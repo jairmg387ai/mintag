@@ -1,0 +1,15 @@
+# Binary
+mintag.exe
+/mintag
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+
+# Go build cache
+/vendor/
+
+# OS
+.DS_Store
+Thumbs.db
