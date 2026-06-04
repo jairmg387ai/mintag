@@ -53,6 +53,7 @@ func (srv *Server) Handler() http.Handler {
 			r.Get("/", srv.handleListMeetings)
 			r.Post("/import", srv.handleImportMeeting)
 			r.Get("/{id}", srv.handleGetMeeting)
+			r.Put("/{id}/rich-content", srv.handleSetMeetingRichContent)
 		})
 
 		r.Route("/tasks", func(r chi.Router) {
@@ -152,6 +153,32 @@ func (srv *Server) handleGetMeeting(w http.ResponseWriter, r *http.Request) {
 	}
 	m, err := srv.st.GetMeeting(id)
 	writeJSON(w, m, err)
+}
+
+func (srv *Server) handleSetMeetingRichContent(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	var body struct {
+		Content     string `json:"content"`
+		ContentType string `json:"content_type"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if body.ContentType != "markdown" && body.ContentType != "html" {
+		http.Error(w, "invalid content_type", http.StatusBadRequest)
+		return
+	}
+	m, err := srv.st.UpdateMeetingRichContent(id, body.Content, body.ContentType)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	writeJSON(w, m, nil)
 }
 
 // --- Tasks ---

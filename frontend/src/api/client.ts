@@ -58,3 +58,7 @@ export function getStats(): Promise<Stats> {
 export function search(q: string): Promise<SearchResult[]> {
   return request<SearchResult[]>(`/api/search?q=${encodeURIComponent(q)}`)
 }
+
+export function setMeetingRichContent(id: number, body: { content: string; content_type: string }): Promise<Meeting> {
+  return request<Meeting>(`/api/meetings/${id}/rich-content`, { method: 'PUT', body: JSON.stringify(body) })
+}
