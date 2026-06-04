@@ -5,10 +5,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-# Build
-go build -o mintag.exe ./cmd/mintag
+# Full production build (frontend + Go binary)
+make build
 
-# Run web portal (default port 7430)
+# Install frontend deps (first time only)
+make frontend-install
+
+# Build frontend only (outputs to internal/web/static/)
+make frontend-build
+
+# Dev: run Go API server on :7430
+make dev-api
+
+# Dev: run Vite HMR dev server on :5173 (proxies /api to :7430)
+make dev-web
+
+# Run web portal directly (no rebuild)
 mintag.exe serve
 
 # Run MCP stdio server
@@ -27,6 +39,16 @@ go mod tidy
 Environment variables:
 - `MINTAG_DB` — path to SQLite database (default: `~/.mintag/mintag.db`)
 - `MINTAG_PORT` — HTTP port for `serve` (default: `7430`)
+
+## Frontend
+
+Located in `frontend/`. Built with Vite + React 18 + TypeScript + Tailwind v4.
+
+- `npm run build` emits directly to `internal/web/static/` (Vite outDir)
+- `internal/web/static/` is committed to the repo — `go:embed` requires it at compile time
+- `frontend/node_modules/` and `frontend/dist/` are gitignored
+- State: React Context + useState (no external state library)
+- Routing: view-enum in AppContext (no react-router)
 
 ## Architecture
 

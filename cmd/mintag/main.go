@@ -57,7 +57,7 @@ func runMCP(dbPath string) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `mintag — Meeting Task Tracker
+	fmt.Fprint(os.Stderr, `mintag — Meeting Task Tracker
 
 Commands:
   mintag serve   Start the web portal (default port 7430)

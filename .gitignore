@@ -1,6 +1,11 @@
 # Binary
 mintag.exe
+mintag_verify.exe
+*.exe~
 /mintag
+
+# SDD / AI tooling
+.atl/
 
 # Database
 *.db
@@ -13,3 +18,7 @@ mintag.exe
 # OS
 .DS_Store
 Thumbs.db
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
