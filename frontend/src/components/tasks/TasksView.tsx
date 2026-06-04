@@ -4,6 +4,7 @@ import { TopBar } from '../layout/TopBar'
 import { FilterBar } from './FilterBar'
 import { TaskList } from './TaskList'
 import { Kanban } from './Kanban'
+import { Button } from '../ui'
 import type { Status } from '../../types'
 
 export function TasksView() {
@@ -41,15 +42,12 @@ export function TasksView() {
             </svg>
           </ViewBtn>
         </div>
-        <button
-          onClick={() => openModal('new-task')}
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: '0.78em', fontWeight: 500, background: 'var(--color-blue)', color: '#fff' }}
-        >
+        <Button variant="primary" onClick={() => openModal('new-task')}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
             <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
           </svg>
           New Task
-        </button>
+        </Button>
       </TopBar>
 
       <div style={{ padding: '24px 28px' }}>

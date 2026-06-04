@@ -8,18 +8,12 @@ export function FilterChip({ label, active, onClick }: FilterChipProps) {
   return (
     <span
       onClick={onClick}
-      style={{
-        background: active ? 'rgba(59,130,246,0.12)' : 'var(--color-surface2)',
-        border: `1px solid ${active ? 'var(--color-blue)' : 'var(--color-border)'}`,
-        borderRadius: 20,
-        padding: '4px 12px',
-        fontSize: '0.78em',
-        cursor: 'pointer',
-        color: active ? 'var(--color-blue)' : 'var(--color-text2)',
-        transition: 'all 0.15s',
-        whiteSpace: 'nowrap',
-        userSelect: 'none',
-      }}
+      className={[
+        'inline-flex items-center rounded-full px-3 py-1 text-[0.78em] cursor-pointer select-none whitespace-nowrap transition-all duration-150',
+        active
+          ? 'bg-blue-bg border border-blue text-blue font-medium'
+          : 'bg-surface2 border border-border text-text2 hover:text-text hover:border-border2',
+      ].join(' ')}
     >
       {label}
     </span>

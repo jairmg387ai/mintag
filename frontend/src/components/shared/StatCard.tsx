@@ -1,3 +1,5 @@
+import { Card } from '../ui'
+
 interface StatCardProps {
   label: string
   value: number | string
@@ -6,16 +8,15 @@ interface StatCardProps {
 
 export function StatCard({ label, value, color }: StatCardProps) {
   return (
-    <div
-      className="stat-card"
-      style={color ? { borderTopColor: color } : undefined}
+    <Card
+      padding
+      className="transition-transform duration-150 hover:-translate-y-px hover:shadow-[0_4px_16px_rgba(0,0,0,0.25)]"
+      style={color ? { borderTop: `2px solid ${color}` } : undefined}
     >
-      <div style={{ fontSize: '0.7em', color: 'var(--color-text3)', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 8 }}>
-        {label}
-      </div>
-      <div style={{ fontSize: '2em', fontWeight: 700, color: color ?? 'var(--color-text)', lineHeight: 1 }}>
+      <div className="text-[0.7em] text-text3 uppercase tracking-[0.6px] mb-2">{label}</div>
+      <div className="text-[2em] font-bold leading-none" style={{ color: color ?? 'var(--color-text)' }}>
         {value}
       </div>
-    </div>
+    </Card>
   )
 }

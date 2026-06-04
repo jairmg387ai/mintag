@@ -11,6 +11,7 @@ import {
 import type { Task, Priority, Status } from '../../types'
 import { PriorityDot } from '../shared/PriorityDot'
 import { Avatar } from '../shared/Avatar'
+import { Badge, Card, CardHeader } from '../ui'
 import { useAppActions } from '../../store/AppContext'
 
 interface KanbanProps {
@@ -49,7 +50,7 @@ export function Kanban({ tasks, onOpen }: KanbanProps) {
   return (
     <>
       <DndContext collisionDetection={closestCenter} onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, alignItems: 'start' }} className="kanban-grid">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 16, alignItems: 'start' }} className="kanban-grid">
           {COLUMNS.map(col => (
             <KanbanColumn
               key={col.status}
@@ -87,27 +88,29 @@ function KanbanColumn({
   const highlight = isOver && isDragTarget
 
   return (
-    <div
+    <Card
       ref={setNodeRef}
-      className="card"
       style={{
         background: highlight ? col.bg : undefined,
         borderColor: highlight ? col.color : undefined,
         transition: 'background 0.15s, border-color 0.15s',
       }}
     >
-      <div className="card-header-sm" style={{ color: col.color }}>
+      <CardHeader
+        size="sm"
+        style={{ color: col.color }}
+        right={<Badge className="text-[0.85em]">{tasks.length}</Badge>}
+      >
         {col.label}
-        <span className="badge" style={{ fontSize: '0.85em' }}>{tasks.length}</span>
-      </div>
+      </CardHeader>
 
-      <div style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 80 }}>
+      <div className="p-3 flex flex-col gap-2.5" style={{ minHeight: 80 }}>
         {tasks.length === 0 && !highlight && (
-          <div style={{ textAlign: 'center', padding: 20, color: 'var(--color-text3)', fontSize: '0.78em' }}>Empty</div>
+          <div className="text-center py-5 text-text3 text-[0.78em]">Empty</div>
         )}
         {tasks.map(t => <KanbanCard key={t.id} task={t} onClick={() => onOpen(t.id)} />)}
       </div>
-    </div>
+    </Card>
   )
 }
 
@@ -117,7 +120,7 @@ function KanbanCard({ task: t, onClick, overlay }: { task: Task; onClick: () => 
   const cls = [
     'kanban-card',
     isDragging ? 'kanban-card--dragging' : '',
-    overlay ? 'kanban-card--overlay' : '',
+    overlay    ? 'kanban-card--overlay'  : '',
   ].filter(Boolean).join(' ')
 
   return (
@@ -127,11 +130,11 @@ function KanbanCard({ task: t, onClick, overlay }: { task: Task; onClick: () => 
       {...(overlay ? {} : { ...listeners, ...attributes })}
       onClick={overlay ? undefined : onClick}
     >
-      <div style={{ fontSize: '0.88em', fontWeight: 500, marginBottom: 6, lineHeight: 1.4 }}>{t.title}</div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      <div className="text-[0.88em] font-medium mb-2.5 leading-snug">{t.title}</div>
+      <div className="flex items-center gap-1.5 flex-wrap">
         <PriorityDot priority={t.priority as Priority} />
         {t.owner && <Avatar name={t.owner} />}
-        {t.project_name && <span className="badge">{t.project_name}</span>}
+        {t.project_name && <Badge>{t.project_name}</Badge>}
       </div>
     </div>
   )

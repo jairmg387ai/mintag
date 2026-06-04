@@ -8,13 +8,19 @@ import { useDebounce } from '../../hooks/useDebounce'
 import { search } from '../../api/client'
 import type { SearchResult, Status, Priority } from '../../types'
 import { TopBar } from '../layout/TopBar'
+import { Card, CardHeader, Badge, Input } from '../ui'
 
 function fmt(dt: string) {
   if (!dt) return '—'
-  try {
-    return new Date(dt).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })
-  } catch { return dt }
+  try { return new Date(dt).toLocaleString('en-US', { day: '2-digit', month: 'short', year: 'numeric' }) }
+  catch { return dt }
 }
+
+const SearchIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+  </svg>
+)
 
 export function Dashboard() {
   const { stats, tasks, meetings } = useAppState()
@@ -43,25 +49,20 @@ export function Dashboard() {
   return (
     <>
       <TopBar title="Dashboard">
-        <div style={{ position: 'relative', flex: 1, maxWidth: 380 }}>
-          <svg style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text3)', pointerEvents: 'none' }}
-            width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-          </svg>
-          <input
+        <div className="relative flex-1 max-w-[380px]">
+          <Input
+            prefix={<SearchIcon />}
             type="text"
             placeholder="Search tasks and meetings..."
             value={query}
             onChange={e => setQuery(e.target.value)}
-            className="input"
-            style={{ padding: '8px 12px 8px 34px' }}
           />
         </div>
       </TopBar>
 
-      <div style={{ padding: '24px 28px' }}>
-        {/* Stats row */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: 14, marginBottom: 24 }}>
+      <div className="p-7">
+        {/* Stats */}
+        <div className="grid gap-3.5 mb-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}>
           <StatCard label="Total Tasks"  value={stats?.total_tasks ?? 0}       color="var(--color-blue)" />
           <StatCard label="To Do"        value={stats?.todo_tasks ?? 0} />
           <StatCard label="In Progress"  value={stats?.in_progress_tasks ?? 0} color="var(--color-blue)" />
@@ -72,88 +73,86 @@ export function Dashboard() {
 
         {/* Search results */}
         {searchResults.length > 0 && (
-          <div className="card" style={{ marginBottom: 20 }}>
-            <div className="card-header">
-              <h2>Search results: "{query}"</h2>
-            </div>
-            <div style={{ padding: 8 }}>
+          <Card className="mb-5">
+            <CardHeader>Search results: "{query}"</CardHeader>
+            <div className="p-2">
               {searchResults.map(r => (
                 <div
                   key={`${r.kind}-${r.id}`}
                   onClick={() => r.kind === 'task' ? openTask(r.id) : openMeeting(r.id)}
-                  className="row-clickable"
-                  style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 2 }}
+                  className="row-clickable flex flex-col gap-1 px-3 py-2.5"
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span className="badge">{r.kind === 'task' ? 'Task' : 'Meeting'}</span>
-                    <strong style={{ fontSize: '0.88em' }}>{r.title}</strong>
+                  <div className="flex items-center gap-2">
+                    <Badge>{r.kind === 'task' ? 'Task' : 'Meeting'}</Badge>
+                    <strong className="text-[0.88em]">{r.title}</strong>
                   </div>
-                  <div style={{ fontSize: '0.78em', color: 'var(--color-text3)', paddingLeft: 2 }}>{r.snippet}</div>
+                  <div className="text-[0.78em] text-text3 pl-0.5">{r.snippet}</div>
                 </div>
               ))}
             </div>
-          </div>
+          </Card>
         )}
 
         {/* Content grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
+        <div className="grid grid-cols-2 gap-[18px]">
           {/* Active tasks */}
-          <div className="card">
-            <div className="card-header">
+          <Card>
+            <CardHeader icon={
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/>
               </svg>
-              <h2>Blocked / In Progress</h2>
-            </div>
+            }>
+              Blocked / In Progress
+            </CardHeader>
             {activeTasks.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--color-text3)' }}>No active tasks</div>
+              <div className="text-center py-12 text-text3">No active tasks</div>
             ) : (
               activeTasks.map(t => (
                 <div
                   key={t.id}
                   onClick={() => openTask(t.id)}
-                  className="row-clickable"
-                  style={{ display: 'grid', gridTemplateColumns: '28px 1fr 110px 90px', alignItems: 'center', gap: 12, padding: '11px 16px' }}
+                  className="row-clickable grid items-center gap-3 px-4 py-3"
+                  style={{ gridTemplateColumns: '28px 1fr 110px 90px' }}
                 >
                   <PriorityDot priority={t.priority as Priority} />
                   <div>
-                    <div style={{ fontSize: '0.9em', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.title}</div>
-                    <div style={{ fontSize: '0.78em', color: 'var(--color-text3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.project_name ?? ''}</div>
+                    <div className="text-[0.9em] font-medium truncate">{t.title}</div>
+                    <div className="text-[0.78em] text-text3 truncate">{t.project_name ?? ''}</div>
                   </div>
                   <StatusBadge status={t.status as Status} />
-                  {t.owner ? <Avatar name={t.owner} /> : <span style={{ color: 'var(--color-text3)', fontSize: '0.78em' }}>—</span>}
+                  {t.owner ? <Avatar name={t.owner} /> : <span className="text-text3 text-[0.78em]">—</span>}
                 </div>
               ))
             )}
-          </div>
+          </Card>
 
           {/* Recent meetings */}
-          <div className="card">
-            <div className="card-header">
+          <Card>
+            <CardHeader icon={
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
               </svg>
-              <h2>Recent Meetings</h2>
-            </div>
-            <div style={{ padding: '0 12px' }}>
+            }>
+              Recent Meetings
+            </CardHeader>
+            <div className="px-4">
               {recentMeetings.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '36px 24px', color: 'var(--color-text3)' }}>No meetings</div>
+                <div className="text-center py-9 text-text3">No meetings</div>
               ) : (
                 recentMeetings.map(m => (
                   <div
                     key={m.id}
                     onClick={() => openMeeting(m.id)}
-                    className="row-clickable"
-                    style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 4px' }}
+                    className="row-clickable flex items-center gap-2.5 px-0 py-3"
                   >
-                    <span style={{ fontSize: '0.72em', color: 'var(--color-text3)', minWidth: 80 }}>{fmt(m.date) || '—'}</span>
-                    <span style={{ fontSize: '0.85em', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.title}</span>
-                    <span className="badge">{m.task_count ?? 0} tasks</span>
+                    <span className="text-[0.72em] text-text3 min-w-[80px]">{fmt(m.date) || '—'}</span>
+                    <span className="text-[0.85em] flex-1 truncate">{m.title}</span>
+                    <Badge>{m.task_count ?? 0} tasks</Badge>
                   </div>
                 ))
               )}
             </div>
-          </div>
+          </Card>
         </div>
       </div>
     </>
