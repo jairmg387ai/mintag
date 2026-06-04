@@ -1,22 +1,83 @@
-import { Card } from '../ui'
+import type { LucideIcon } from 'lucide-react'
 
 interface StatCardProps {
+  icon: LucideIcon
+  iconBg: string
+  iconFg: string
+  value: number
   label: string
-  value: number | string
-  color?: string
+  delta?: string
+  deltaColor?: string
+  emphasize?: boolean
+  onClick?: () => void
 }
 
-export function StatCard({ label, value, color }: StatCardProps) {
+export function StatCard({
+  icon: Icon,
+  iconBg,
+  iconFg,
+  value,
+  label,
+  delta,
+  deltaColor,
+  emphasize,
+  onClick,
+}: StatCardProps) {
   return (
-    <Card
-      padding
-      className="transition-transform duration-150 hover:-translate-y-px hover:shadow-[0_4px_16px_rgba(0,0,0,0.25)]"
-      style={color ? { borderTop: `2px solid ${color}` } : undefined}
+    <button
+      className="card"
+      onClick={onClick}
+      style={{
+        padding: 18,
+        textAlign: 'left',
+        display: 'block',
+        width: '100%',
+        cursor: onClick ? 'pointer' : 'default',
+        boxShadow: emphasize ? 'var(--shadow-md)' : 'var(--shadow-sm)',
+        borderColor: emphasize ? 'var(--rose-200)' : 'var(--border)',
+        background: 'var(--bg-surface)',
+      }}
     >
-      <div className="text-[0.7em] text-text3 uppercase tracking-[0.6px] mb-2">{label}</div>
-      <div className="text-[2em] font-bold leading-none" style={{ color: color ?? 'var(--color-text)' }}>
+      <span
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: 'var(--radius-md)',
+          background: iconBg,
+          color: iconFg,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Icon size={20} strokeWidth={1.75} />
+      </span>
+      <div
+        style={{
+          font: 'var(--text-display)',
+          letterSpacing: 'var(--tracking-tight)',
+          color: emphasize ? 'var(--block-fg)' : 'var(--fg1)',
+          margin: '14px 0 2px',
+        }}
+      >
         {value}
       </div>
-    </Card>
+      <div style={{ font: 'var(--text-sm)', color: 'var(--fg2)' }}>{label}</div>
+      {delta && (
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            font: 'var(--text-caption)',
+            fontWeight: 600,
+            color: deltaColor ?? 'var(--fg3)',
+            marginTop: 10,
+          }}
+        >
+          {delta}
+        </span>
+      )}
+    </button>
   )
 }

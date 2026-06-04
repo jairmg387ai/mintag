@@ -1,26 +1,37 @@
 import React from 'react'
+import type { LucideIcon } from 'lucide-react'
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'ghost'
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger'
   size?: 'sm' | 'md'
+  icon?: LucideIcon
+  iconRight?: LucideIcon
 }
 
-export function Button({ variant = 'ghost', size = 'md', className = '', children, ...props }: ButtonProps) {
-  const base = 'inline-flex items-center gap-1.5 rounded-[7px] border-0 cursor-pointer font-medium transition-all duration-100 active:scale-[0.96] disabled:opacity-50 disabled:cursor-not-allowed'
+export function Button({
+  variant = 'secondary',
+  size = 'md',
+  icon: Icon,
+  iconRight: IconRight,
+  className = '',
+  children,
+  ...props
+}: ButtonProps) {
+  const variantClass = ['primary', 'secondary', 'ghost', 'danger'].includes(variant ?? '')
+    ? `btn-${variant}`
+    : 'btn-secondary'
 
-  const variants = {
-    primary: 'bg-blue text-white hover:bg-blue-dim',
-    ghost:   'bg-surface2 text-text2 ring-1 ring-border hover:bg-surface3 hover:text-text',
-  }
+  const sizeClass = size === 'sm' ? 'btn-sm' : ''
 
-  const sizes = {
-    sm: 'px-2 py-1 text-[0.75em]',
-    md: 'px-2.5 py-[5px] text-[0.78em]',
-  }
+  const classes = ['btn', variantClass, sizeClass, className].filter(Boolean).join(' ')
+
+  const iconSize = size === 'sm' ? 15 : 16
 
   return (
-    <button className={`${base} ${variants[variant]} ${sizes[size]} ${className}`} {...props}>
+    <button className={classes} {...props}>
+      {Icon && <Icon size={iconSize} strokeWidth={1.75} />}
       {children}
+      {IconRight && <IconRight size={iconSize} strokeWidth={1.75} />}
     </button>
   )
 }

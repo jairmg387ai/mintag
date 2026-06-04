@@ -1,22 +1,37 @@
 import React from 'react'
 
-interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
+// Omit 'prefix' from HTMLInputElement attributes to avoid type conflict
+// (native prefix is string | undefined, ours is ReactNode)
+interface InputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'prefix'> {
   prefix?: React.ReactNode
 }
 
 export function Input({ prefix, className = '', ...props }: InputProps) {
-  const base = 'bg-surface2 border border-border rounded-[7px] text-text text-[0.88em] outline-none w-full transition-all duration-150 focus:border-blue focus:shadow-[0_0_0_2px_rgba(59,130,246,0.15)]'
-
   if (prefix) {
     return (
-      <div className="relative">
-        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text3 pointer-events-none flex">
+      <div className="tb-search" style={{ width: '100%', margin: 0 }}>
+        <span className="mt-icon" style={{ pointerEvents: 'none' }}>
           {prefix}
         </span>
-        <input className={`${base} pl-8 pr-3 py-2 ${className}`} {...props} />
+        <input className={className} {...props} />
       </div>
     )
   }
 
-  return <input className={`${base} px-3 py-2 ${className}`} {...props} />
+  return (
+    <input
+      className={className}
+      style={{
+        width: '100%',
+        padding: '8px 12px',
+        border: '1px solid var(--border-strong)',
+        borderRadius: 'var(--radius-md)',
+        font: 'var(--text-body)',
+        color: 'var(--fg1)',
+        background: 'var(--bg-sunken)',
+        outline: 'none',
+      }}
+      {...props}
+    />
+  )
 }

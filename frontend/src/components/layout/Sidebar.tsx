@@ -1,5 +1,5 @@
+import React from 'react'
 import { useAppState, useAppActions } from '../../store/AppContext'
-import type { ViewName } from '../../types'
 
 export function Sidebar() {
   const { currentView, projects, activeProject } = useAppState()

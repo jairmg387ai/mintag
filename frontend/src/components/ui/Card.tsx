@@ -11,7 +11,7 @@ export const Card = React.forwardRef<HTMLDivElement, CardProps>(
   ({ children, className = '', style, padding = false }, ref) => (
     <div
       ref={ref}
-      className={`bg-surface border border-border rounded-[10px] overflow-hidden ${padding ? 'p-5' : ''} ${className}`}
+      className={['card', padding ? 'p-5' : '', className].filter(Boolean).join(' ')}
       style={style}
     >
       {children}
@@ -33,8 +33,8 @@ export function CardHeader({ children, icon, right, size = 'md', className = '',
   if (size === 'sm') {
     return (
       <div
-        className={`px-3.5 py-2.5 border-b border-border flex items-center justify-between text-[0.76em] font-semibold uppercase tracking-[0.5px] ${className}`}
-        style={style}
+        className={['flex items-center justify-between', 'px-[14px] py-2.5', 'border-b', 'text-[0.76em] font-semibold uppercase tracking-[0.5px]', className].filter(Boolean).join(' ')}
+        style={{ borderColor: 'var(--border)', ...style }}
       >
         <span>{children}</span>
         {right}
@@ -43,11 +43,12 @@ export function CardHeader({ children, icon, right, size = 'md', className = '',
   }
   return (
     <div
-      className={`px-[18px] py-3.5 border-b border-border flex items-center gap-2.5 ${className}`}
-      style={style}
+      className={['flex items-center gap-2.5', 'px-[18px] py-3.5', 'border-b', className].filter(Boolean).join(' ')}
+      style={{ borderColor: 'var(--border)', ...style }}
     >
-      {icon && <span className="shrink-0 text-text2">{icon}</span>}
-      <h2 className="text-[0.95em] font-semibold">{children}</h2>
+      {icon && <span className="shrink-0" style={{ color: 'var(--fg2)' }}>{icon}</span>}
+      <h2 className="text-[0.95em] font-semibold" style={{ color: 'var(--fg1)', margin: 0 }}>{children}</h2>
+      {right && <span className="ml-auto">{right}</span>}
     </div>
   )
 }

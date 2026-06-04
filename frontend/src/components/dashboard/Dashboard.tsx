@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { ClipboardList, Circle, CircleDot, CircleAlert, CircleCheck, CalendarDays } from 'lucide-react'
 import { useAppState, useAppActions } from '../../store/AppContext'
 import { StatCard } from '../shared/StatCard'
 import { StatusBadge } from '../shared/StatusBadge'
@@ -63,12 +64,12 @@ export function Dashboard() {
       <div className="p-7">
         {/* Stats */}
         <div className="grid gap-3.5 mb-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}>
-          <StatCard label="Total Tasks"  value={stats?.total_tasks ?? 0}       color="var(--color-blue)" />
-          <StatCard label="To Do"        value={stats?.todo_tasks ?? 0} />
-          <StatCard label="In Progress"  value={stats?.in_progress_tasks ?? 0} color="var(--color-blue)" />
-          <StatCard label="Blocked"      value={stats?.blocked_tasks ?? 0}     color="var(--color-red)" />
-          <StatCard label="Done"         value={stats?.done_tasks ?? 0}        color="var(--color-green)" />
-          <StatCard label="Meetings"     value={stats?.total_meetings ?? 0}    color="var(--color-orange)" />
+          <StatCard icon={ClipboardList} iconBg="var(--indigo-50)"   iconFg="var(--indigo-700)"  value={stats?.total_tasks ?? 0}       label="Total Tasks"  onClick={() => {}} />
+          <StatCard icon={Circle}        iconBg="var(--slate-100)"   iconFg="var(--slate-600)"   value={stats?.todo_tasks ?? 0}        label="To Do"        onClick={() => {}} />
+          <StatCard icon={CircleDot}     iconBg="var(--amber-50)"    iconFg="var(--amber-700)"   value={stats?.in_progress_tasks ?? 0} label="In Progress"  onClick={() => {}} />
+          <StatCard icon={CircleAlert}   iconBg="var(--rose-50)"     iconFg="var(--rose-700)"    value={stats?.blocked_tasks ?? 0}     label="Blocked"      onClick={() => {}} emphasize={!!stats?.blocked_tasks} />
+          <StatCard icon={CircleCheck}   iconBg="var(--emerald-50)"  iconFg="var(--emerald-700)" value={stats?.done_tasks ?? 0}        label="Done"         onClick={() => {}} />
+          <StatCard icon={CalendarDays}  iconBg="var(--indigo-50)"   iconFg="var(--indigo-700)"  value={stats?.total_meetings ?? 0}    label="Meetings"     onClick={() => {}} />
         </div>
 
         {/* Search results */}
