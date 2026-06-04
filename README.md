@@ -14,7 +14,7 @@ Replaces the manual workflow of updating HTML files after each meeting. All data
 ## Installation
 
 ```bash
-git clone https://github.com/Gentleman-Programming/mintag
+git clone https://github.com/jairmg387ai/mintag
 cd mintag
 go build -o mintag.exe ./cmd/mintag
 ```

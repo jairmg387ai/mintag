@@ -235,6 +235,36 @@ func registerTools(s *mcpserver.MCPServer, st *store.Store) {
 		return jsonResult(map[string]any{"task": task, "history": history}, err)
 	})
 
+	// --- meeting_set_rich_content ---
+	s.AddTool(mcp.NewTool("meeting_set_rich_content",
+		mcp.WithDescription("Set rich content (Markdown or HTML) on a meeting record"),
+		mcp.WithString("meeting_id", mcp.Required(), mcp.Description("Meeting ID")),
+		mcp.WithString("content", mcp.Required(), mcp.Description("The rich content to store")),
+		mcp.WithString("content_type", mcp.Required(), mcp.Description("markdown | html")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		meetingIDStr, err := req.RequireString("meeting_id")
+		if err != nil {
+			return errResult(err)
+		}
+		meetingID, err := strconv.ParseInt(meetingIDStr, 10, 64)
+		if err != nil {
+			return errResult(fmt.Errorf("invalid meeting_id: %s", meetingIDStr))
+		}
+		content, err := req.RequireString("content")
+		if err != nil {
+			return errResult(err)
+		}
+		contentType, err := req.RequireString("content_type")
+		if err != nil {
+			return errResult(err)
+		}
+		if contentType != "markdown" && contentType != "html" {
+			return errResult(fmt.Errorf("invalid content_type: must be markdown or html"))
+		}
+		m, err := st.UpdateMeetingRichContent(meetingID, content, contentType)
+		return jsonResult(m, err)
+	})
+
 	// --- tasks_by_project ---
 	s.AddTool(mcp.NewTool("tasks_by_project",
 		mcp.WithDescription("List all tasks for a project, optionally filtered by status"),

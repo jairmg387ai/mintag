@@ -22,3 +22,8 @@ Thumbs.db
 # Frontend
 frontend/node_modules/
 frontend/dist/
+
+# Root-level node artifacts (accidental npm installs at project root)
+node_modules/
+package-lock.json
+package.json

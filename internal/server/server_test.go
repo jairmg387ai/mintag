@@ -214,6 +214,69 @@ func TestMeetings_Import_And_Get(t *testing.T) {
 	}
 }
 
+// TestMeetingRichContent verifies PUT /api/meetings/{id}/rich-content.
+func TestMeetingRichContent(t *testing.T) {
+	base, st := newTestServer(t)
+
+	m, err := st.CreateMeeting(nil, "f.vtt", "2026-01-01", "Title", "raw", "sum")
+	mustNoErr(t, err)
+
+	putURL := fmt.Sprintf("%s/api/meetings/%d/rich-content", base, m.ID)
+
+	// valid request — markdown
+	req, err := http.NewRequest(http.MethodPut, putURL, strings.NewReader(`{"content":"# Hello","content_type":"markdown"}`))
+	mustNoErr(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	mustNoErr(t, err)
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("PUT rich-content: expected 200, got %d — %s", resp.StatusCode, string(body))
+	}
+	var updated map[string]any
+	decodeJSON(t, resp, &updated)
+	if updated["rich_content"] != "# Hello" {
+		t.Errorf("expected rich_content='# Hello', got %v", updated["rich_content"])
+	}
+	if updated["content_type"] != "markdown" {
+		t.Errorf("expected content_type='markdown', got %v", updated["content_type"])
+	}
+
+	// GET to confirm persistence
+	getResp := get(t, fmt.Sprintf("%s/api/meetings/%d", base, m.ID))
+	var got map[string]any
+	decodeJSON(t, getResp, &got)
+	if got["rich_content"] != "# Hello" {
+		t.Errorf("GET: expected rich_content='# Hello', got %v", got["rich_content"])
+	}
+	if got["content_type"] != "markdown" {
+		t.Errorf("GET: expected content_type='markdown', got %v", got["content_type"])
+	}
+
+	// invalid content_type → 400
+	req2, err := http.NewRequest(http.MethodPut, putURL, strings.NewReader(`{"content":"x","content_type":"pdf"}`))
+	mustNoErr(t, err)
+	req2.Header.Set("Content-Type", "application/json")
+	resp2, err := http.DefaultClient.Do(req2)
+	mustNoErr(t, err)
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid content_type, got %d", resp2.StatusCode)
+	}
+
+	// unknown id → 404
+	req3, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/api/meetings/99999/rich-content", base), strings.NewReader(`{"content":"x","content_type":"markdown"}`))
+	mustNoErr(t, err)
+	req3.Header.Set("Content-Type", "application/json")
+	resp3, err := http.DefaultClient.Do(req3)
+	mustNoErr(t, err)
+	resp3.Body.Close()
+	if resp3.StatusCode != http.StatusNotFound {
+		t.Errorf("expected 404 for unknown meeting, got %d", resp3.StatusCode)
+	}
+}
+
 // TestSearch_Endpoint verifies GET /api/search?q=... returns matching results.
 func TestSearch_Endpoint(t *testing.T) {
 	base, st := newTestServer(t)

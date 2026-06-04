@@ -234,6 +234,66 @@ func TestTask_HistoryBaseline(t *testing.T) {
 	}
 }
 
+// TestMigrationIdempotency verifies that calling migrate() multiple times
+// on the same DB does not fail and new columns are present.
+func TestMigrationIdempotency(t *testing.T) {
+	s := openTestDB(t)
+
+	// run migrate again on the same store — addColumnIfMissing must be a no-op
+	if err := s.migrate(); err != nil {
+		t.Fatalf("second migrate() call failed: %v", err)
+	}
+
+	// columns must be readable
+	m, err := s.CreateMeeting(nil, "f.vtt", "2026-01-01", "T", "c", "s")
+	mustNoErr(t, err)
+	got, err := s.GetMeeting(m.ID)
+	mustNoErr(t, err)
+	if got.RichContent != "" {
+		t.Errorf("expected empty rich_content for new meeting, got %q", got.RichContent)
+	}
+	if got.ContentType != "" {
+		t.Errorf("expected empty content_type for new meeting, got %q", got.ContentType)
+	}
+}
+
+// TestUpdateMeetingRichContent verifies all store-layer scenarios.
+func TestUpdateMeetingRichContent(t *testing.T) {
+	s := openTestDB(t)
+
+	m, err := s.CreateMeeting(nil, "f.vtt", "2026-01-01", "Title", "raw", "sum")
+	mustNoErr(t, err)
+
+	// valid markdown
+	updated, err := s.UpdateMeetingRichContent(m.ID, "## Summary\nfoo", "markdown")
+	mustNoErr(t, err)
+	if updated.RichContent != "## Summary\nfoo" {
+		t.Errorf("unexpected rich_content: %q", updated.RichContent)
+	}
+	if updated.ContentType != "markdown" {
+		t.Errorf("unexpected content_type: %q", updated.ContentType)
+	}
+
+	// valid html
+	updated2, err := s.UpdateMeetingRichContent(m.ID, "<p>ok</p>", "html")
+	mustNoErr(t, err)
+	if updated2.ContentType != "html" {
+		t.Errorf("unexpected content_type: %q", updated2.ContentType)
+	}
+
+	// invalid content_type
+	_, err = s.UpdateMeetingRichContent(m.ID, "x", "pdf")
+	if err == nil {
+		t.Error("expected error for invalid content_type")
+	}
+
+	// meeting not found
+	_, err = s.UpdateMeetingRichContent(99999, "x", "markdown")
+	if err == nil {
+		t.Error("expected error for missing meeting")
+	}
+}
+
 // TestFTS_Search verifies that FTS5 search returns results for both
 // tasks and meetings containing a unique keyword.
 func TestFTS_Search(t *testing.T) {

@@ -19,6 +19,8 @@ export interface Meeting {
   summary: string
   task_count?: number
   created_at: string
+  rich_content?: string
+  content_type?: string
 }
 
 export interface Task {

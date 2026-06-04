@@ -25,15 +25,17 @@ type Project struct {
 }
 
 type Meeting struct {
-	ID         int64     `json:"id"`
-	ProjectID  *int64    `json:"project_id"`
-	Filename   string    `json:"filename"`
-	Date       string    `json:"date"`
-	Title      string    `json:"title"`
-	RawContent string    `json:"raw_content,omitempty"`
-	Summary    string    `json:"summary"`
-	TaskCount  int       `json:"task_count,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID          int64     `json:"id"`
+	ProjectID   *int64    `json:"project_id"`
+	Filename    string    `json:"filename"`
+	Date        string    `json:"date"`
+	Title       string    `json:"title"`
+	RawContent  string    `json:"raw_content,omitempty"`
+	Summary     string    `json:"summary"`
+	TaskCount   int       `json:"task_count,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	RichContent string    `json:"rich_content,omitempty"`
+	ContentType string    `json:"content_type,omitempty"`
 }
 
 type Task struct {
@@ -193,6 +195,36 @@ func (s *Store) migrate() error {
 		VALUES (new.id, new.title, new.description, new.owner);
 	END;
 	`)
+	if err != nil {
+		return err
+	}
+	if err := s.addColumnIfMissing("meetings", "rich_content", "rich_content TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	return s.addColumnIfMissing("meetings", "content_type", "content_type TEXT NOT NULL DEFAULT ''")
+}
+
+func (s *Store) addColumnIfMissing(table, col, ddl string) error {
+	rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, ctype string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == col {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + ddl)
 	return err
 }
 
@@ -255,8 +287,8 @@ func (s *Store) CreateMeeting(projectID *int64, filename, date, title, rawConten
 func (s *Store) GetMeeting(id int64) (*Meeting, error) {
 	m := &Meeting{}
 	err := s.db.QueryRow(
-		`SELECT id, project_id, filename, date, title, raw_content, summary, created_at FROM meetings WHERE id = ?`, id,
-	).Scan(&m.ID, &m.ProjectID, &m.Filename, &m.Date, &m.Title, &m.RawContent, &m.Summary, &m.CreatedAt)
+		`SELECT id, project_id, filename, date, title, raw_content, summary, created_at, rich_content, content_type FROM meetings WHERE id = ?`, id,
+	).Scan(&m.ID, &m.ProjectID, &m.Filename, &m.Date, &m.Title, &m.RawContent, &m.Summary, &m.CreatedAt, &m.RichContent, &m.ContentType)
 	return m, err
 }
 
@@ -288,6 +320,24 @@ func (s *Store) ListMeetings(projectID *int64) ([]*Meeting, error) {
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) UpdateMeetingRichContent(id int64, content, contentType string) (*Meeting, error) {
+	if contentType != "markdown" && contentType != "html" {
+		return nil, fmt.Errorf("invalid content_type: must be markdown or html")
+	}
+	res, err := s.db.Exec(
+		`UPDATE meetings SET rich_content = ?, content_type = ? WHERE id = ?`,
+		content, contentType, id,
+	)
+	if err != nil {
+		return nil, err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return nil, fmt.Errorf("meeting not found: %d", id)
+	}
+	return s.GetMeeting(id)
 }
 
 // --- Tasks ---
@@ -446,7 +496,7 @@ func (s *Store) Search(query string, limit int) ([]*SearchResult, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	var results []*SearchResult
+	results := make([]*SearchResult, 0)
 
 	// search tasks
 	rows, err := s.db.Query(`

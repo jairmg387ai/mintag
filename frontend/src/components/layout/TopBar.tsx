@@ -1,4 +1,5 @@
 import React from 'react'
+import { SearchBar } from './SearchBar'
 
 interface TopBarProps {
   title: string
@@ -20,6 +21,7 @@ export function TopBar({ title, children }: TopBarProps) {
     }}>
       <h1 style={{ fontSize: '1.1em', fontWeight: 600 }}>{title}</h1>
       <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+        <SearchBar />
         {children}
       </div>
     </div>
