@@ -6,16 +6,14 @@ interface StatCardProps {
 
 export function StatCard({ label, value, color }: StatCardProps) {
   return (
-    <div style={{
-      background: 'var(--color-surface)',
-      border: '1px solid var(--color-border)',
-      borderRadius: 10,
-      padding: 16,
-    }}>
-      <div style={{ fontSize: '0.72em', color: 'var(--color-text3)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>
+    <div
+      className="stat-card"
+      style={color ? { borderTopColor: color } : undefined}
+    >
+      <div style={{ fontSize: '0.7em', color: 'var(--color-text3)', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 8 }}>
         {label}
       </div>
-      <div style={{ fontSize: '1.8em', fontWeight: 700, color: color ?? 'var(--color-text)' }}>
+      <div style={{ fontSize: '2em', fontWeight: 700, color: color ?? 'var(--color-text)', lineHeight: 1 }}>
         {value}
       </div>
     </div>

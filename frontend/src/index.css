@@ -44,3 +44,206 @@ html, body {
   display: flex;
   min-height: 100vh;
 }
+
+@layer components {
+  /* ── Cards ─────────────────────────────────────────── */
+  .card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .card-header {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--color-border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.95em;
+    font-weight: 600;
+  }
+
+  .card-header-sm {
+    padding: 10px 14px;
+    font-size: 0.78em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--color-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  /* ── Stat card ──────────────────────────────────────── */
+  .stat-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-top: 2px solid var(--color-border);
+    border-radius: 10px;
+    padding: 16px;
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+
+  .stat-card:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  }
+
+  /* ── Interactive rows ───────────────────────────────── */
+  .row-clickable {
+    cursor: pointer;
+    border-bottom: 1px solid var(--color-border);
+    transition: background 0.12s, box-shadow 0.12s;
+  }
+
+  .row-clickable:hover {
+    background: var(--color-surface2);
+    box-shadow: inset 2px 0 0 var(--color-blue);
+  }
+
+  /* ── Kanban card ────────────────────────────────────── */
+  .kanban-card {
+    background: var(--color-surface2);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 12px;
+    cursor: grab;
+    user-select: none;
+    transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s, background 0.15s;
+  }
+
+  .kanban-card:hover:not(.kanban-card--dragging):not(.kanban-card--overlay) {
+    border-color: var(--color-border2);
+    background: var(--color-surface3);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  }
+
+  .kanban-card--dragging {
+    opacity: 0.35;
+    cursor: grabbing;
+  }
+
+  .kanban-card--overlay {
+    cursor: grabbing;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    transform: scale(1.02);
+  }
+
+  /* ── Sidebar nav ────────────────────────────────────── */
+  .nav-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px;
+    color: var(--color-text2);
+    cursor: pointer;
+    border: none;
+    border-left: 2px solid transparent;
+    background: none;
+    width: 100%;
+    text-align: left;
+    font-size: 0.88em;
+    font-weight: 400;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+  }
+
+  .nav-btn:hover {
+    background: var(--color-surface2);
+    color: var(--color-text);
+  }
+
+  .nav-btn.active {
+    color: var(--color-blue);
+    background: rgba(59, 130, 246, 0.08);
+    border-left-color: var(--color-blue);
+    font-weight: 600;
+  }
+
+  /* ── Buttons ────────────────────────────────────────── */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 7px;
+    border: none;
+    cursor: pointer;
+    font-size: 0.78em;
+    font-weight: 500;
+    transition: background 0.12s, transform 0.08s;
+  }
+
+  .btn:active {
+    transform: scale(0.96);
+  }
+
+  .btn-primary {
+    background: var(--color-blue);
+    color: #fff;
+  }
+
+  .btn-primary:hover {
+    background: var(--color-blue-dim);
+  }
+
+  .btn-ghost {
+    background: var(--color-surface2);
+    color: var(--color-text2);
+    border: 1px solid var(--color-border);
+  }
+
+  .btn-ghost:hover {
+    background: var(--color-surface3);
+    color: var(--color-text);
+  }
+
+  /* ── Badge (project / kind pill) ───────────────────── */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    background: var(--color-surface2);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 2px 9px;
+    font-size: 0.72em;
+    color: var(--color-text2);
+    white-space: nowrap;
+  }
+
+  /* ── Status badge ───────────────────────────────────── */
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 9px;
+    border-radius: 20px;
+    font-size: 0.75em;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .status-badge-todo       { background: var(--color-surface3); color: var(--color-text2); }
+  .status-badge-in_progress { background: var(--color-blue-bg); color: var(--color-blue); box-shadow: 0 0 0 1px rgba(59,130,246,0.25); }
+  .status-badge-blocked    { background: var(--color-red-bg);   color: var(--color-red);  box-shadow: 0 0 0 1px rgba(239,68,68,0.25); }
+  .status-badge-done       { background: var(--color-green-bg); color: var(--color-green);box-shadow: 0 0 0 1px rgba(34,197,94,0.25); }
+  .status-badge-cancelled  { background: var(--color-surface3); color: var(--color-text3); }
+
+  /* ── Input ──────────────────────────────────────────── */
+  .input {
+    background: var(--color-surface2);
+    border: 1px solid var(--color-border);
+    border-radius: 7px;
+    color: var(--color-text);
+    font-size: 0.88em;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  .input:focus {
+    border-color: var(--color-blue);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+  }
+}

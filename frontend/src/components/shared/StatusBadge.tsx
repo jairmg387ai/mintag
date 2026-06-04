@@ -8,29 +8,17 @@ const LABELS: Record<Status, string> = {
   cancelled: 'Cancelled',
 }
 
-const STYLES: Record<Status, React.CSSProperties> = {
-  todo: { background: 'var(--color-surface3)', color: 'var(--color-text2)' },
-  in_progress: { background: 'rgba(59,130,246,0.12)', color: 'var(--color-blue)' },
-  blocked: { background: 'rgba(239,68,68,0.12)', color: 'var(--color-red)' },
-  done: { background: 'rgba(34,197,94,0.12)', color: 'var(--color-green)' },
-  cancelled: { background: 'var(--color-surface3)', color: 'var(--color-text3)' },
+const STATUS_CLASS: Record<Status, string> = {
+  todo: 'status-badge-todo',
+  in_progress: 'status-badge-in_progress',
+  blocked: 'status-badge-blocked',
+  done: 'status-badge-done',
+  cancelled: 'status-badge-cancelled',
 }
-
-import React from 'react'
 
 export function StatusBadge({ status }: { status: Status }) {
   return (
-    <span style={{
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: 4,
-      padding: '3px 9px',
-      borderRadius: 20,
-      fontSize: '0.75em',
-      fontWeight: 600,
-      whiteSpace: 'nowrap',
-      ...STYLES[status],
-    }}>
+    <span className={`status-badge ${STATUS_CLASS[status]}`}>
       {LABELS[status]}
     </span>
   )
