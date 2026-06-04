@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback } from 'react'
-import type { Project, Meeting, Task, Stats, ViewName, TaskViewName, ModalName, Toast } from '../types'
+import type { Project, Meeting, Task, Stats, ViewName, TaskViewName, ModalName, Toast, Status } from '../types'
 import * as api from '../api/client'
 
 interface AppState {
@@ -28,6 +28,7 @@ interface AppActions {
   openModal: (modal: ModalName) => void
   closeModal: () => void
   pushToast: (message: string, isError?: boolean) => void
+  updateTaskStatus: (id: number, status: Status) => Promise<void>
 }
 
 const defaultState: AppState = {
@@ -106,6 +107,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }, 3200)
   }, [])
 
+  const updateTaskStatus = useCallback(async (id: number, status: Status) => {
+    setState(prev => ({
+      ...prev,
+      tasks: prev.tasks.map(t => t.id === id ? { ...t, status } : t),
+    }))
+    try {
+      await api.updateTask(id, { status })
+    } catch {
+      setState(prev => ({
+        ...prev,
+        tasks: prev.tasks.map(t => t.id === id ? { ...t } : t),
+      }))
+      const id2 = ++toastIdCounter
+      setState(prev => ({ ...prev, toasts: [...prev.toasts, { id: id2, message: 'Failed to update task status', isError: true }] }))
+      setTimeout(() => {
+        setState(prev => ({ ...prev, toasts: prev.toasts.filter(t => t.id !== id2) }))
+      }, 3200)
+    }
+  }, [])
+
   const actions: AppActions = {
     loadAll,
     setView,
@@ -117,6 +138,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     openModal,
     closeModal,
     pushToast,
+    updateTaskStatus,
   }
 
   return (
