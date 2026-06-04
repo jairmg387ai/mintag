@@ -1,10 +1,10 @@
 import React, { useMemo } from 'react'
 import { useAppState, useAppActions } from '../../store/AppContext'
-import { TopBar } from '../layout/TopBar'
 import { FilterBar } from './FilterBar'
 import { TaskList } from './TaskList'
 import { Kanban } from './Kanban'
 import { Button } from '../ui'
+import { Plus } from 'lucide-react'
 import type { Status } from '../../types'
 
 export function TasksView() {
@@ -24,10 +24,10 @@ export function TasksView() {
   }
 
   return (
-    <>
-      <TopBar title="Tasks">
+    <div style={{ padding: '24px 28px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
         {/* View toggle */}
-        <div style={{ display: 'flex', background: 'var(--color-surface2)', borderRadius: 7, padding: 2, gap: 2 }}>
+        <div style={{ display: 'flex', background: 'var(--bg-sunken)', borderRadius: 'var(--radius-md)', padding: 2, gap: 2 }}>
           <ViewBtn active={taskView === 'list'} onClick={() => setTaskView('list')} title="List">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
@@ -42,23 +42,22 @@ export function TasksView() {
             </svg>
           </ViewBtn>
         </div>
-        <Button variant="primary" onClick={() => openModal('new-task')}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-          </svg>
-          New Task
-        </Button>
-      </TopBar>
 
-      <div style={{ padding: '24px 28px' }}>
-        <FilterBar />
-        {taskView === 'list' ? (
-          <TaskList tasks={filteredTasks} onOpen={openTask} />
-        ) : (
-          <Kanban tasks={filteredTasks} onOpen={openTask} />
-        )}
+        <div style={{ marginLeft: 'auto' }}>
+          <Button variant="primary" onClick={() => openModal('new-task')}>
+            <Plus size={14} strokeWidth={2} />
+            New Task
+          </Button>
+        </div>
       </div>
-    </>
+
+      <FilterBar />
+      {taskView === 'list' ? (
+        <TaskList tasks={filteredTasks} onOpen={openTask} />
+      ) : (
+        <Kanban tasks={filteredTasks} onOpen={openTask} />
+      )}
+    </div>
   )
 }
 
@@ -67,7 +66,7 @@ function ViewBtn({ active, onClick, title, children }: { active: boolean; onClic
     <button
       onClick={onClick}
       title={title}
-      style={{ background: active ? 'var(--color-surface3)' : 'none', border: 'none', color: active ? 'var(--color-text)' : 'var(--color-text3)', cursor: 'pointer', padding: '5px 8px', borderRadius: 5, display: 'flex', transition: 'all 0.15s' }}
+      style={{ background: active ? 'var(--bg-surface)' : 'none', border: active ? '1px solid var(--border)' : '1px solid transparent', color: active ? 'var(--fg1)' : 'var(--fg3)', cursor: 'pointer', padding: '5px 8px', borderRadius: 'var(--radius-sm)', display: 'flex', transition: 'all 0.15s' }}
     >
       {children}
     </button>
