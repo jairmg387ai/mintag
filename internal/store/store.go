@@ -88,6 +88,19 @@ func Open(path string) (*Store, error) {
 	return s, s.migrate()
 }
 
+// OpenInMemory opens a fresh in-memory SQLite store for testing.
+// SetMaxOpenConns(1) is required: without it database/sql may open
+// multiple connections, each getting its own empty in-memory database.
+func OpenInMemory() (*Store, error) {
+	db, err := sql.Open("sqlite", ":memory:?_foreign_keys=on")
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	s := &Store{db: db}
+	return s, s.migrate()
+}
+
 func (s *Store) Close() error { return s.db.Close() }
 
 // --- Schema ---
@@ -214,7 +227,7 @@ func (s *Store) ListProjects() ([]*Project, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []*Project
+	out := make([]*Project, 0)
 	for rows.Next() {
 		p := &Project{}
 		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.Color, &p.CreatedAt); err != nil {
@@ -266,7 +279,7 @@ func (s *Store) ListMeetings(projectID *int64) ([]*Meeting, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []*Meeting
+	out := make([]*Meeting, 0)
 	for rows.Next() {
 		m := &Meeting{}
 		if err := rows.Scan(&m.ID, &m.ProjectID, &m.Filename, &m.Date, &m.Title, &m.Summary, &m.CreatedAt, &m.TaskCount); err != nil {
@@ -343,7 +356,7 @@ func (s *Store) ListTasks(projectID *int64, status string) ([]*Task, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []*Task
+	out := make([]*Task, 0)
 	for rows.Next() {
 		t := &Task{}
 		if err := rows.Scan(&t.ID, &t.MeetingID, &t.ProjectID, &t.Title, &t.Description, &t.Status,
@@ -415,7 +428,7 @@ func (s *Store) GetTaskHistory(taskID int64) ([]*TaskHistory, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []*TaskHistory
+	out := make([]*TaskHistory, 0)
 	for rows.Next() {
 		h := &TaskHistory{}
 		if err := rows.Scan(&h.ID, &h.TaskID, &h.SourceMeetingID, &h.OldStatus, &h.NewStatus,
