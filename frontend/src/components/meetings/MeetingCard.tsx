@@ -25,7 +25,7 @@ export function MeetingCard({ meeting: m, projectColor, projectName, onClick }: 
     <div
       className="card"
       onClick={onClick}
-      style={{ cursor: 'pointer', transition: 'box-shadow .15s, border-color .15s' }}
+      style={{ cursor: 'pointer', transition: 'box-shadow .15s, border-color .15s', padding: 'var(--space-4)' }}
       onMouseEnter={e => {
         e.currentTarget.style.boxShadow = 'var(--shadow-md)'
         e.currentTarget.style.borderColor = 'var(--border-strong)'
