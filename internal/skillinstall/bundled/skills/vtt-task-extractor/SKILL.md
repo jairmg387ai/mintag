@@ -3,7 +3,7 @@ name: vtt-task-extractor
 description: "Trigger: extraer tareas de una transcripcion, analizar un .vtt, generar reporte HTML de reunion, subir tareas a mintag. Extrae compromisos, resume decisiones, arma un informe HTML con Mermaid y persiste tareas en Mintag cuando esta disponible."
 license: Apache-2.0
 metadata:
-  author: jair-muñóz
+  author: gentleman-programming
   version: "2.1"
 ---
 
