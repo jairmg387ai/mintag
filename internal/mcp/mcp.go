@@ -69,13 +69,7 @@ func registerTools(s *mcpserver.MCPServer, st *store.Store) {
 		}
 		pm := parser.Parse(path, string(raw))
 
-		var projectID *int64
-		if v := req.GetString("project_id", ""); v != "" {
-			id, err := strconv.ParseInt(v, 10, 64)
-			if err == nil {
-				projectID = &id
-			}
-		}
+		projectID, _ := parsePtrID(req, "project_id")
 
 		m, err := st.CreateMeeting(projectID, path, pm.Date, pm.Title, pm.Content, summary)
 		if err != nil {
@@ -131,19 +125,8 @@ func registerTools(s *mcpserver.MCPServer, st *store.Store) {
 		status := req.GetString("status", "todo")
 		dueDate := req.GetString("due_date", "")
 
-		var projectID, meetingID *int64
-		if v := req.GetString("project_id", ""); v != "" {
-			id, err := strconv.ParseInt(v, 10, 64)
-			if err == nil {
-				projectID = &id
-			}
-		}
-		if v := req.GetString("meeting_id", ""); v != "" {
-			id, err := strconv.ParseInt(v, 10, 64)
-			if err == nil {
-				meetingID = &id
-			}
-		}
+		projectID, _ := parsePtrID(req, "project_id")
+		meetingID, _ := parsePtrID(req, "meeting_id")
 
 		t, err := st.CreateTask(meetingID, projectID, title, desc, status, priority, owner, dueDate)
 		return jsonResult(t, err)
@@ -181,13 +164,7 @@ func registerTools(s *mcpserver.MCPServer, st *store.Store) {
 		note := req.GetString("note", "")
 		author := req.GetString("author", "")
 
-		var sourceMeetingID *int64
-		if v := req.GetString("source_meeting_id", ""); v != "" {
-			id, err := strconv.ParseInt(v, 10, 64)
-			if err == nil {
-				sourceMeetingID = &id
-			}
-		}
+		sourceMeetingID, _ := parsePtrID(req, "source_meeting_id")
 
 		t, err := st.UpdateTask(taskID, updates, note, author, sourceMeetingID)
 		return jsonResult(t, err)
@@ -292,6 +269,113 @@ func registerTools(s *mcpserver.MCPServer, st *store.Store) {
 			"total":   len(tasks),
 		}, err)
 	})
+
+	// --- meeting_find_or_create ---
+	s.AddTool(mcp.NewTool("meeting_find_or_create",
+		mcp.WithDescription("Find an existing meeting by filename or create it. Dedup-safe: never creates duplicates. Returns {action: created|updated|skipped, id, filename, meeting}."),
+		mcp.WithString("filename", mcp.Required(), mcp.Description("Canonical filename of the transcript (e.g. standup-2026-06-05.vtt)")),
+		mcp.WithString("title", mcp.Description("Meeting title (used on create)")),
+		mcp.WithString("date", mcp.Description("ISO date YYYY-MM-DD (used on create)")),
+		mcp.WithString("content", mcp.Description("Transcript body (used on create or update if differs)")),
+		mcp.WithString("summary", mcp.Description("Meeting summary (used on create or update if differs)")),
+		mcp.WithString("project_id", mcp.Description("Project ID (optional)")),
+		mcp.WithString("candidate_id", mcp.Description("Advisory hint: ID from a previous meeting_search result")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		filename, err := req.RequireString("filename")
+		if err != nil {
+			return errResult(err)
+		}
+		title := req.GetString("title", "")
+		date := req.GetString("date", "")
+		content := req.GetString("content", "")
+		summary := req.GetString("summary", "")
+
+		projectID, err := parsePtrID(req, "project_id")
+		if err != nil {
+			return errResult(fmt.Errorf("invalid project_id: %w", err))
+		}
+		candidateID, err := parsePtrID(req, "candidate_id")
+		if err != nil {
+			return errResult(fmt.Errorf("invalid candidate_id: %w", err))
+		}
+
+		m, action, err := st.UpsertMeeting(projectID, filename, date, title, content, summary, candidateID)
+		if err != nil {
+			return errResult(err)
+		}
+		return jsonResult(map[string]any{
+			"action":   action,
+			"id":       m.ID,
+			"filename": m.Filename,
+			"meeting":  m,
+		}, nil)
+	})
+
+	// --- task_upsert ---
+	s.AddTool(mcp.NewTool("task_upsert",
+		mcp.WithDescription("Find an existing task by title+project or create it. Dedup-safe. Returns {action: created|updated|skipped|ambiguous, id, title, task}. On ambiguous, surface candidates to user — do NOT retry without a candidate_id."),
+		mcp.WithString("title", mcp.Required(), mcp.Description("Task title — primary match key")),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("Project ID (required for deterministic match)")),
+		mcp.WithString("source_meeting_id", mcp.Description("Meeting that triggered this upsert (recorded in task history)")),
+		mcp.WithString("status", mcp.Description("todo | in_progress | blocked | done | cancelled")),
+		mcp.WithString("priority", mcp.Description("low | medium | high | critical")),
+		mcp.WithString("owner", mcp.Description("Responsible person")),
+		mcp.WithString("description", mcp.Description("Task description / context")),
+		mcp.WithString("due_date", mcp.Description("Due date YYYY-MM-DD")),
+		mcp.WithString("candidate_id", mcp.Description("Advisory hint: ID from a previous task_search result")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		title, err := req.RequireString("title")
+		if err != nil {
+			return errResult(err)
+		}
+		description := req.GetString("description", "")
+		status := req.GetString("status", "")
+		priority := req.GetString("priority", "")
+		owner := req.GetString("owner", "")
+		dueDate := req.GetString("due_date", "")
+
+		projectID, err := parsePtrID(req, "project_id")
+		if err != nil {
+			return errResult(fmt.Errorf("invalid project_id: %w", err))
+		}
+		sourceMeetingID, err := parsePtrID(req, "source_meeting_id")
+		if err != nil {
+			return errResult(fmt.Errorf("invalid source_meeting_id: %w", err))
+		}
+		candidateID, err := parsePtrID(req, "candidate_id")
+		if err != nil {
+			return errResult(fmt.Errorf("invalid candidate_id: %w", err))
+		}
+
+		t, action, err := st.UpsertTask(sourceMeetingID, projectID, title, description, status, priority, owner, dueDate, candidateID)
+		if err != nil {
+			return errResult(err)
+		}
+
+		if action == "ambiguous" {
+			// fetch candidates so the caller can surface them
+			var candidateIDs []int64
+			if projectID != nil {
+				candidates, ferr := st.FindTaskByTitleAndProject(title, *projectID)
+				if ferr == nil {
+					for _, c := range candidates {
+						candidateIDs = append(candidateIDs, c.ID)
+					}
+				}
+			}
+			return jsonResult(map[string]any{
+				"action":     "ambiguous",
+				"candidates": candidateIDs,
+			}, nil)
+		}
+
+		return jsonResult(map[string]any{
+			"action": action,
+			"id":     t.ID,
+			"title":  t.Title,
+			"task":   t,
+		}, nil)
+	})
 }
 
 // --- helpers ---
@@ -313,4 +397,19 @@ func errResult(err error) (*mcp.CallToolResult, error) {
 		msg = err.Error()
 	}
 	return mcp.NewToolResultText(fmt.Sprintf(`{"error":"%s"}`, strings.ReplaceAll(msg, `"`, `'`))), nil
+}
+
+// parsePtrID reads an optional string parameter by key and parses it as
+// int64. Returns (nil, nil) when the parameter is absent or empty.
+// Returns (nil, err) on a non-numeric value.
+func parsePtrID(req mcp.CallToolRequest, key string) (*int64, error) {
+	v := req.GetString(key, "")
+	if v == "" {
+		return nil, nil
+	}
+	id, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return nil, err
+	}
+	return &id, nil
 }

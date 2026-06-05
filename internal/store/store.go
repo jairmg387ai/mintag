@@ -342,25 +342,52 @@ func (s *Store) UpdateMeetingRichContent(id int64, content, contentType string) 
 
 // --- Tasks ---
 
-func (s *Store) CreateTask(meetingID, projectID *int64, title, description, status, priority, owner, dueDate string) (*Task, error) {
+// execer is the common interface shared by *sql.DB and *sql.Tx, allowing
+// tx-aware helpers to accept either without duplication.
+type execer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+// createTaskTx inserts a task row and its creation history entry using the
+// supplied execer (either a *sql.DB or a *sql.Tx from an outer transaction).
+func createTaskTx(ex execer, meetingID, projectID *int64, title, description, status, priority, owner, dueDate string) (int64, error) {
 	if status == "" {
 		status = "todo"
 	}
 	if priority == "" {
 		priority = "medium"
 	}
-	res, err := s.db.Exec(
+	res, err := ex.Exec(
 		`INSERT INTO tasks (meeting_id, project_id, title, description, status, priority, owner, due_date)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		meetingID, projectID, title, description, status, priority, owner, dueDate,
 	)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	id, _ := res.LastInsertId()
-	// record creation in history
-	s.db.Exec(`INSERT INTO task_history (task_id, new_status, note, author) VALUES (?, ?, ?, ?)`,
-		id, status, "Task created", owner)
+	_, err = ex.Exec(
+		`INSERT INTO task_history (task_id, new_status, note, author) VALUES (?, ?, ?, ?)`,
+		id, status, "Task created", owner,
+	)
+	return id, err
+}
+
+// insertHistoryTx appends a task_history row using the supplied execer.
+func insertHistoryTx(ex execer, taskID int64, sourceMeetingID *int64, oldStatus, newStatus, note, author string) error {
+	_, err := ex.Exec(
+		`INSERT INTO task_history (task_id, source_meeting_id, old_status, new_status, note, author) VALUES (?, ?, ?, ?, ?, ?)`,
+		taskID, sourceMeetingID, oldStatus, newStatus, note, author,
+	)
+	return err
+}
+
+func (s *Store) CreateTask(meetingID, projectID *int64, title, description, status, priority, owner, dueDate string) (*Task, error) {
+	id, err := createTaskTx(s.db, meetingID, projectID, title, description, status, priority, owner, dueDate)
+	if err != nil {
+		return nil, err
+	}
 	return s.GetTask(id)
 }
 
@@ -459,10 +486,10 @@ func (s *Store) UpdateTask(id int64, updates map[string]any, note, author string
 		newStatus = fmt.Sprintf("%v", v)
 	}
 
-	_, err = s.db.Exec(
-		`INSERT INTO task_history (task_id, source_meeting_id, old_status, new_status, note, author) VALUES (?, ?, ?, ?, ?, ?)`,
-		id, sourceMeetingID, old.Status, newStatus, note, author,
-	)
+	err = insertHistoryTx(s.db, id, sourceMeetingID, old.Status, newStatus, note, author)
+	if err != nil {
+		return nil, err
+	}
 	return s.GetTask(id)
 }
 
@@ -535,6 +562,325 @@ func (s *Store) Search(query string, limit int) ([]*SearchResult, error) {
 	}
 
 	return results, nil
+}
+
+// --- Find (exact-match, dedup-safe) ---
+
+// FindMeetingByFilename returns the meeting whose filename exactly matches the
+// given string, optionally scoped to a project. Returns (nil, nil) when no row
+// is found; returns a non-nil error only on real DB failure.
+func (s *Store) FindMeetingByFilename(filename string, projectID *int64) (*Meeting, error) {
+	var query string
+	var args []any
+	if projectID != nil {
+		query = `SELECT id, project_id, filename, date, title, raw_content, summary, created_at, rich_content, content_type
+		         FROM meetings WHERE filename = ? AND project_id = ? LIMIT 1`
+		args = []any{filename, *projectID}
+	} else {
+		query = `SELECT id, project_id, filename, date, title, raw_content, summary, created_at, rich_content, content_type
+		         FROM meetings WHERE filename = ? LIMIT 1`
+		args = []any{filename}
+	}
+	m := &Meeting{}
+	err := s.db.QueryRow(query, args...).Scan(
+		&m.ID, &m.ProjectID, &m.Filename, &m.Date, &m.Title,
+		&m.RawContent, &m.Summary, &m.CreatedAt, &m.RichContent, &m.ContentType,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// FindTaskByTitleAndProject returns all tasks with the given title in the given
+// project. Returns an empty (non-nil) slice on no match; returns a non-nil
+// error only on real DB failure. Slice length > 1 signals an ambiguous match.
+func (s *Store) FindTaskByTitleAndProject(title string, projectID int64) ([]*Task, error) {
+	rows, err := s.db.Query(`
+		SELECT t.id, t.meeting_id, t.project_id, t.title, t.description, t.status,
+		       t.priority, t.owner, t.due_date, t.created_at, t.updated_at,
+		       COALESCE(p.name,''), COALESCE(m.title,'')
+		FROM tasks t
+		LEFT JOIN projects p ON p.id = t.project_id
+		LEFT JOIN meetings m ON m.id = t.meeting_id
+		WHERE t.title = ? AND t.project_id = ?`, title, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]*Task, 0)
+	for rows.Next() {
+		t := &Task{}
+		if err := rows.Scan(&t.ID, &t.MeetingID, &t.ProjectID, &t.Title, &t.Description, &t.Status,
+			&t.Priority, &t.Owner, &t.DueDate, &t.CreatedAt, &t.UpdatedAt,
+			&t.ProjectName, &t.MeetingTitle); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// --- Upsert ---
+
+// UpsertMeeting finds or creates a meeting identified by filename (+ optional
+// projectID). If the meeting exists and the provided content or summary differ,
+// those fields are updated. Returns the resolved meeting, an action string
+// ("created" | "updated" | "skipped"), and any error.
+// The entire find+create/update is wrapped in a single transaction.
+func (s *Store) UpsertMeeting(projectID *int64, filename, date, title, rawContent, summary string, candidateID *int64) (*Meeting, string, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, "", err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// resolve candidate: if hint provided, load by ID and verify filename matches
+	var existing *Meeting
+	if candidateID != nil {
+		c := &Meeting{}
+		cerr := tx.QueryRow(
+			`SELECT id, project_id, filename, date, title, raw_content, summary, created_at, rich_content, content_type
+			 FROM meetings WHERE id = ?`, *candidateID,
+		).Scan(&c.ID, &c.ProjectID, &c.Filename, &c.Date, &c.Title, &c.RawContent, &c.Summary, &c.CreatedAt, &c.RichContent, &c.ContentType)
+		if cerr == nil && c.Filename == filename {
+			existing = c
+		}
+		// if not found or filename mismatch: fall through to deterministic find
+	}
+
+	if existing == nil {
+		// deterministic find by filename [+ project_id]
+		var q string
+		var args []any
+		if projectID != nil {
+			q = `SELECT id, project_id, filename, date, title, raw_content, summary, created_at, rich_content, content_type
+			     FROM meetings WHERE filename = ? AND project_id = ? LIMIT 1`
+			args = []any{filename, *projectID}
+		} else {
+			q = `SELECT id, project_id, filename, date, title, raw_content, summary, created_at, rich_content, content_type
+			     FROM meetings WHERE filename = ? LIMIT 1`
+			args = []any{filename}
+		}
+		row := &Meeting{}
+		rerr := tx.QueryRow(q, args...).Scan(
+			&row.ID, &row.ProjectID, &row.Filename, &row.Date, &row.Title,
+			&row.RawContent, &row.Summary, &row.CreatedAt, &row.RichContent, &row.ContentType,
+		)
+		if rerr == nil {
+			existing = row
+		} else if rerr != sql.ErrNoRows {
+			return nil, "", rerr
+		}
+	}
+
+	var action string
+	var meetingID int64
+
+	if existing == nil {
+		// create new meeting
+		res, err := tx.Exec(
+			`INSERT INTO meetings (project_id, filename, date, title, raw_content, summary) VALUES (?, ?, ?, ?, ?, ?)`,
+			projectID, filename, date, title, rawContent, summary,
+		)
+		if err != nil {
+			return nil, "", err
+		}
+		meetingID, _ = res.LastInsertId()
+		action = "created"
+	} else {
+		meetingID = existing.ID
+		// determine which fields changed (only update fields that are explicitly provided and differ)
+		setClauses := []string{}
+		setArgs := []any{}
+		if rawContent != "" && rawContent != existing.RawContent {
+			setClauses = append(setClauses, "raw_content = ?")
+			setArgs = append(setArgs, rawContent)
+		}
+		if summary != "" && summary != existing.Summary {
+			setClauses = append(setClauses, "summary = ?")
+			setArgs = append(setArgs, summary)
+		}
+		if title != "" && title != existing.Title {
+			setClauses = append(setClauses, "title = ?")
+			setArgs = append(setArgs, title)
+		}
+		if date != "" && date != existing.Date {
+			setClauses = append(setClauses, "date = ?")
+			setArgs = append(setArgs, date)
+		}
+		if len(setClauses) == 0 {
+			action = "skipped"
+		} else {
+			q := "UPDATE meetings SET "
+			for i, c := range setClauses {
+				if i > 0 {
+					q += ", "
+				}
+				q += c
+			}
+			q += " WHERE id = ?"
+			setArgs = append(setArgs, meetingID)
+			if _, err := tx.Exec(q, setArgs...); err != nil {
+				return nil, "", err
+			}
+			action = "updated"
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, "", err
+	}
+
+	m, err := s.GetMeeting(meetingID)
+	return m, action, err
+}
+
+// UpsertTask finds or creates a task identified by title + projectID.
+// If the task exists and provided fields differ, it updates them and appends
+// a task_history row (with the optional sourceMeetingID) inside the same tx.
+// Returns the resolved task, an action string
+// ("created" | "updated" | "skipped" | "ambiguous"), and any error.
+// On "ambiguous" the returned task is nil and the caller should surface
+// the candidate IDs (obtain them separately via FindTaskByTitleAndProject).
+func (s *Store) UpsertTask(meetingID, projectID *int64, title, description, status, priority, owner, dueDate string, candidateID *int64) (*Task, string, error) {
+	if projectID == nil {
+		return nil, "", fmt.Errorf("project_id is required for task_upsert")
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, "", err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// resolve candidate: if hint provided, load by ID and verify title+project match
+	var existing *Task
+	if candidateID != nil {
+		c := &Task{}
+		cerr := tx.QueryRow(`
+			SELECT t.id, t.meeting_id, t.project_id, t.title, t.description, t.status,
+			       t.priority, t.owner, t.due_date, t.created_at, t.updated_at,
+			       COALESCE(p.name,''), COALESCE(m.title,'')
+			FROM tasks t
+			LEFT JOIN projects p ON p.id = t.project_id
+			LEFT JOIN meetings m ON m.id = t.meeting_id
+			WHERE t.id = ?`, *candidateID,
+		).Scan(&c.ID, &c.MeetingID, &c.ProjectID, &c.Title, &c.Description, &c.Status,
+			&c.Priority, &c.Owner, &c.DueDate, &c.CreatedAt, &c.UpdatedAt,
+			&c.ProjectName, &c.MeetingTitle)
+		if cerr == nil && c.Title == title && c.ProjectID != nil && *c.ProjectID == *projectID {
+			existing = c
+		}
+		// if not found or key mismatch: fall through to deterministic find
+	}
+
+	if existing == nil {
+		// deterministic find by title + project_id (may return multiple rows)
+		rows, err := tx.Query(`
+			SELECT t.id, t.meeting_id, t.project_id, t.title, t.description, t.status,
+			       t.priority, t.owner, t.due_date, t.created_at, t.updated_at,
+			       COALESCE(p.name,''), COALESCE(m.title,'')
+			FROM tasks t
+			LEFT JOIN projects p ON p.id = t.project_id
+			LEFT JOIN meetings m ON m.id = t.meeting_id
+			WHERE t.title = ? AND t.project_id = ?`, title, *projectID)
+		if err != nil {
+			return nil, "", err
+		}
+		var candidates []*Task
+		for rows.Next() {
+			c := &Task{}
+			if err := rows.Scan(&c.ID, &c.MeetingID, &c.ProjectID, &c.Title, &c.Description, &c.Status,
+				&c.Priority, &c.Owner, &c.DueDate, &c.CreatedAt, &c.UpdatedAt,
+				&c.ProjectName, &c.MeetingTitle); err != nil {
+				rows.Close()
+				return nil, "", err
+			}
+			candidates = append(candidates, c)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, "", err
+		}
+		if len(candidates) > 1 {
+			// ambiguous: commit (no writes) and signal caller
+			_ = tx.Commit()
+			return nil, "ambiguous", nil
+		}
+		if len(candidates) == 1 {
+			existing = candidates[0]
+		}
+	}
+
+	var taskID int64
+	var action string
+
+	if existing == nil {
+		// create new task inside the transaction
+		id, err := createTaskTx(tx, meetingID, projectID, title, description, status, priority, owner, dueDate)
+		if err != nil {
+			return nil, "", err
+		}
+		taskID = id
+		action = "created"
+	} else {
+		taskID = existing.ID
+		// build diff: only non-empty provided fields that differ from stored values
+		setClauses := []string{}
+		setArgs := []any{}
+		newStatus := existing.Status
+
+		applyIfDiffers := func(field, provided, stored string) {
+			if provided != "" && provided != stored {
+				setClauses = append(setClauses, field+" = ?")
+				setArgs = append(setArgs, provided)
+			}
+		}
+		applyIfDiffers("title", title, existing.Title)
+		applyIfDiffers("description", description, existing.Description)
+		applyIfDiffers("status", status, existing.Status)
+		applyIfDiffers("priority", priority, existing.Priority)
+		applyIfDiffers("owner", owner, existing.Owner)
+		applyIfDiffers("due_date", dueDate, existing.DueDate)
+
+		if status != "" && status != existing.Status {
+			newStatus = status
+		}
+
+		if len(setClauses) == 0 {
+			action = "skipped"
+		} else {
+			setClauses = append(setClauses, "updated_at = CURRENT_TIMESTAMP")
+			q := "UPDATE tasks SET "
+			for i, c := range setClauses {
+				if i > 0 {
+					q += ", "
+				}
+				q += c
+			}
+			q += " WHERE id = ?"
+			setArgs = append(setArgs, taskID)
+			if _, err := tx.Exec(q, setArgs...); err != nil {
+				return nil, "", err
+			}
+			// history row inside the same tx
+			if err := insertHistoryTx(tx, taskID, meetingID, existing.Status, newStatus, "Updated via task_upsert", owner); err != nil {
+				return nil, "", err
+			}
+			action = "updated"
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, "", err
+	}
+
+	t, err := s.GetTask(taskID)
+	return t, action, err
 }
 
 // --- Stats ---

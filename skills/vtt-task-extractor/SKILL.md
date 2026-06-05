@@ -27,7 +27,7 @@ Use this skill when the user wants to extract action items, commitments, decisio
 | Direct commitment appears (`voy a`, `me encargo`, `quedamos en`) | Create a task row |
 | Process sequence appears (`primero`, `luego`, `despues`) | Draft a Mermaid flow |
 | Decision or agreement appears | Include it in the executive summary |
-| Mintag tools are available | Create or update the related meeting and tasks in Mintag |
+| Mintag tools are available | Pre-search candidates (meeting_search / task_search), then call meeting_find_or_create and task_upsert passing the best candidate_id as a hint (dedup-aware) |
 | Transcript is noisy or incomplete | Prefer concise summary over speculative detail |
 
 ## Execution Steps
@@ -37,7 +37,7 @@ Use this skill when the user wants to extract action items, commitments, decisio
 3. Extract tasks into rows with `Tarea`, `Responsable`, and `Contexto / Referencia`.
 4. Build Mermaid flow code only if the meeting describes a real sequence or interaction.
 5. Inject the summary, Mermaid code, metadata, and task rows into `template_informe_reunion.html`.
-6. When Mintag is available, import or locate the meeting, create the extracted tasks in Mintag, and attach the generated summary as meeting rich content when appropriate.
+6. When Mintag is available: (a) search existing meetings/tasks to find likely matches; (b) call meeting_find_or_create(filename, title, date, content, project_id, candidate_id?) — returns {action, id}; (c) for each task call task_upsert(title, project_id, status, priority, owner, description, source_meeting_id, candidate_id?) — returns {action: created|updated|skipped}; (d) if action is ambiguous, surface candidate IDs to user — do NOT create; (e) attach summary via meeting_set_rich_content when appropriate. Prefer these dedup tools over meeting_import/task_create.
 
 ## Output Contract
 
