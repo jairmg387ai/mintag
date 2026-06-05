@@ -1,18 +1,16 @@
-import { useMemo, useState, useRef, useEffect, useCallback } from 'react'
+import { useMemo } from 'react'
 import {
   ListTodo,
   CircleDot,
   CircleAlert,
   CalendarCheck,
   Users,
-  Search,
 } from 'lucide-react'
 import { useAppState, useAppActions } from '../../store/AppContext'
 import { StatCard } from '../shared/StatCard'
 import { StatusBadge } from '../shared/StatusBadge'
 import { Avatar } from '../shared/Avatar'
-import * as api from '../../api/client'
-import type { Status, ViewName, SearchResult } from '../../types'
+import type { Status, ViewName } from '../../types'
 
 function fmt(dt: string) {
   if (!dt) return '—'
@@ -21,108 +19,6 @@ function fmt(dt: string) {
   } catch {
     return dt
   }
-}
-
-// ── Inline search panel ──────────────────────────────────────────────────────
-
-interface DashboardSearchProps {
-  onSelectTask: (id: number) => void
-  onSelectMeeting: (id: number) => void
-}
-
-function DashboardSearch({ onSelectTask, onSelectMeeting }: DashboardSearchProps) {
-  const [query, setQuery] = useState('')
-  const [results, setResults] = useState<SearchResult[]>([])
-  const [open, setOpen] = useState(false)
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const doSearch = useCallback(async (q: string) => {
-    if (!q.trim()) { setResults([]); setOpen(false); return }
-    try {
-      const res = await api.search(q)
-      setResults(res ?? [])
-      setOpen(true)
-    } catch {
-      setResults([])
-    }
-  }, [])
-
-  useEffect(() => {
-    if (timerRef.current) clearTimeout(timerRef.current)
-    timerRef.current = setTimeout(() => doSearch(query), 300)
-    return () => { if (timerRef.current) clearTimeout(timerRef.current) }
-  }, [query, doSearch])
-
-  function handleSelect(r: SearchResult) {
-    if (r.kind === 'task') onSelectTask(r.id)
-    else onSelectMeeting(r.id)
-    setOpen(false)
-    setQuery('')
-  }
-
-  return (
-    <div style={{ marginTop: 24 }}>
-      <div className="tb-search" style={{ width: 320, margin: '0 auto' }}>
-        <span
-          className="mt-icon"
-          style={{
-            position: 'absolute',
-            left: 11,
-            top: '50%',
-            transform: 'translateY(-50%)',
-            color: 'var(--fg3)',
-          }}
-        >
-          <Search size={16} />
-        </span>
-        <input
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          placeholder="Search tasks & meetings…"
-          onBlur={() => setTimeout(() => setOpen(false), 150)}
-          onFocus={() => results.length > 0 && setOpen(true)}
-        />
-      </div>
-
-      {open && results.length > 0 && (
-        <div
-          style={{
-            width: 320,
-            margin: '4px auto 0',
-            background: 'var(--bg-surface)',
-            border: '1px solid var(--border-strong)',
-            borderRadius: 'var(--radius-md)',
-            boxShadow: 'var(--shadow-md)',
-            overflow: 'hidden',
-          }}
-        >
-          {results.map(r => (
-            <button
-              key={`${r.kind}-${r.id}`}
-              onMouseDown={() => handleSelect(r)}
-              style={{
-                display: 'block',
-                width: '100%',
-                textAlign: 'left',
-                padding: '10px 14px',
-                border: 'none',
-                borderBottom: '1px solid var(--border)',
-                background: 'none',
-                cursor: 'pointer',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-hover)' }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'none' }}
-            >
-              <div style={{ font: 'var(--text-h4)', color: 'var(--fg1)' }}>{r.title}</div>
-              <div style={{ font: 'var(--text-caption)', color: 'var(--fg3)', marginTop: 2 }}>
-                {r.snippet}
-              </div>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -382,11 +278,6 @@ export function Dashboard() {
         </section>
       </div>
 
-      {/* Search panel */}
-      <DashboardSearch
-        onSelectTask={id => openTask(id)}
-        onSelectMeeting={id => openMeeting(id)}
-      />
     </div>
   )
 }
