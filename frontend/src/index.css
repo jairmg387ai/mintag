@@ -215,7 +215,7 @@ body {
   .mt-icon svg { width: 100%; height: 100%; }
 
   /* ---- app shell ---- */
-  .app { display: flex; height: 100vh; overflow: hidden; }
+  .app { display: flex; height: 100vh; overflow: hidden; width: 100%; }
   .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   .content { flex: 1; overflow-y: auto; }
   .content-pad { padding: 28px 32px; max-width: 1280px; margin: 0 auto; }
@@ -237,7 +237,7 @@ body {
   .sb-foot .role { font: var(--text-caption); color: var(--indigo-300); }
 
   /* ---- topbar ---- */
-  .topbar { height: 60px; background: var(--bg-surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 16px; padding: 0 24px; flex: none; }
+  .topbar { height: 60px; background: var(--bg-surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 16px; padding: 0 32px; flex: none; }
   .topbar .crumb { font: var(--text-h3); color: var(--fg1); }
   .topbar .crumb .sub { color: var(--fg3); font-weight: 400; }
   .tb-search { margin-left: auto; position: relative; width: 320px; }
