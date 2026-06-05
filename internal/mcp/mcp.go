@@ -315,7 +315,7 @@ func registerTools(s *mcpserver.MCPServer, st *store.Store) {
 	s.AddTool(mcp.NewTool("task_upsert",
 		mcp.WithDescription("Find an existing task by title+project or create it. Dedup-safe. Returns {action: created|updated|skipped|ambiguous, id, title, task}. On ambiguous, surface candidates to user — do NOT retry without a candidate_id."),
 		mcp.WithString("title", mcp.Required(), mcp.Description("Task title — primary match key")),
-		mcp.WithString("project_id", mcp.Description("Project ID (required for deterministic match)")),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("Project ID (required for deterministic match)")),
 		mcp.WithString("source_meeting_id", mcp.Description("Meeting that triggered this upsert (recorded in task history)")),
 		mcp.WithString("status", mcp.Description("todo | in_progress | blocked | done | cancelled")),
 		mcp.WithString("priority", mcp.Description("low | medium | high | critical")),
