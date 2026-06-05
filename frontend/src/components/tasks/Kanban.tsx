@@ -9,9 +9,10 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core'
 import type { Task, Priority, Status } from '../../types'
-import { PriorityDot } from '../shared/PriorityDot'
+import { StatusBadge } from '../shared/StatusBadge'
+import { PriorityTag } from '../shared/PriorityTag'
 import { Avatar } from '../shared/Avatar'
-import { Badge, Card, CardHeader } from '../ui'
+import { Badge } from '../ui'
 import { useAppActions } from '../../store/AppContext'
 
 interface KanbanProps {
@@ -19,11 +20,11 @@ interface KanbanProps {
   onOpen: (id: number) => void
 }
 
-const COLUMNS: { status: Status; label: string; color: string; bg: string }[] = [
-  { status: 'todo',        label: 'To Do',      color: 'var(--color-text2)', bg: 'transparent' },
-  { status: 'in_progress', label: 'In Progress', color: 'var(--color-blue)',  bg: 'rgba(59,130,246,0.06)' },
-  { status: 'blocked',     label: 'Blocked',     color: 'var(--color-red)',   bg: 'rgba(239,68,68,0.06)' },
-  { status: 'done',        label: 'Done',        color: 'var(--color-green)', bg: 'rgba(34,197,94,0.06)' },
+const COLUMNS: { status: Status; label: string; highlightBg: string; highlightBorder: string }[] = [
+  { status: 'todo',        label: 'To Do',       highlightBg: 'rgba(100,116,139,0.08)', highlightBorder: 'var(--slate-400)' },
+  { status: 'in_progress', label: 'In Progress',  highlightBg: 'rgba(59,130,246,0.08)',  highlightBorder: 'var(--prog-solid)' },
+  { status: 'blocked',     label: 'Blocked',      highlightBg: 'rgba(239,68,68,0.08)',   highlightBorder: 'var(--block-solid)' },
+  { status: 'done',        label: 'Done',         highlightBg: 'rgba(34,197,94,0.08)',   highlightBorder: 'var(--done-solid)' },
 ]
 
 export function Kanban({ tasks, onOpen }: KanbanProps) {
@@ -88,29 +89,33 @@ function KanbanColumn({
   const highlight = isOver && isDragTarget
 
   return (
-    <Card
+    <div
       ref={setNodeRef}
       style={{
-        background: highlight ? col.bg : undefined,
-        borderColor: highlight ? col.color : undefined,
+        background: highlight ? col.highlightBg : 'var(--bg-sunken)',
+        border: `1px solid ${highlight ? col.highlightBorder : 'var(--border)'}`,
+        borderRadius: 'var(--radius-lg)',
+        padding: 12,
+        display: 'flex',
+        flexDirection: 'column',
         transition: 'background 0.15s, border-color 0.15s',
       }}
     >
-      <CardHeader
-        size="sm"
-        style={{ color: col.color }}
-        right={<Badge className="text-[0.85em]">{tasks.length}</Badge>}
-      >
-        {col.label}
-      </CardHeader>
+      {/* Column header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 6px 12px' }}>
+        <span className="mt-label" style={{ flex: 1 }}>{col.label}</span>
+        <Badge className="text-[0.85em]">{tasks.length}</Badge>
+      </div>
 
-      <div className="p-3 flex flex-col gap-2.5" style={{ minHeight: 80 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 80 }}>
         {tasks.length === 0 && !highlight && (
-          <div className="text-center py-5 text-text3 text-[0.78em]">Empty</div>
+          <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--fg3)', font: 'var(--text-caption)' }}>
+            Empty
+          </div>
         )}
         {tasks.map(t => <KanbanCard key={t.id} task={t} onClick={() => onOpen(t.id)} />)}
       </div>
-    </Card>
+    </div>
   )
 }
 
@@ -118,24 +123,36 @@ function KanbanCard({ task: t, onClick, overlay }: { task: Task; onClick: () => 
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: t.id })
 
   const cls = [
-    'kanban-card',
+    'kb-card',
     isDragging ? 'kanban-card--dragging' : '',
     overlay    ? 'kanban-card--overlay'  : '',
   ].filter(Boolean).join(' ')
 
   return (
-    <div
+    <button
       ref={overlay ? undefined : setNodeRef}
       className={cls}
       {...(overlay ? {} : { ...listeners, ...attributes })}
       onClick={overlay ? undefined : onClick}
     >
-      <div className="text-[0.88em] font-medium mb-2.5 leading-snug">{t.title}</div>
-      <div className="flex items-center gap-1.5 flex-wrap">
-        <PriorityDot priority={t.priority as Priority} />
-        {t.owner && <Avatar name={t.owner} />}
-        {t.project_name && <Badge>{t.project_name}</Badge>}
+      {/* top: status chip + priority tag */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <StatusBadge status={t.status} />
+        <PriorityTag priority={t.priority as Priority} />
       </div>
-    </div>
+
+      {/* title */}
+      <div style={{ font: 'var(--text-h4)', color: 'var(--fg1)', lineHeight: 1.35, marginBottom: 10 }}>
+        {t.title}
+      </div>
+
+      {/* footer: project name + avatar */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span style={{ font: 'var(--text-caption)', color: 'var(--fg3)' }}>
+          {t.project_name ?? ''}
+        </span>
+        {t.owner && <Avatar name={t.owner} size={24} />}
+      </div>
+    </button>
   )
 }

@@ -4,7 +4,7 @@ import { FilterBar } from './FilterBar'
 import { TaskList } from './TaskList'
 import { Kanban } from './Kanban'
 import { Button } from '../ui'
-import { Plus } from 'lucide-react'
+import { List, Columns, Plus } from 'lucide-react'
 import type { Status } from '../../types'
 
 export function TasksView() {
@@ -24,27 +24,26 @@ export function TasksView() {
   }
 
   return (
-    <div style={{ padding: '24px 28px' }}>
+    <div className="content-pad">
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
         {/* View toggle */}
-        <div style={{ display: 'flex', background: 'var(--bg-sunken)', borderRadius: 'var(--radius-md)', padding: 2, gap: 2 }}>
+        <div style={{
+          display: 'flex',
+          background: 'var(--bg-sunken)',
+          borderRadius: 'var(--radius-md)',
+          padding: 2,
+          gap: 2,
+        }}>
           <ViewBtn active={taskView === 'list'} onClick={() => setTaskView('list')} title="List">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
-              <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
-            </svg>
+            <List size={14} strokeWidth={2} />
           </ViewBtn>
           <ViewBtn active={taskView === 'kanban'} onClick={() => setTaskView('kanban')} title="Kanban">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="3" y="3" width="5" height="18" rx="1"/>
-              <rect x="10" y="3" width="5" height="12" rx="1"/>
-              <rect x="17" y="3" width="5" height="15" rx="1"/>
-            </svg>
+            <Columns size={14} strokeWidth={2} />
           </ViewBtn>
         </div>
 
         <div style={{ marginLeft: 'auto' }}>
-          <Button variant="primary" onClick={() => openModal('new-task')}>
+          <Button variant="primary" size="sm" onClick={() => openModal('new-task')}>
             <Plus size={14} strokeWidth={2} />
             New Task
           </Button>
@@ -52,6 +51,7 @@ export function TasksView() {
       </div>
 
       <FilterBar />
+
       {taskView === 'list' ? (
         <TaskList tasks={filteredTasks} onOpen={openTask} />
       ) : (
@@ -61,12 +61,32 @@ export function TasksView() {
   )
 }
 
-function ViewBtn({ active, onClick, title, children }: { active: boolean; onClick: () => void; title: string; children: React.ReactNode }) {
+function ViewBtn({
+  active,
+  onClick,
+  title,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  title: string
+  children: React.ReactNode
+}) {
   return (
     <button
       onClick={onClick}
       title={title}
-      style={{ background: active ? 'var(--bg-surface)' : 'none', border: active ? '1px solid var(--border)' : '1px solid transparent', color: active ? 'var(--fg1)' : 'var(--fg3)', cursor: 'pointer', padding: '5px 8px', borderRadius: 'var(--radius-sm)', display: 'flex', transition: 'all 0.15s' }}
+      style={{
+        background: active ? 'var(--brand-subtle)' : 'none',
+        border: active ? '1px solid var(--border)' : '1px solid transparent',
+        color: active ? 'var(--brand)' : 'var(--fg3)',
+        cursor: 'pointer',
+        padding: '5px 8px',
+        borderRadius: 'var(--radius-sm)',
+        display: 'flex',
+        alignItems: 'center',
+        transition: 'all 0.15s',
+      }}
     >
       {children}
     </button>
