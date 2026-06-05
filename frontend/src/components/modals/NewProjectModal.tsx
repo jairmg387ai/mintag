@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { useAppActions } from '../../store/AppContext'
-import { Modal, Field, Input, BtnPrimary, BtnGhost } from './Modal'
+import { Modal, Field } from './Modal'
+import { Button } from '../ui/Button'
+import { Input } from '../ui/Input'
 import { createProject } from '../../api/client'
 import { useToast } from '../../hooks/useToast'
 
@@ -27,8 +29,8 @@ export function NewProjectModal() {
       title="New Project"
       footer={
         <>
-          <BtnGhost onClick={closeModal}>Cancel</BtnGhost>
-          <BtnPrimary onClick={handleSubmit}>Create</BtnPrimary>
+          <Button variant="ghost" onClick={closeModal}>Cancel</Button>
+          <Button variant="primary" onClick={handleSubmit}>Create</Button>
         </>
       }
     >

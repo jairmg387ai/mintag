@@ -5,9 +5,10 @@ import rehypeHighlight from 'rehype-highlight'
 import DOMPurify from 'dompurify'
 import 'highlight.js/styles/github-dark.css'
 import { useAppState, useAppActions } from '../../store/AppContext'
-import { Modal, BtnGhost } from './Modal'
+import { Modal } from './Modal'
+import { Button } from '../ui/Button'
 import { StatusBadge } from '../shared/StatusBadge'
-import { PriorityDot } from '../shared/PriorityDot'
+import { PriorityTag } from '../shared/PriorityTag'
 import { Avatar } from '../shared/Avatar'
 import { getMeeting } from '../../api/client'
 import type { Meeting, Task, Status, Priority } from '../../types'
@@ -51,10 +52,17 @@ export function MeetingDetailModal() {
     <Modal
       title={meeting.title}
       maxWidth={720}
-      footer={<BtnGhost onClick={closeModal}>Close</BtnGhost>}
+      footer={<Button variant="ghost" onClick={closeModal}>Close</Button>}
     >
       {/* Meta grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          gap: 12,
+          marginBottom: 16,
+        }}
+      >
         <MetaItem label="Date" value={meeting.date || '—'} />
         <MetaItem label="Project" value={project?.name ?? '—'} />
         <div style={{ gridColumn: '1 / -1' }}>
@@ -63,37 +71,106 @@ export function MeetingDetailModal() {
       </div>
 
       {/* Tab row */}
-      <div style={{ display: 'flex', gap: 4, marginBottom: 16, borderBottom: '1px solid var(--color-border)', paddingBottom: 0 }}>
-        <TabButton label="Summary" active={activeTab === 'summary'} onClick={() => setActiveTab('summary')} />
-        {hasTranscript && <TabButton label="Transcript" active={activeTab === 'transcript'} onClick={() => setActiveTab('transcript')} />}
-        {hasRich && <TabButton label="Rich Content" active={activeTab === 'rich'} onClick={() => setActiveTab('rich')} />}
+      <div
+        style={{
+          display: 'flex',
+          gap: 4,
+          marginBottom: 16,
+          borderBottom: '1px solid var(--border)',
+          paddingBottom: 0,
+        }}
+      >
+        <TabButton
+          label="Summary"
+          active={activeTab === 'summary'}
+          onClick={() => setActiveTab('summary')}
+        />
+        {hasTranscript && (
+          <TabButton
+            label="Transcript"
+            active={activeTab === 'transcript'}
+            onClick={() => setActiveTab('transcript')}
+          />
+        )}
+        {hasRich && (
+          <TabButton
+            label="Rich Content"
+            active={activeTab === 'rich'}
+            onClick={() => setActiveTab('rich')}
+          />
+        )}
       </div>
 
       {/* Summary tab */}
       {activeTab === 'summary' && (
         <>
-          <div style={{ background: 'rgba(59,130,246,0.12)', borderLeft: '3px solid var(--color-blue)', borderRadius: '0 8px 8px 0', padding: '12px 14px', marginBottom: 16, fontSize: '0.88em', color: 'var(--color-text2)', lineHeight: 1.6 }}>
-            {meeting.summary || <span style={{ color: 'var(--color-text3)' }}>No summary available</span>}
+          {/* Summary block */}
+          <div
+            style={{
+              background: 'var(--bg-sunken)',
+              borderLeft: '3px solid var(--brand)',
+              borderRadius: '0 var(--radius-md) var(--radius-md) 0',
+              padding: '12px 14px',
+              marginBottom: 16,
+              font: 'var(--text-body)',
+              color: 'var(--fg2)',
+              lineHeight: 1.6,
+            }}
+          >
+            {meeting.summary || (
+              <span style={{ color: 'var(--fg3)' }}>No summary available</span>
+            )}
           </div>
 
-          <div style={{ fontSize: '0.8em', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text3)', marginBottom: 12 }}>
+          {/* Action items section */}
+          <div className="label" style={{ marginBottom: 12 }}>
             Associated Tasks ({meetingTasks.length})
           </div>
           {meetingTasks.length === 0 ? (
-            <div style={{ fontSize: '0.82em', color: 'var(--color-text3)', marginBottom: 12 }}>No associated tasks</div>
+            <div style={{ font: 'var(--text-sm)', color: 'var(--fg3)', marginBottom: 12 }}>
+              No associated tasks
+            </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
               {meetingTasks.map(t => (
-                <div
+                <button
                   key={t.id}
                   onClick={() => openTask(t.id)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: 'var(--color-surface2)', borderRadius: 7, fontSize: '0.85em', cursor: 'pointer' }}
+                  className="card"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '10px 14px',
+                    font: 'var(--text-body)',
+                    cursor: 'pointer',
+                    width: '100%',
+                    textAlign: 'left',
+                    border: 'none',
+                    background: 'var(--bg-surface)',
+                  }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.background = 'var(--bg-hover)'
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.background = 'var(--bg-surface)'
+                  }}
                 >
-                  <PriorityDot priority={t.priority as Priority} />
-                  <div style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title}</div>
+                  <PriorityTag priority={t.priority as Priority} />
+                  <div
+                    style={{
+                      flex: 1,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      color: 'var(--fg1)',
+                    }}
+                  >
+                    {t.title}
+                  </div>
                   <StatusBadge status={t.status as Status} />
                   {t.owner && <Avatar name={t.owner} />}
-                </div>
+                </button>
               ))}
             </div>
           )}
@@ -102,7 +179,20 @@ export function MeetingDetailModal() {
 
       {/* Transcript tab */}
       {activeTab === 'transcript' && hasTranscript && (
-        <div style={{ fontSize: '0.78em', color: 'var(--color-text3)', lineHeight: 1.7, whiteSpace: 'pre-wrap', background: 'var(--color-surface2)', borderRadius: 7, padding: 12, maxHeight: 400, overflowY: 'auto' }}>
+        <div
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 'var(--text-sm)',
+            color: 'var(--fg2)',
+            lineHeight: 1.7,
+            whiteSpace: 'pre-wrap',
+            background: 'var(--bg-sunken)',
+            borderRadius: 'var(--radius-md)',
+            padding: '12px 14px',
+            maxHeight: 400,
+            overflowY: 'auto',
+          }}
+        >
           {meeting.raw_content}
         </div>
       )}
@@ -111,7 +201,10 @@ export function MeetingDetailModal() {
       {activeTab === 'rich' && hasRich && (
         <div style={{ maxHeight: 480, overflowY: 'auto' }}>
           {meeting.content_type === 'markdown' ? (
-            <div className="prose prose-invert max-w-none" style={{ fontSize: '0.88em', lineHeight: 1.7 }}>
+            <div
+              className="prose prose-invert max-w-none"
+              style={{ font: 'var(--text-body)', lineHeight: 1.7, color: 'var(--fg2)' }}
+            >
               <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
                 {meeting.rich_content ?? ''}
               </ReactMarkdown>
@@ -128,26 +221,41 @@ export function MeetingDetailModal() {
 function SafeHtml({ html }: { html: string }) {
   return (
     <div
-      style={{ fontSize: '0.88em', lineHeight: 1.7, color: 'var(--color-text2)' }}
+      style={{ font: 'var(--text-body)', lineHeight: 1.7, color: 'var(--fg2)' }}
       dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }}
     />
   )
 }
 
-function TabButton({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+function TabButton({
+  label,
+  active,
+  onClick,
+}: {
+  label: string
+  active: boolean
+  onClick: () => void
+}) {
   return (
     <button
       onClick={onClick}
       style={{
         background: 'none',
         border: 'none',
-        borderBottom: active ? '2px solid var(--color-blue)' : '2px solid transparent',
-        color: active ? 'var(--color-text)' : 'var(--color-text3)',
+        borderBottom: active ? '2px solid var(--brand)' : '2px solid transparent',
+        color: active ? 'var(--brand)' : 'var(--fg2)',
         cursor: 'pointer',
-        padding: '6px 14px',
-        fontSize: '0.82em',
+        padding: '8px 14px',
+        font: 'var(--text-h4)',
         fontWeight: active ? 600 : 400,
         marginBottom: -1,
+        transition: 'color 0.15s ease, border-color 0.15s ease',
+      }}
+      onMouseEnter={e => {
+        if (!active) e.currentTarget.style.color = 'var(--fg1)'
+      }}
+      onMouseLeave={e => {
+        if (!active) e.currentTarget.style.color = 'var(--fg2)'
       }}
     >
       {label}
@@ -155,11 +263,34 @@ function TabButton({ label, active, onClick }: { label: string; active: boolean;
   )
 }
 
-function MetaItem({ label, value, small }: { label: string; value: string; small?: boolean }) {
+function MetaItem({
+  label,
+  value,
+  small,
+}: {
+  label: string
+  value: string
+  small?: boolean
+}) {
   return (
-    <div style={{ background: 'var(--color-surface2)', borderRadius: 8, padding: 12 }}>
-      <div style={{ fontSize: '0.72em', textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text3)', marginBottom: 3 }}>{label}</div>
-      <div style={{ fontWeight: 600, fontSize: small ? '0.78em' : '0.88em', color: 'var(--color-text)', wordBreak: 'break-all' }}>{value}</div>
+    <div
+      style={{
+        background: 'var(--bg-sunken)',
+        borderRadius: 'var(--radius-md)',
+        padding: 12,
+      }}
+    >
+      <div className="label" style={{ marginBottom: 3 }}>{label}</div>
+      <div
+        style={{
+          fontWeight: 600,
+          font: small ? 'var(--text-caption)' : 'var(--text-body)',
+          color: 'var(--fg1)',
+          wordBreak: 'break-all',
+        }}
+      >
+        {value}
+      </div>
     </div>
   )
 }

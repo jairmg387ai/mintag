@@ -1,41 +1,32 @@
+import { Circle, CircleDot, CircleAlert, CircleCheck, Ban } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import type { Status } from '../../types'
 
-const LABELS: Record<Status, string> = {
-  todo: 'To Do',
-  in_progress: 'In Progress',
-  blocked: 'Blocked',
-  done: 'Done',
-  cancelled: 'Cancelled',
+interface StatusMeta {
+  label: string
+  cls: string
+  icon: LucideIcon
 }
 
-const STYLES: Record<Status, React.CSSProperties> = {
-  todo: { background: 'var(--color-surface3)', color: 'var(--color-text2)' },
-  in_progress: { background: 'rgba(59,130,246,0.12)', color: 'var(--color-blue)' },
-  blocked: { background: 'rgba(239,68,68,0.12)', color: 'var(--color-red)' },
-  done: { background: 'rgba(34,197,94,0.12)', color: 'var(--color-green)' },
-  cancelled: { background: 'var(--color-surface3)', color: 'var(--color-text3)' },
+export const STATUS_META: Record<Status, StatusMeta> = {
+  todo:        { label: 'To Do',       cls: 'chip-todo',  icon: Circle },
+  in_progress: { label: 'In Progress', cls: 'chip-prog',  icon: CircleDot },
+  blocked:     { label: 'Blocked',     cls: 'chip-block', icon: CircleAlert },
+  done:        { label: 'Done',        cls: 'chip-done',  icon: CircleCheck },
+  cancelled:   { label: 'Cancelled',   cls: 'chip-todo',  icon: Ban },
 }
-
-import React from 'react'
 
 export function StatusBadge({ status }: { status: Status }) {
+  const meta = STATUS_META[status] ?? STATUS_META.todo
+  const Icon = meta.icon
   return (
-    <span style={{
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: 4,
-      padding: '3px 9px',
-      borderRadius: 20,
-      fontSize: '0.75em',
-      fontWeight: 600,
-      whiteSpace: 'nowrap',
-      ...STYLES[status],
-    }}>
-      {LABELS[status]}
+    <span className={`chip ${meta.cls}`}>
+      <Icon size={13} strokeWidth={1.75} />
+      {meta.label}
     </span>
   )
 }
 
 export function statusLabel(s: Status): string {
-  return LABELS[s] ?? s
+  return STATUS_META[s]?.label ?? s
 }
