@@ -60,6 +60,12 @@ mintag.exe serve
 
 # Start MCP stdio server (pipe to Claude Code)
 mintag.exe mcp
+
+# List bundled skills
+mintag.exe skills list
+
+# Install a bundled skill for Claude, Gemini, and OpenCode
+mintag.exe skills install vtt-task-extractor
 ```
 
 ### Environment variables
@@ -68,6 +74,37 @@ mintag.exe mcp
 |----------|---------|-------------|
 | `MINTAG_DB` | `~/.mintag/mintag.db` | Path to SQLite database |
 | `MINTAG_PORT` | `7430` | HTTP port for `serve` |
+
+---
+
+## Skill installer
+
+Mintag can bundle reusable AI skills and install them into supported local agent folders.
+
+```bash
+# Install for all supported targets
+mintag.exe skills install vtt-task-extractor
+
+# Install only for Claude and OpenCode
+mintag.exe skills install vtt-task-extractor --targets claude,opencode
+
+# Overwrite an existing installation
+mintag.exe skills install vtt-task-extractor --force
+```
+
+Current target directories:
+
+| Target | Destination |
+|--------|-------------|
+| Claude | `~/.claude/skills/<skill-name>` |
+| Gemini | `~/.gemini/skills/<skill-name>` |
+| OpenCode | `~/.config/opencode/skills/<skill-name>` |
+
+Bundled skills are listed with:
+
+```bash
+mintag.exe skills list
+```
 
 ---
 
