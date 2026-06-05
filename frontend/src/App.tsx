@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useAppState, useAppActions } from './store/AppContext'
 import { Sidebar } from './components/layout/Sidebar'
+import { TopBar } from './components/layout/TopBar'
 import { Dashboard } from './components/dashboard/Dashboard'
 import { TasksView } from './components/tasks/TasksView'
 import { MeetingsView } from './components/meetings/MeetingsView'
@@ -11,6 +12,12 @@ import { NewProjectModal } from './components/modals/NewProjectModal'
 import { MeetingDetailModal } from './components/modals/MeetingDetailModal'
 import { ToastContainer } from './components/shared/Toast'
 
+const VIEW_TITLES: Record<string, string> = {
+  dashboard: 'Dashboard',
+  tasks: 'Tasks',
+  meetings: 'Meetings',
+}
+
 function AppInner() {
   const { currentView, activeModal } = useAppState()
   const { loadAll } = useAppActions()
@@ -19,13 +26,20 @@ function AppInner() {
     loadAll()
   }, [loadAll])
 
+  const title = VIEW_TITLES[currentView] ?? 'Mintag'
+
   return (
     <>
-      <Sidebar />
-      <div style={{ flex: 1, overflowY: 'auto', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-        {currentView === 'dashboard' && <Dashboard />}
-        {currentView === 'tasks' && <TasksView />}
-        {currentView === 'meetings' && <MeetingsView />}
+      <div className="app">
+        <Sidebar />
+        <div className="main">
+          <TopBar title={title} />
+          <div className="content">
+            {currentView === 'dashboard' && <Dashboard />}
+            {currentView === 'tasks' && <TasksView />}
+            {currentView === 'meetings' && <MeetingsView />}
+          </div>
+        </div>
       </div>
 
       {activeModal === 'task' && <TaskDetailModal />}

@@ -1,5 +1,7 @@
 import React from 'react'
+import { X } from 'lucide-react'
 import { useAppActions } from '../../store/AppContext'
+import { Button } from '../ui/Button'
 
 interface ModalProps {
   title: string
@@ -14,24 +16,51 @@ export function Modal({ title, children, footer, maxWidth = 640 }: ModalProps) {
   return (
     <div
       onClick={closeModal}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.65)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(15,23,42,0.5)',
+        zIndex: 100,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 20,
+      }}
     >
       <div
         onClick={e => e.stopPropagation()}
-        style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border2)', borderRadius: 14, width: '100%', maxWidth, maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 4px 24px rgba(0,0,0,.4)' }}
+        className="card"
+        style={{
+          borderRadius: 'var(--radius-xl)',
+          boxShadow: 'var(--shadow-xl)',
+          width: '100%',
+          maxWidth,
+          maxHeight: '90vh',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
       >
         {/* Header */}
-        <div style={{ padding: '18px 22px', borderBottom: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', gap: 10 }}>
-          <h2 style={{ fontSize: '1em', fontWeight: 600, flex: 1 }}>{title}</h2>
-          <button
-            onClick={closeModal}
-            style={{ background: 'none', border: 'none', color: 'var(--color-text3)', cursor: 'pointer', padding: 4, borderRadius: 6, display: 'flex' }}
+        <div
+          style={{
+            padding: '16px 20px',
+            borderBottom: '1px solid var(--border)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+          }}
+        >
+          <h2
+            style={{
+              font: 'var(--text-h3)',
+              color: 'var(--fg1)',
+              flex: 1,
+              margin: 0,
+            }}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="18" y1="6" x2="6" y2="18"/>
-              <line x1="6" y1="6" x2="18" y2="18"/>
-            </svg>
-          </button>
+            {title}
+          </h2>
+          <Button variant="ghost" size="sm" icon={X} onClick={closeModal} aria-label="Close" />
         </div>
 
         {/* Body */}
@@ -41,7 +70,15 @@ export function Modal({ title, children, footer, maxWidth = 640 }: ModalProps) {
 
         {/* Footer */}
         {footer && (
-          <div style={{ padding: '14px 22px', borderTop: '1px solid var(--color-border)', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <div
+            style={{
+              padding: '14px 22px',
+              borderTop: '1px solid var(--border)',
+              display: 'flex',
+              gap: 8,
+              justifyContent: 'flex-end',
+            }}
+          >
             {footer}
           </div>
         )}
@@ -50,52 +87,17 @@ export function Modal({ title, children, footer, maxWidth = 640 }: ModalProps) {
   )
 }
 
-// Reusable form helpers
+// Field label wrapper — used by all modals
 export function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{ marginBottom: 14 }}>
-      <label style={{ fontSize: '0.8em', color: 'var(--color-text2)', marginBottom: 4, display: 'block', fontWeight: 500 }}>{label}</label>
+      <label
+        className="label"
+        style={{ marginBottom: 6, display: 'block' }}
+      >
+        {label}
+      </label>
       {children}
     </div>
-  )
-}
-
-const inputStyle: React.CSSProperties = {
-  background: 'var(--color-surface2)',
-  border: '1px solid var(--color-border)',
-  borderRadius: 7,
-  color: 'var(--color-text)',
-  padding: '8px 12px',
-  fontSize: '0.88em',
-  width: '100%',
-  outline: 'none',
-  fontFamily: 'inherit',
-}
-
-export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  return <input {...props} style={{ ...inputStyle, ...props.style }} />
-}
-
-export function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return <textarea {...props} style={{ ...inputStyle, resize: 'vertical', minHeight: 80, ...props.style }} />
-}
-
-export function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select {...props} style={{ ...inputStyle, ...props.style }} />
-}
-
-export function BtnPrimary(props: React.ButtonHTMLAttributes<HTMLButtonElement>) {
-  return (
-    <button {...props} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: '0.85em', fontWeight: 500, background: 'var(--color-blue)', color: '#fff', ...props.style }}>
-      {props.children}
-    </button>
-  )
-}
-
-export function BtnGhost(props: React.ButtonHTMLAttributes<HTMLButtonElement>) {
-  return (
-    <button {...props} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 7, cursor: 'pointer', fontSize: '0.85em', fontWeight: 500, background: 'var(--color-surface2)', color: 'var(--color-text2)', border: '1px solid var(--color-border)', ...props.style }}>
-      {props.children}
-    </button>
   )
 }

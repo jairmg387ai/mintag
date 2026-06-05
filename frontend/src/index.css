@@ -1,41 +1,195 @@
 @import "tailwindcss";
 
-@theme {
-  --color-bg: #0f172a;
-  --color-surface: #1e293b;
-  --color-surface2: #273549;
-  --color-surface3: #334155;
-  --color-border: #334155;
-  --color-border2: #475569;
-  --color-text: #f1f5f9;
-  --color-text2: #94a3b8;
-  --color-text3: #64748b;
-  --color-blue: #3b82f6;
-  --color-blue-dim: #1d4ed8;
-  --color-blue-bg: rgba(59, 130, 246, 0.12);
-  --color-green: #22c55e;
-  --color-green-bg: rgba(34, 197, 94, 0.12);
-  --color-yellow: #eab308;
-  --color-yellow-bg: rgba(234, 179, 8, 0.12);
-  --color-red: #ef4444;
-  --color-red-bg: rgba(239, 68, 68, 0.12);
-  --color-orange: #f97316;
-  --color-orange-bg: rgba(249, 115, 22, 0.12);
-  --color-purple: #a855f7;
-  --color-purple-bg: rgba(168, 85, 247, 0.12);
+/* ============================================================
+   MINTAG PRO — Design Tokens
+   Vendored from Mintag-Design-System/colors_and_type.css
+   Fonts loaded via <link> in index.html (Inter + JetBrains Mono)
+   ============================================================ */
+
+:root {
+  /* ---------- FONT FAMILIES ---------- */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  /* ============================================================
+     COLOR PRIMITIVES
+     ============================================================ */
+
+  /* Indigo — primary brand ramp (brand core = indigo-900 #312E81) */
+  --indigo-50:  #EEF2FF;
+  --indigo-100: #E0E7FF;
+  --indigo-200: #C7D2FE;
+  --indigo-300: #A5B4FC;
+  --indigo-400: #818CF8;
+  --indigo-500: #6366F1;
+  --indigo-600: #4F46E5;
+  --indigo-700: #4338CA;
+  --indigo-800: #3730A3;
+  --indigo-900: #312E81; /* brand primary */
+  --indigo-950: #1E1B4B;
+
+  /* Slate — neutral ramp (UI chrome, text, borders, surfaces) */
+  --slate-50:  #F8FAFC;
+  --slate-100: #F1F5F9;
+  --slate-200: #E2E8F0;
+  --slate-300: #CBD5E1;
+  --slate-400: #94A3B8;
+  --slate-500: #64748B;
+  --slate-600: #475569;
+  --slate-700: #334155;
+  --slate-800: #1E293B;
+  --slate-900: #0F172A;
+  --white: #FFFFFF;
+
+  /* Emerald — status: Done / success */
+  --emerald-50:  #ECFDF5;
+  --emerald-100: #D1FAE5;
+  --emerald-500: #10B981;
+  --emerald-600: #059669;
+  --emerald-700: #047857;
+
+  /* Amber — status: In Progress / pending */
+  --amber-50:  #FFFBEB;
+  --amber-100: #FEF3C7;
+  --amber-500: #F59E0B;
+  --amber-600: #D97706;
+  --amber-700: #B45309;
+
+  /* Rose — status: Blocked / critical */
+  --rose-50:  #FFF1F2;
+  --rose-100: #FFE4E6;
+  --rose-500: #F43F5E;
+  --rose-600: #E11D48;
+  --rose-700: #BE123C;
+
+  /* Sky — accent: informational / links / "Today" */
+  --sky-50:  #F0F9FF;
+  --sky-100: #E0F2FE;
+  --sky-500: #0EA5E9;
+  --sky-600: #0284C7;
+  --sky-700: #0369A1;
+
+  /* ============================================================
+     SEMANTIC TOKENS
+     ============================================================ */
+
+  /* Brand */
+  --brand:          var(--indigo-900);
+  --brand-hover:    var(--indigo-800);
+  --brand-active:   var(--indigo-950);
+  --brand-subtle:   var(--indigo-50);
+  --brand-on:       var(--white);
+  --brand-ring:     var(--indigo-300);
+
+  /* Surfaces */
+  --bg-app:        var(--slate-100);   /* app canvas behind cards */
+  --bg-surface:    var(--white);       /* cards, panels, tables */
+  --bg-sunken:     var(--slate-50);    /* table headers, inset wells */
+  --bg-sidebar:    var(--indigo-950);  /* persistent nav */
+  --bg-hover:      var(--slate-50);    /* row / item hover */
+  --bg-selected:   var(--indigo-50);   /* selected row / nav item */
+
+  /* Text */
+  --fg1: var(--slate-900);  /* primary text, headings */
+  --fg2: var(--slate-600);  /* secondary text, body */
+  --fg3: var(--slate-400);  /* tertiary, placeholder, meta */
+  --fg-on-brand: var(--white);
+  --fg-link: var(--indigo-600);
+
+  /* Borders & dividers */
+  --border:        var(--slate-200);
+  --border-strong: var(--slate-300);
+  --border-focus:  var(--indigo-500);
+
+  /* Status — foreground / surface / border triads */
+  --done-fg: var(--emerald-700);  --done-bg: var(--emerald-50);  --done-solid: var(--emerald-500);
+  --prog-fg: var(--amber-700);    --prog-bg: var(--amber-50);    --prog-solid: var(--amber-500);
+  --block-fg: var(--rose-700);    --block-bg: var(--rose-50);    --block-solid: var(--rose-500);
+  --info-fg: var(--sky-700);      --info-bg: var(--sky-50);      --info-solid: var(--sky-500);
+
+  /* ============================================================
+     TYPE SCALE  (enterprise density — 14px base body)
+     ============================================================ */
+  --text-display: 700 30px/36px var(--font-sans);
+  --text-h1:      700 24px/32px var(--font-sans);
+  --text-h2:      600 20px/28px var(--font-sans);
+  --text-h3:      600 16px/24px var(--font-sans);
+  --text-h4:      600 14px/20px var(--font-sans);
+  --text-body-lg: 400 16px/24px var(--font-sans);
+  --text-body:    400 14px/20px var(--font-sans);
+  --text-sm:      400 13px/18px var(--font-sans);
+  --text-label:   500 12px/16px var(--font-sans);   /* uppercase + tracking */
+  --text-caption: 400 12px/16px var(--font-sans);
+  --text-mono:    500 13px/18px var(--font-mono);
+
+  --tracking-label: 0.06em;
+  --tracking-tight: -0.01em;
+
+  /* ============================================================
+     SPACING  (4px base)
+     ============================================================ */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ============================================================
+     RADII  (subtle enterprise rounding)
+     ============================================================ */
+  --radius-sm: 4px;
+  --radius-md: 6px;   /* default — buttons, inputs, badges */
+  --radius-lg: 8px;   /* cards, panels */
+  --radius-xl: 12px;  /* modals, large surfaces */
+  --radius-full: 9999px;
+
+  /* ============================================================
+     ELEVATION  (cool slate-tinted shadows, low spread)
+     ============================================================ */
+  --shadow-xs: 0 1px 2px rgba(15,23,42,0.06);
+  --shadow-sm: 0 1px 3px rgba(15,23,42,0.10), 0 1px 2px rgba(15,23,42,0.06);
+  --shadow-md: 0 4px 6px -1px rgba(15,23,42,0.10), 0 2px 4px -2px rgba(15,23,42,0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(15,23,42,0.10), 0 4px 6px -4px rgba(15,23,42,0.05);
+  --shadow-xl: 0 20px 25px -5px rgba(15,23,42,0.12), 0 8px 10px -6px rgba(15,23,42,0.08);
+  --ring-focus: 0 0 0 3px rgba(99,102,241,0.35);
 }
 
-*, *::before, *::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+/* ============================================================
+   SEMANTIC ELEMENT HELPERS
+   Vendored from Mintag-Design-System/colors_and_type.css
+   ============================================================ */
+.mt-display { font: var(--text-display); letter-spacing: var(--tracking-tight); color: var(--fg1); }
+.mt-h1 { font: var(--text-h1); letter-spacing: var(--tracking-tight); color: var(--fg1); }
+.mt-h2 { font: var(--text-h2); color: var(--fg1); }
+.mt-h3 { font: var(--text-h3); color: var(--fg1); }
+.mt-h4 { font: var(--text-h4); color: var(--fg1); }
+.mt-body-lg { font: var(--text-body-lg); color: var(--fg2); }
+.mt-body { font: var(--text-body); color: var(--fg2); }
+.mt-sm { font: var(--text-sm); color: var(--fg2); }
+.mt-label {
+  font: var(--text-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--fg3);
 }
+.mt-mono { font: var(--text-mono); color: var(--fg2); }
 
+/* ============================================================
+   APP RESET
+   ============================================================ */
 html, body {
-  font-family: 'Inter', system-ui, sans-serif;
-  background: #0f172a;
-  color: #f1f5f9;
-  min-height: 100vh;
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-app);
+  color: var(--fg1);
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
 }
@@ -43,4 +197,138 @@ html, body {
 #root {
   display: flex;
   min-height: 100vh;
+}
+
+/* ============================================================
+   KIT COMPONENT CLASSES
+   Vendored from Mintag-Design-System/ui_kits/mintag-app/kit.css
+   ============================================================ */
+@layer components {
+  /* ---- icon helper ---- */
+  .mt-icon { display: inline-flex; align-items: center; justify-content: center; flex: none; }
+  .mt-icon svg { width: 100%; height: 100%; }
+
+  /* ---- app shell ---- */
+  .app { display: flex; height: 100vh; overflow: hidden; width: 100%; }
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .content { flex: 1; overflow-y: auto; }
+  .content-pad { padding: 28px 32px; max-width: 1280px; margin: 0 auto; }
+
+  /* ---- sidebar ---- */
+  .sidebar { width: 244px; background: var(--bg-sidebar); color: var(--indigo-100); display: flex; flex-direction: column; flex: none; }
+  .sb-brand { display: flex; align-items: center; gap: 10px; padding: 18px 18px 16px; }
+  .sb-brand .name { font: var(--text-h3); color: #fff; letter-spacing: -0.01em; }
+  .sb-brand .pro { font: var(--text-caption); font-weight: 700; letter-spacing: 0.08em; color: var(--indigo-300); background: rgba(255,255,255,.08); padding: 2px 6px; border-radius: 4px; }
+  .sb-section { padding: 8px 12px; }
+  .sb-section .head { font: var(--text-label); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--indigo-400); padding: 12px 12px 6px; }
+  .sb-item { display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-radius: var(--radius-md); color: var(--indigo-200); font: var(--text-h4); cursor: pointer; transition: background .15s ease, color .15s ease; margin-bottom: 2px; border: none; background: none; width: 100%; text-align: left; }
+  .sb-item:hover { background: rgba(255,255,255,.06); color: #fff; }
+  .sb-item.active { background: var(--indigo-800); color: #fff; }
+  .sb-item .count { margin-left: auto; font: var(--text-caption); font-weight: 600; background: rgba(255,255,255,.12); color: #fff; padding: 1px 7px; border-radius: var(--radius-full); }
+  .sb-item.active .count { background: rgba(255,255,255,.2); }
+  .sb-foot { margin-top: auto; padding: 14px; border-top: 1px solid rgba(255,255,255,.08); display: flex; align-items: center; gap: 10px; }
+  .sb-foot .who { font: var(--text-h4); color: #fff; line-height: 1.2; }
+  .sb-foot .role { font: var(--text-caption); color: var(--indigo-300); }
+
+  /* ---- topbar ---- */
+  .topbar { height: 60px; background: var(--bg-surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 16px; padding: 0 32px; flex: none; }
+  .topbar .crumb { font: var(--text-h3); color: var(--fg1); }
+  .topbar .crumb .sub { color: var(--fg3); font-weight: 400; }
+  .tb-search { margin-left: auto; position: relative; width: 320px; }
+  .tb-search .mt-icon { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--fg3); }
+  .tb-search input { width: 100%; padding: 8px 12px 8px 34px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); font: var(--text-body); color: var(--fg1); background: var(--bg-sunken); outline: none; }
+  .tb-search input:focus { border-color: var(--border-focus); box-shadow: var(--ring-focus); background: var(--bg-surface); }
+  .tb-icon { width: 36px; height: 36px; border-radius: var(--radius-md); border: 1px solid transparent; background: none; color: var(--fg2); display: inline-flex; align-items: center; justify-content: center; position: relative; transition: background .15s; }
+  .tb-icon:hover { background: var(--bg-hover); }
+  .tb-icon .badge { position: absolute; top: 6px; right: 7px; width: 7px; height: 7px; background: var(--rose-500); border-radius: 50%; border: 1.5px solid var(--bg-surface); }
+
+  /* ---- buttons ---- */
+  .btn { display: inline-flex; align-items: center; gap: 7px; font: var(--text-h4); border-radius: var(--radius-md); padding: 9px 14px; border: 1px solid transparent; transition: background .15s ease, transform .05s ease; white-space: nowrap; }
+  .btn:active { transform: scale(.98); }
+  .btn-primary { background: var(--brand); color: #fff; }
+  .btn-primary:hover { background: var(--brand-hover); }
+  .btn-secondary { background: var(--bg-surface); color: var(--fg1); border-color: var(--border-strong); }
+  .btn-secondary:hover { background: var(--bg-hover); }
+  .btn-ghost { background: none; color: var(--fg2); }
+  .btn-ghost:hover { background: var(--bg-hover); color: var(--fg1); }
+  .btn-danger { background: var(--block-solid); color: #fff; }
+  .btn-danger:hover { background: var(--rose-600); }
+  .btn-sm { font: var(--text-sm); font-weight: 600; padding: 6px 11px; }
+
+  /* ---- chips ---- */
+  .chip { display: inline-flex; align-items: center; gap: 6px; font: var(--text-label); font-weight: 600; padding: 4px 10px; border-radius: var(--radius-full); white-space: nowrap; }
+  .chip .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .chip .mt-icon { margin: 0 -1px; }
+  .chip-done { color: var(--done-fg); background: var(--done-bg); }
+  .chip-prog { color: var(--prog-fg); background: var(--prog-bg); }
+  .chip-block { color: var(--block-fg); background: var(--block-bg); }
+  .chip-todo { color: var(--slate-600); background: var(--slate-100); }
+
+  /* ---- priority labels ---- */
+  .pri { font: var(--text-caption); font-weight: 600; padding: 2px 8px; border-radius: var(--radius-sm); }
+  .pri-High { color: var(--block-fg); background: var(--rose-50); }
+  .pri-Medium { color: var(--prog-fg); background: var(--amber-50); }
+  .pri-Low { color: var(--slate-500); background: var(--slate-100); }
+
+  /* ---- avatars ---- */
+  .avatar { border-radius: 50%; color: #fff; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+  .av-stack { display: flex; }
+  .av-stack .avatar { border: 2px solid var(--bg-surface); margin-left: -8px; }
+  .av-stack .avatar:first-child { margin-left: 0; }
+
+  /* ---- cards ---- */
+  .card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
+  .section-title { font: var(--text-h2); color: var(--fg1); letter-spacing: var(--tracking-tight); }
+  .label { font: var(--text-label); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--fg3); }
+
+  /* ---- table ---- */
+  .mt-table { width: 100%; border-collapse: collapse; }
+  .mt-table thead th { font: var(--text-label); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--fg3); text-align: left; padding: 10px 16px; background: var(--bg-sunken); border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .mt-table tbody td { padding: 13px 16px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  .mt-table tbody tr { cursor: pointer; transition: background .12s ease; }
+  .mt-table tbody tr:last-child td { border-bottom: none; }
+  .mt-table tbody tr:hover { background: var(--bg-hover); }
+
+  /* ---- kanban card ---- */
+  .kb-card { display: block; width: 100%; text-align: left; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--shadow-xs); padding: 13px; transition: box-shadow .15s ease, border-color .15s ease; }
+  .kb-card:hover { box-shadow: var(--shadow-md); border-color: var(--border-strong); }
+
+  /* ---- kanban drag states ---- */
+  .kb-card--dragging {
+    opacity: 0.35;
+    cursor: grabbing;
+  }
+
+  .kb-card--overlay {
+    cursor: grabbing;
+    box-shadow: var(--shadow-lg);
+    transform: scale(1.02);
+  }
+
+  /* ---- activity timeline ---- */
+  .timeline { position: relative; padding-left: 4px; }
+  .tl-item { position: relative; display: flex; gap: 12px; padding-bottom: 18px; }
+  .tl-item:last-child { padding-bottom: 0; }
+  .tl-rail { position: relative; flex: none; width: 28px; display: flex; justify-content: center; }
+  .tl-rail::before { content: ''; position: absolute; top: 26px; bottom: -18px; width: 2px; background: var(--border); }
+  .tl-item:last-child .tl-rail::before { display: none; }
+  .tl-node { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--bg-surface); border: 1px solid var(--border); z-index: 1; }
+  .tl-body { padding-top: 3px; min-width: 0; flex: 1; }
+
+  /* ---- scrollbars ---- */
+  .content::-webkit-scrollbar, .scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+  .content::-webkit-scrollbar-thumb, .scroll::-webkit-scrollbar-thumb { background: var(--slate-300); border-radius: 6px; border: 3px solid var(--bg-app); }
+  .content::-webkit-scrollbar-track { background: transparent; }
+
+  /* ---- interactive rows (kept: has app-specific logic) ---- */
+  .row-clickable {
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.12s, box-shadow 0.12s;
+  }
+
+  .row-clickable:hover {
+    background: var(--bg-hover);
+    box-shadow: inset 2px 0 0 var(--brand);
+  }
 }

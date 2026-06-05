@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Search } from 'lucide-react'
 import DOMPurify from 'dompurify'
 import { search } from '../../api/client'
 import { useAppActions } from '../../store/AppContext'
@@ -65,25 +66,16 @@ export function SearchBar() {
   const taskResults = results.filter(r => r.kind === 'task')
 
   return (
-    <div ref={wrapperRef} style={{ position: 'relative' }}>
+    <div ref={wrapperRef} className="tb-search">
+      <span className="mt-icon"><Search size={16} strokeWidth={1.75} /></span>
       <input
         type="text"
-        placeholder="Search meetings & tasks…"
+        placeholder="Search tasks & meetings…"
         value={query}
         onChange={e => setQuery(e.target.value)}
-        style={{
-          background: 'var(--color-surface2)',
-          border: '1px solid var(--color-border)',
-          borderRadius: 7,
-          color: 'var(--color-text)',
-          fontSize: '0.85em',
-          padding: '6px 12px',
-          width: 220,
-          outline: 'none',
-        }}
       />
       {loading && (
-        <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: '0.7em', color: 'var(--color-text3)' }}>…</span>
+        <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: '0.7em', color: 'var(--fg3)' }}>…</span>
       )}
       {open && (
         <div style={{
@@ -91,16 +83,16 @@ export function SearchBar() {
           top: 'calc(100% + 6px)',
           right: 0,
           minWidth: 320,
-          background: 'var(--color-surface)',
-          border: '1px solid var(--color-border)',
-          borderRadius: 8,
-          boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+          background: 'var(--bg-surface)',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-lg)',
+          boxShadow: 'var(--shadow-lg)',
           zIndex: 20,
           maxHeight: 360,
           overflowY: 'auto',
         }}>
           {results.length === 0 ? (
-            <div style={{ padding: '12px 16px', fontSize: '0.82em', color: 'var(--color-text3)' }}>
+            <div style={{ padding: '12px 16px', fontSize: '0.82em', color: 'var(--fg3)' }}>
               No results for "{query}"
             </div>
           ) : (
@@ -122,7 +114,7 @@ export function SearchBar() {
 function ResultGroup({ label, items, onSelect }: { label: string; items: SearchResult[]; onSelect: (r: SearchResult) => void }) {
   return (
     <div>
-      <div style={{ fontSize: '0.72em', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-text3)', padding: '8px 16px 4px' }}>
+      <div style={{ fontSize: '0.72em', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--fg3)', padding: '8px 16px 4px' }}>
         {label}
       </div>
       {items.map(r => (
@@ -132,15 +124,15 @@ function ResultGroup({ label, items, onSelect }: { label: string; items: SearchR
           style={{
             padding: '8px 16px',
             cursor: 'pointer',
-            borderTop: '1px solid var(--color-border)',
+            borderTop: '1px solid var(--border)',
           }}
-          onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-surface2)')}
+          onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
           onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
         >
-          <div style={{ fontSize: '0.85em', fontWeight: 500, color: 'var(--color-text)', marginBottom: 2 }}>{r.title}</div>
+          <div style={{ fontSize: '0.85em', fontWeight: 500, color: 'var(--fg1)', marginBottom: 2 }}>{r.title}</div>
           {r.snippet && (
             <div
-              style={{ fontSize: '0.78em', color: 'var(--color-text3)', lineHeight: 1.5 }}
+              style={{ fontSize: '0.78em', color: 'var(--fg3)', lineHeight: 1.5 }}
               dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(r.snippet, { ALLOWED_TAGS: ['mark'] }) }}
             />
           )}

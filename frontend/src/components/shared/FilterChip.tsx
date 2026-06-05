@@ -8,17 +8,16 @@ export function FilterChip({ label, active, onClick }: FilterChipProps) {
   return (
     <span
       onClick={onClick}
+      className="chip"
       style={{
-        background: active ? 'rgba(59,130,246,0.12)' : 'var(--color-surface2)',
-        border: `1px solid ${active ? 'var(--color-blue)' : 'var(--color-border)'}`,
-        borderRadius: 20,
-        padding: '4px 12px',
-        fontSize: '0.78em',
         cursor: 'pointer',
-        color: active ? 'var(--color-blue)' : 'var(--color-text2)',
-        transition: 'all 0.15s',
-        whiteSpace: 'nowrap',
         userSelect: 'none',
+        background: active ? 'var(--brand-subtle)' : 'var(--bg-surface)',
+        color: active ? 'var(--brand)' : 'var(--fg2)',
+        border: active
+          ? '1px solid var(--brand)'
+          : '1px solid var(--border-strong)',
+        transition: 'background 0.15s ease, color 0.15s ease, border-color 0.15s ease',
       }}
     >
       {label}

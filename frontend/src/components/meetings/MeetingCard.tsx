@@ -7,36 +7,90 @@ interface MeetingCardProps {
   onClick: () => void
 }
 
+function formatDate(dateStr: string): string {
+  if (!dateStr) return '—'
+  try {
+    return new Date(dateStr).toLocaleDateString('en-US', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    })
+  } catch {
+    return dateStr
+  }
+}
+
 export function MeetingCard({ meeting: m, projectColor, projectName, onClick }: MeetingCardProps) {
   return (
     <div
+      className="card"
       onClick={onClick}
-      style={{
-        background: 'var(--color-surface)',
-        border: '1px solid var(--color-border)',
-        borderRadius: 10,
-        padding: '14px 18px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 14,
-        cursor: 'pointer',
-        transition: 'all 0.15s',
+      style={{ cursor: 'pointer', transition: 'box-shadow .15s, border-color .15s', padding: 'var(--space-4)' }}
+      onMouseEnter={e => {
+        e.currentTarget.style.boxShadow = 'var(--shadow-md)'
+        e.currentTarget.style.borderColor = 'var(--border-strong)'
       }}
-      onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-surface2)'; e.currentTarget.style.borderColor = 'var(--color-border2)' }}
-      onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-surface)'; e.currentTarget.style.borderColor = 'var(--color-border)' }}
+      onMouseLeave={e => {
+        e.currentTarget.style.boxShadow = ''
+        e.currentTarget.style.borderColor = 'var(--border)'
+      }}
     >
-      <span style={{ fontSize: '0.75em', color: 'var(--color-text3)', fontWeight: 600, minWidth: 84 }}>{m.date || '—'}</span>
-      <span style={{ fontWeight: 500, fontSize: '0.92em', flex: 1 }}>{m.title}</span>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        {(m.task_count ?? 0) > 0 && (
-          <span style={{ background: 'var(--color-surface2)', border: '1px solid var(--color-border)', borderRadius: 12, padding: '2px 9px', fontSize: '0.72em', color: 'var(--color-text2)' }}>
-            {m.task_count} tasks
-          </span>
-        )}
+      {/* Date */}
+      <div
+        style={{
+          font: 'var(--text-caption)',
+          color: 'var(--fg3)',
+          marginBottom: 8,
+          fontFamily: 'var(--font-mono)',
+        }}
+      >
+        {formatDate(m.date)}
+      </div>
+
+      {/* Title */}
+      <div style={{ font: 'var(--text-h4)', color: 'var(--fg1)', marginBottom: 8 }}>
+        {m.title}
+      </div>
+
+      {/* Summary snippet */}
+      {m.summary && (
+        <div
+          style={{
+            font: 'var(--text-sm)',
+            color: 'var(--fg2)',
+            marginBottom: 12,
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+          }}
+        >
+          {m.summary}
+        </div>
+      )}
+
+      {/* Footer */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span className="chip chip-todo" style={{ fontSize: 11 }}>
+          {m.task_count ?? 0} tasks
+        </span>
         {projectColor && (
           <>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: projectColor, display: 'inline-block' }} />
-            {projectName && <span style={{ fontSize: '0.75em', color: 'var(--color-text2)' }}>{projectName}</span>}
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                background: projectColor,
+                display: 'inline-block',
+                flex: 'none',
+              }}
+            />
+            {projectName && (
+              <span style={{ font: 'var(--text-caption)', color: 'var(--fg3)' }}>
+                {projectName}
+              </span>
+            )}
           </>
         )}
       </div>
