@@ -1,9 +1,37 @@
 import { useEffect, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { Calendar } from 'lucide-react'
 import { useAppState, useAppActions } from '../../store/AppContext'
-import { Modal, Field, Textarea, Select } from './Modal'
+import { Modal, Field } from './Modal'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
+
+const selectStyle: CSSProperties = {
+  width: '100%',
+  padding: '8px 12px',
+  border: '1px solid var(--border-strong)',
+  borderRadius: 'var(--radius-md)',
+  font: 'var(--text-body)',
+  color: 'var(--fg1)',
+  background: 'var(--bg-sunken)',
+  outline: 'none',
+  boxSizing: 'border-box',
+}
+
+const textareaStyle: CSSProperties = {
+  width: '100%',
+  padding: '8px 12px',
+  border: '1px solid var(--border-strong)',
+  borderRadius: 'var(--radius-md)',
+  font: 'var(--text-body)',
+  color: 'var(--fg1)',
+  background: 'var(--bg-sunken)',
+  outline: 'none',
+  resize: 'vertical',
+  minHeight: 80,
+  fontFamily: 'inherit',
+  boxSizing: 'border-box',
+}
 import { Timeline } from '../shared/Timeline'
 import { updateTask, getTask, getTaskHistory, getMeeting } from '../../api/client'
 import type { Task, TaskHistory, Meeting, Status, Priority } from '../../types'
@@ -233,7 +261,8 @@ export function TaskDetailModal() {
 
       {/* Description */}
       <Field label="Description">
-        <Textarea
+        <textarea
+          style={textareaStyle}
           value={form.description}
           onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
         />
@@ -250,7 +279,8 @@ export function TaskDetailModal() {
 
       {/* Meeting trigger */}
       <Field label="Meeting that triggered this change">
-        <Select
+        <select
+          style={selectStyle}
           value={form.source_meeting_id}
           onChange={e => setForm(f => ({ ...f, source_meeting_id: e.target.value }))}
         >
@@ -260,7 +290,7 @@ export function TaskDetailModal() {
               {m.date} — {m.title}
             </option>
           ))}
-        </Select>
+        </select>
       </Field>
 
       {/* Author */}
