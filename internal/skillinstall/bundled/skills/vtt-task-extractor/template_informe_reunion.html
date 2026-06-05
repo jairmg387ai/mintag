@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{TITULO_INFORME}} - RUNT 2.0</title>
+  <style>
+    :root {
+      --blue-dark: #0d3b66;
+      --blue-mid: #1a6faf;
+      --blue-light: #e8f4fd;
+      --green: #1a7f4b;
+      --green-bg: #e8f6ee;
+      --orange: #b45309;
+      --orange-bg: #fef3c7;
+      --red: #9b1c1c;
+      --red-bg: #fde8e8;
+      --yellow: #92400e;
+      --yellow-bg: #fffbeb;
+      --gray-text: #374151;
+      --gray-light: #f9fafb;
+      --border: #e5e7eb;
+      --shadow: 0 4px 16px rgba(0,0,0,0.08);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      font-size: 15px; line-height: 1.7; color: var(--gray-text);
+      background: #f0f4f8; padding: 0 0 60px;
+    }
+    header {
+      background: linear-gradient(135deg, var(--blue-dark) 0%, var(--blue-mid) 100%);
+      color: white; padding: 48px 60px 40px; position: relative; overflow: hidden;
+    }
+    header::after {
+      content: ''; position: absolute; right: -80px; top: -80px;
+      width: 400px; height: 400px; border-radius: 50%;
+      background: rgba(255,255,255,0.05);
+    }
+    header h1 { font-size: 2.1em; font-weight: 700; margin-bottom: 8px; }
+    header .subtitle { opacity: 0.85; font-size: 1.05em; }
+    header .meta { margin-top: 16px; display: flex; gap: 24px; flex-wrap: wrap; }
+    header .badge {
+      background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3);
+      padding: 4px 14px; border-radius: 20px; font-size: 0.85em;
+    }
+    .container { max-width: 1280px; margin: 0 auto; padding: 0 40px; }
+    section { margin-top: 48px; }
+    .card {
+      background: white; border-radius: 12px; box-shadow: var(--shadow);
+      border: 1px solid var(--border); overflow: hidden; margin-bottom: 28px;
+    }
+    .card-body { padding: 28px; }
+    h2 {
+      font-size: 1.45em; color: var(--blue-dark);
+      border-left: 5px solid var(--blue-mid);
+      padding: 10px 0 10px 18px; margin: 40px 0 20px;
+      background: var(--blue-light); border-radius: 0 8px 8px 0;
+    }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.93em; }
+    th {
+      background: var(--blue-dark); color: white;
+      padding: 12px 16px; text-align: left; font-weight: 600;
+      font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    td { padding: 11px 16px; border: 1px solid var(--border); vertical-align: top; }
+    tr:nth-child(even) td { background: var(--gray-light); }
+    footer { text-align: center; padding: 40px; color: #9ca3af; font-size: 0.85em; border-top: 1px solid var(--border); margin-top: 60px; }
+    .diagram-container { background: white; padding: 20px; border-radius: 8px; border: 1px solid var(--border); text-align: center; margin-top: 15px; overflow-x: auto; }
+  </style>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({ startOnLoad: true, theme: 'neutral' });
+  </script>
+</head>
+<body>
+
+<header>
+  <h1>{{TITULO_PRINCIPAL}}</h1>
+  <p class="subtitle">{{SUBTITULO_DESCRIPCION}}</p>
+  <div class="meta">
+    <span class="badge">{{FECHA}}</span>
+    <span class="badge">RUNT 2.0</span>
+    <span class="badge">{{CATEGORIA}}</span>
+  </div>
+</header>
+
+<div class="container">
+  <section id="resumen">
+    <h2>1. Resumen de la Sesion</h2>
+    <div class="card">
+      <div class="card-body">
+        {{CONTENIDO_RESUMEN}}
+      </div>
+    </div>
+  </section>
+
+  <section id="flujos">
+    <h2>2. Flujos y Arquitectura</h2>
+    <div class="card">
+      <div class="card-body">
+        <div class="diagram-container">
+          <pre class="mermaid">
+            {{CODIGO_MERMAID}}
+          </pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="tareas">
+    <h2>3. Compromisos y Tareas Extraidas</h2>
+    <div class="card">
+      <div class="card-body">
+        <table>
+          <thead>
+            <tr><th>Tarea / Compromiso</th><th>Responsable</th><th>Contexto / Referencia</th></tr>
+          </thead>
+          <tbody>
+            {{FILAS_TAREAS}}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+
+<footer>
+  <p><strong>{{PIE_PAGINA}}</strong></p>
+  <p>Generado automaticamente mediante vtt-task-extractor - RUNT 2.0</p>
+</footer>
+
+</body>
+</html>
