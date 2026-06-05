@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
+import { Upload } from 'lucide-react'
 import { useAppState, useAppActions } from '../../store/AppContext'
 import { MeetingCard } from './MeetingCard'
 import { Button } from '../ui'
-import { Upload } from 'lucide-react'
 
 export function MeetingsView() {
   const { meetings, projects, activeProject } = useAppState()
@@ -19,18 +19,31 @@ export function MeetingsView() {
   }
 
   return (
-    <div style={{ padding: '24px 28px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', marginBottom: 16 }}>
-        <Button variant="secondary" onClick={() => openModal('import')}>
-          <Upload size={14} strokeWidth={1.75} />
+    <div className="content-pad">
+      {/* Action row */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', marginBottom: 20 }}>
+        <Button variant="secondary" size="sm" icon={Upload} onClick={() => openModal('import')}>
           Import Meeting
         </Button>
       </div>
 
+      {/* Empty state */}
       {filtered.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--fg3)' }}>No meetings imported</div>
+        <div
+          className="card"
+          style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--fg3)' }}
+        >
+          No meetings yet. Import a transcript to get started.
+        </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        /* Responsive grid */
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+            gap: 16,
+          }}
+        >
           {filtered.map(m => {
             const proj = projects.find(p => p.id === m.project_id)
             return (
