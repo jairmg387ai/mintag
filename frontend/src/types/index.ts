@@ -68,7 +68,68 @@ export interface Stats {
   total_projects: number
 }
 
-export type ViewName = 'dashboard' | 'tasks' | 'meetings'
+// --- Graph types ---
+
+export interface GraphNode {
+  id: number
+  namespace: string
+  kind: string
+  key: string
+  label: string
+  summary?: string
+  attrs?: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface GraphNeighbor {
+  relation: string
+  direction: 'in' | 'out'
+  edge_attrs?: Record<string, unknown>
+  node: GraphNode
+}
+
+export interface GraphNodeSearchResult {
+  node: GraphNode
+  snippet: string
+  score: number
+}
+
+export interface GraphImpactSlimRow {
+  depth: number
+  kind: string
+  key: string
+  label: string
+}
+
+export interface GraphImpactResult {
+  node: { id: number; kind: string; key: string; label: string }
+  impacted_count: number
+  impacted_by_kind: Record<string, number>
+  impacted: GraphImpactSlimRow[]
+  truncated: boolean
+}
+
+export interface GraphStats {
+  namespace: string
+  node_count: number
+  edge_count: number
+  nodes_by_kind: Record<string, number>
+  edges_by_relation: Record<string, number>
+}
+
+export interface GraphStatsResponse {
+  stats: GraphStats
+  namespaces: string[]
+}
+
+export interface GraphNodeDetail {
+  node: GraphNode
+  relations: Record<string, GraphNeighbor[]>
+  neighbor_count: number
+}
+
+export type ViewName = 'dashboard' | 'tasks' | 'meetings' | 'graph'
 export type TaskViewName = 'list' | 'kanban'
 export type ModalName = 'task' | 'new-task' | 'import' | 'new-project' | 'meeting' | null
 

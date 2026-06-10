@@ -5,6 +5,7 @@ import { TopBar } from './components/layout/TopBar'
 import { Dashboard } from './components/dashboard/Dashboard'
 import { TasksView } from './components/tasks/TasksView'
 import { MeetingsView } from './components/meetings/MeetingsView'
+import { GraphView } from './components/graph/GraphView'
 import { TaskDetailModal } from './components/modals/TaskDetailModal'
 import { NewTaskModal } from './components/modals/NewTaskModal'
 import { ImportMeetingModal } from './components/modals/ImportMeetingModal'
@@ -16,6 +17,7 @@ const VIEW_TITLES: Record<string, string> = {
   dashboard: 'Dashboard',
   tasks: 'Tasks',
   meetings: 'Meetings',
+  graph: 'Knowledge Graph',
 }
 
 function AppInner() {
@@ -38,6 +40,7 @@ function AppInner() {
             {currentView === 'dashboard' && <Dashboard />}
             {currentView === 'tasks' && <TasksView />}
             {currentView === 'meetings' && <MeetingsView />}
+            {currentView === 'graph' && <GraphView />}
           </div>
         </div>
       </div>
