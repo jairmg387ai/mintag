@@ -1,4 +1,4 @@
-import { LayoutDashboard, CheckSquare, Users, Plus } from 'lucide-react'
+import { LayoutDashboard, CheckSquare, Users, Network, Plus } from 'lucide-react'
 import { useAppState, useAppActions } from '../../store/AppContext'
 import { Avatar } from '../shared/Avatar'
 import type { ViewName } from '../../types'
@@ -10,9 +10,10 @@ interface NavEntry {
 }
 
 const NAV_ITEMS: NavEntry[] = [
-  { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} strokeWidth={1.75} /> },
-  { id: 'tasks',     label: 'Tasks',     icon: <CheckSquare    size={18} strokeWidth={1.75} /> },
-  { id: 'meetings',  label: 'Meetings',  icon: <Users          size={18} strokeWidth={1.75} /> },
+  { id: 'dashboard', label: 'Dashboard',       icon: <LayoutDashboard size={18} strokeWidth={1.75} /> },
+  { id: 'tasks',     label: 'Tasks',           icon: <CheckSquare    size={18} strokeWidth={1.75} /> },
+  { id: 'meetings',  label: 'Meetings',        icon: <Users          size={18} strokeWidth={1.75} /> },
+  { id: 'graph',     label: 'Knowledge Graph', icon: <Network        size={18} strokeWidth={1.75} /> },
 ]
 
 export function Sidebar() {
