@@ -126,6 +126,24 @@ func TestGraphNodeByKey_NotFound_Returns404(t *testing.T) {
 	}
 }
 
+func TestGraphNodeByKey_AmbiguousNamespace_Returns400(t *testing.T) {
+	base, st := newTestServer(t)
+	for _, ns := range []string{"ns-a", "ns-b"} {
+		if _, _, err := st.UpsertGraphNode(ns, "repo", "Shared/Repo", "Shared Repo", "", nil); err != nil {
+			t.Fatalf("seed %s: %v", ns, err)
+		}
+	}
+
+	resp, err := http.Get(base + "/api/graph/nodes?kind=repo&key=Shared%2FRepo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for ambiguous key across namespaces, got %d", resp.StatusCode)
+	}
+}
+
 func TestGraphNodeByKey_MissingParams_Returns400(t *testing.T) {
 	base, _ := newTestServer(t)
 

@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -80,7 +79,13 @@ func (srv *Server) handleGraphNodeByKey(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "node not found", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, node, err)
+	if err != nil {
+		// Ambiguous natural key (multiple namespaces) is client-fixable:
+		// retry with an explicit namespace.
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, node, nil)
 }
 
 // GET /api/graph/nodes/{id}
@@ -242,20 +247,4 @@ func (srv *Server) handleGraphNamespaces(w http.ResponseWriter, r *http.Request)
 		ns = []string{}
 	}
 	writeJSON(w, ns, err)
-}
-
-// kindFilterFromCSV splits a comma-separated kind_filter param.
-func kindFilterFromCSV(s string) []string {
-	if s == "" {
-		return nil
-	}
-	parts := strings.Split(s, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
 }
