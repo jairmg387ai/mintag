@@ -201,7 +201,10 @@ func (s *Store) migrate() error {
 	if err := s.addColumnIfMissing("meetings", "rich_content", "rich_content TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
-	return s.addColumnIfMissing("meetings", "content_type", "content_type TEXT NOT NULL DEFAULT ''")
+	if err := s.addColumnIfMissing("meetings", "content_type", "content_type TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	return s.migrateGraph()
 }
 
 func (s *Store) addColumnIfMissing(table, col, ddl string) error {

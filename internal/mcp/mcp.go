@@ -24,6 +24,7 @@ func Serve(st *store.Store) error {
 }
 
 func registerTools(s *mcpserver.MCPServer, st *store.Store) {
+	registerGraphTools(s, st)
 
 	// --- project_create ---
 	s.AddTool(mcp.NewTool("project_create",
