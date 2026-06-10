@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import DOMPurify from 'dompurify'
 import { Search, Network, ChevronRight, ArrowLeft, Zap } from 'lucide-react'
 import { useDebounce } from '../../hooks/useDebounce'
 import * as api from '../../api/client'
@@ -103,7 +104,7 @@ function NodeRow({
         {snippet && (
           <div
             style={{ fontSize: '0.78rem', color: 'var(--fg2)', marginTop: 4 }}
-            dangerouslySetInnerHTML={{ __html: snippet }}
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(snippet, { ALLOWED_TAGS: ['mark'] }) }}
           />
         )}
       </div>
@@ -475,9 +476,9 @@ function ImpactTab({ impact }: { impact: GraphImpactResult | null }) {
         </div>
       )}
 
-      {impact.impacted.map((row, i) => (
+      {impact.impacted.map(row => (
         <div
-          key={i}
+          key={`${row.kind}:${row.key}:${row.depth}`}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -593,14 +594,11 @@ export function GraphView() {
     setPanelView('overview')
     setError(null)
 
-    api
-      .graphNodeByID(id)
-      .then(d => {
+    Promise.all([api.graphNodeByID(id), api.graphImpact(id, { limit: 100 })])
+      .then(([d, imp]) => {
         setDetail(d)
-        // kick off impact load in parallel
-        return api.graphImpact(id, { limit: 100 })
+        setImpact(imp)
       })
-      .then(imp => setImpact(imp))
       .catch(e => setError(String(e)))
   }, [])
 
@@ -646,6 +644,7 @@ export function GraphView() {
             />
             {namespaces.length > 1 && (
               <select
+                aria-label="Filter by namespace"
                 value={namespace}
                 onChange={e => setNamespace(e.target.value)}
                 style={{
