@@ -63,6 +63,8 @@ func (srv *Server) Handler() http.Handler {
 			r.Get("/{id}", srv.handleGetTask)
 			r.Get("/{id}/history", srv.handleTaskHistory)
 		})
+
+		srv.registerGraphRoutes(r)
 	})
 
 	// SPA — serve embedded UI for everything else
