@@ -74,7 +74,10 @@ func (c *Client) PostTimeEntry(ctx context.Context, e TimeEntry) error {
 	}
 
 	minutes := int(math.Round(e.Hours * 60))
-	dateWeek := isoWeekString(e.Date)
+	dateWeek, err := isoWeekString(e.Date)
+	if err != nil {
+		return err
+	}
 
 	payload := map[string]any{
 		"minutes":    minutes,
@@ -123,13 +126,13 @@ func (c *Client) PostTimeEntry(ctx context.Context, e TimeEntry) error {
 
 // isoWeekString derives the ISO 8601 week string (e.g. "2026-W01") for the
 // given YYYY-MM-DD date. Uses time.ISOWeek() so year-boundary cases are correct.
-func isoWeekString(date string) string {
+func isoWeekString(date string) (string, error) {
 	t, err := time.Parse("2006-01-02", date)
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("invalid date %q: %w", date, err)
 	}
 	year, week := t.ISOWeek()
-	return fmt.Sprintf("%d-W%02d", year, week)
+	return fmt.Sprintf("%d-W%02d", year, week), nil
 }
 
 func envOrDefault(key, def string) string {

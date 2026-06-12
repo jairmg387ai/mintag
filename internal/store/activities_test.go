@@ -258,10 +258,13 @@ func TestApproveActivities_AlreadyApproved_ReturnsError(t *testing.T) {
 	if _, err := s.ApproveActivities(ctx, []int64{a.ID}); err != nil {
 		t.Fatal(err)
 	}
-	// Try to approve again — should fail.
-	_, err = s.ApproveActivities(ctx, []int64{a.ID})
-	if err == nil {
-		t.Error("expected error when approving already-approved activity")
+	// Try to approve again — already approved, should be skipped (0 rows changed, no error).
+	n, err := s.ApproveActivities(ctx, []int64{a.ID})
+	if err != nil {
+		t.Errorf("expected no error when approving already-approved activity, got: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected 0 approved (skipped), got %d", n)
 	}
 }
 
