@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, Fragment } from 'react'
 import { ChevronLeft, ChevronRight, Plus, Upload, CheckCircle, RotateCcw, RefreshCw } from 'lucide-react'
 import type { DailyActivity, ActivityCatalog, UploadResult } from '../../types'
 import {
@@ -50,13 +50,12 @@ export function ActivitiesView() {
     }
   }, [])
 
-  // Initial load: activities + catalog
+  // Catalog loads once on mount
   useEffect(() => {
-    fetchActivities(date)
     getActivityCatalog().then(setCatalog).catch(() => setCatalog(null))
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
 
-  // Re-fetch on date change
+  // Re-fetch on date change (also covers initial load)
   useEffect(() => {
     fetchActivities(date)
     setUploadResult(null)
@@ -114,15 +113,13 @@ export function ActivitiesView() {
     }
   }
 
-  const displayDate = (() => {
-    const [y, m, d] = date.split('-').map(Number)
-    return new Date(y, m - 1, d).toLocaleDateString(undefined, {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    })
-  })()
+  const [_y, _m, _d] = date.split('-').map(Number)
+  const displayDate = new Date(_y, _m - 1, _d).toLocaleDateString(undefined, {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  })
 
   return (
     <div className="content-pad">
@@ -217,8 +214,8 @@ export function ActivitiesView() {
             </thead>
             <tbody>
               {activities.map(a => (
-                <>
-                  <tr key={a.id}>
+                <Fragment key={a.id}>
+                  <tr>
                     <td style={{ font: 'var(--text-h4)', color: 'var(--fg1)' }}>{a.project}</td>
                     <td style={{ font: 'var(--text-mono)', color: 'var(--fg1)' }}>{a.hours.toFixed(2)}</td>
                     <td style={{ color: 'var(--fg2)' }}>{a.category}</td>
@@ -255,13 +252,13 @@ export function ActivitiesView() {
                     </td>
                   </tr>
                   {rowErrors[a.id] && (
-                    <tr key={`err-${a.id}`}>
+                    <tr>
                       <td colSpan={7} style={{ padding: '4px 16px 10px', color: 'var(--block-solid)', font: 'var(--text-caption)' }}>
                         {rowErrors[a.id]}
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -343,12 +340,6 @@ export function ActivitiesView() {
         defaultDate={date}
       />
 
-      <style>{`
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
     </div>
   )
 }

@@ -334,3 +334,8 @@ body {
     box-shadow: inset 2px 0 0 var(--brand);
   }
 }
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}

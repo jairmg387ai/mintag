@@ -118,9 +118,9 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
 
     const h = parseFloat(hours)
     const prefix = `${project}/${category}/`
-    const descPart = description.startsWith(prefix)
+    const descPart = (description.startsWith(prefix)
       ? description.slice(prefix.length)
-      : description
+      : description).trim()
     const registro_diario = `${project}/${category}/${descPart}`
 
     try {

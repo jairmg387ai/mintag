@@ -156,8 +156,8 @@ export function createActivity(body: Omit<DailyActivity, 'id' | 'created_at' | '
   return request<DailyActivity>('/api/activities', { method: 'POST', body: JSON.stringify(body) })
 }
 
-export function approveActivity(id: number): Promise<DailyActivity> {
-  return request<DailyActivity>(`/api/activities/${id}`, { method: 'PATCH', body: JSON.stringify({ action: 'approve' }) })
+export function approveActivity(id: number): Promise<{ approved: number }> {
+  return request<{ approved: number }>(`/api/activities/${id}`, { method: 'PATCH', body: JSON.stringify({ action: 'approve' }) })
 }
 
 export function unapproveActivity(id: number): Promise<DailyActivity> {
