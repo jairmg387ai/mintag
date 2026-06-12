@@ -117,6 +117,7 @@ export function NewTaskModal() {
             <option value="todo">To Do</option>
             <option value="in_progress">In Progress</option>
             <option value="blocked">Blocked</option>
+            <option value="in_testing">In Testing</option>
           </select>
         </Field>
         <Field label="Due Date">

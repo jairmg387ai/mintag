@@ -5,6 +5,7 @@ import type {
   TaskHistory,
   Stats,
   SearchResult,
+  GraphNode,
   GraphNodeSearchResult,
   GraphNodeDetail,
   GraphNeighbor,
@@ -88,6 +89,17 @@ export function graphSearch(params: {
   if (params.kind) qs.set('kind', params.kind)
   if (params.limit) qs.set('limit', String(params.limit))
   return request<GraphNodeSearchResult[]>(`/api/graph/search?${qs}`)
+}
+
+export function graphNodesByKind(params: {
+  kind: string
+  namespace?: string
+  limit?: number
+}): Promise<{ nodes: GraphNode[]; count: number }> {
+  const qs = new URLSearchParams({ kind: params.kind })
+  if (params.namespace) qs.set('namespace', params.namespace)
+  if (params.limit) qs.set('limit', String(params.limit))
+  return request(`/api/graph/nodes?${qs}`)
 }
 
 export function graphNodeByID(id: number, neighborLimit?: number): Promise<GraphNodeDetail> {

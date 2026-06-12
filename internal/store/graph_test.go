@@ -156,6 +156,43 @@ func TestUpsertGraphEdge(t *testing.T) {
 	}
 }
 
+func TestListGraphNodesByKind(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	seedGraph(t, s)
+
+	repos, err := s.ListGraphNodesByKind("test", "repo", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repos) != 3 {
+		t.Fatalf("want 3 repos, got %d", len(repos))
+	}
+	// ordered by label
+	if repos[0].Label != "CYRConsultasVehiculoMS" {
+		t.Fatalf("want label-ordered results, got first %q", repos[0].Label)
+	}
+
+	portals, err := s.ListGraphNodesByKind("", "portal", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(portals) != 1 || portals[0].Key != "RUNTPRO" {
+		t.Fatalf("unexpected portals: %+v", portals)
+	}
+
+	none, err := s.ListGraphNodesByKind("other-ns", "repo", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(none) != 0 {
+		t.Fatalf("want empty for unknown namespace, got %d", len(none))
+	}
+}
+
 func TestSearchGraphNodes(t *testing.T) {
 	s, err := OpenInMemory()
 	if err != nil {

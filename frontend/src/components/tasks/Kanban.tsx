@@ -5,6 +5,10 @@ import {
   closestCenter,
   useDraggable,
   useDroppable,
+  useSensor,
+  useSensors,
+  MouseSensor,
+  TouchSensor,
   type DragStartEvent,
   type DragEndEvent,
 } from '@dnd-kit/core'
@@ -24,6 +28,7 @@ const COLUMNS: { status: Status; label: string; highlightBg: string; highlightBo
   { status: 'todo',        label: 'To Do',       highlightBg: 'rgba(100,116,139,0.08)', highlightBorder: 'var(--slate-400)' },
   { status: 'in_progress', label: 'In Progress',  highlightBg: 'rgba(59,130,246,0.08)',  highlightBorder: 'var(--prog-solid)' },
   { status: 'blocked',     label: 'Blocked',      highlightBg: 'rgba(239,68,68,0.08)',   highlightBorder: 'var(--block-solid)' },
+  { status: 'in_testing',  label: 'In Testing',   highlightBg: 'rgba(14,165,233,0.08)',  highlightBorder: 'var(--info-solid)' },
   { status: 'done',        label: 'Done',         highlightBg: 'rgba(34,197,94,0.08)',   highlightBorder: 'var(--done-solid)' },
 ]
 
@@ -31,6 +36,10 @@ export function Kanban({ tasks, onOpen }: KanbanProps) {
   const { updateTaskStatus } = useAppActions()
   const [activeTask, setActiveTask] = useState<Task | null>(null)
   const [overId, setOverId] = useState<string | null>(null)
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
+  )
 
   function handleDragStart(e: DragStartEvent) {
     setActiveTask(tasks.find(t => t.id === Number(e.active.id)) ?? null)
@@ -50,8 +59,8 @@ export function Kanban({ tasks, onOpen }: KanbanProps) {
 
   return (
     <>
-      <DndContext collisionDetection={closestCenter} onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 16, alignItems: 'start' }} className="kanban-grid">
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 16, alignItems: 'start' }} className="kanban-grid">
           {COLUMNS.map(col => (
             <KanbanColumn
               key={col.status}
@@ -69,7 +78,10 @@ export function Kanban({ tasks, onOpen }: KanbanProps) {
       </DndContext>
 
       <style>{`
-        @media (max-width: 900px) {
+        @media (max-width: 1100px) {
+          .kanban-grid { grid-template-columns: repeat(3,1fr) !important; }
+        }
+        @media (max-width: 750px) {
           .kanban-grid { grid-template-columns: 1fr 1fr !important; }
         }
       `}</style>

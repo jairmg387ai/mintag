@@ -11,6 +11,7 @@ import (
 
 	"github.com/Gentleman-Programming/mintag/internal/mcp"
 	"github.com/Gentleman-Programming/mintag/internal/server"
+	"github.com/Gentleman-Programming/mintag/internal/setup"
 	"github.com/Gentleman-Programming/mintag/internal/skillinstall"
 	"github.com/Gentleman-Programming/mintag/internal/store"
 )
@@ -29,6 +30,8 @@ func main() {
 		runMCP(dbPath)
 	case "skills":
 		runSkills(os.Args[2:])
+	case "setup":
+		runSetup(os.Args[2:])
 	default:
 		usage()
 	}
@@ -120,6 +123,41 @@ Examples:
 	fmt.Println(skillinstall.FormatResults(results))
 }
 
+func runSetup(args []string) {
+	if len(args) == 0 {
+		setupUsage()
+	}
+
+	agent := args[0]
+
+	execPath, err := os.Executable()
+	if err != nil {
+		log.Fatalf("cannot resolve executable path: %v", err)
+	}
+
+	homeDir := userHome()
+
+	fmt.Printf("Configuring mintag MCP for %s...\n", agent)
+	if err := setup.Run(agent, homeDir, execPath); err != nil {
+		log.Fatalf("setup error: %v", err)
+	}
+	fmt.Printf("Done. Restart %s to apply changes.\n", agent)
+}
+
+func setupUsage() {
+	fmt.Fprintf(os.Stderr, `mintag setup <agent>
+
+Agents:
+  %s
+
+Examples:
+  mintag setup claude
+  mintag setup opencode
+  mintag setup gemini
+`, setup.SupportedAgentsList())
+	os.Exit(1)
+}
+
 func usage() {
 	fmt.Fprint(os.Stderr, `mintag — Meeting Task Tracker
 
@@ -127,6 +165,7 @@ Commands:
   mintag serve   Start the web portal (default port 7430)
   mintag mcp     Start MCP stdio server for Claude integration
   mintag skills  List or install bundled AI skills
+  mintag setup   Configure MCP integration for an AI agent (claude, opencode, gemini)
 
 Environment:
   MINTAG_DB     Path to SQLite database (default: ~/.mintag/mintag.db)

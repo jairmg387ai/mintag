@@ -14,7 +14,7 @@ import (
 //
 //	GET /api/graph/search         ?q=&namespace=&kind=&limit=
 //	GET /api/graph/nodes/{id}     full node + neighbors grouped by relation
-//	GET /api/graph/nodes          ?namespace=&kind=&key= (lookup by natural key)
+//	GET /api/graph/nodes          ?namespace=&kind=&key= (lookup by natural key; key omitted lists by kind)
 //	GET /api/graph/nodes/{id}/neighbors  ?relation=&direction=&limit=
 //	GET /api/graph/nodes/{id}/impact     ?max_depth=&limit=&kind_filter=
 //	GET /api/graph/stats          ?namespace=
@@ -63,14 +63,22 @@ func (srv *Server) handleGraphSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 // GET /api/graph/nodes?namespace=&kind=&key=
-// Looks up a single node by its natural key.
+// Looks up a single node by its natural key. When key is omitted, lists all
+// nodes of the given kind (tree explorer roots).
 func (srv *Server) handleGraphNodeByKey(w http.ResponseWriter, r *http.Request) {
 	namespace := r.URL.Query().Get("namespace")
 	kind := r.URL.Query().Get("kind")
 	key := r.URL.Query().Get("key")
 
-	if kind == "" || key == "" {
-		http.Error(w, "kind and key are required", http.StatusBadRequest)
+	if kind == "" {
+		http.Error(w, "kind is required", http.StatusBadRequest)
+		return
+	}
+
+	if key == "" {
+		limit := queryInt(r, "limit", 100)
+		nodes, err := srv.st.ListGraphNodesByKind(namespace, kind, limit)
+		writeJSON(w, map[string]any{"nodes": nodes, "count": len(nodes)}, err)
 		return
 	}
 

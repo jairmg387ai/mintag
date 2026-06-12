@@ -1,11 +1,14 @@
 import { useState, useEffect, useCallback } from 'react'
 import DOMPurify from 'dompurify'
-import { Search, Network, ChevronRight, ArrowLeft, Zap } from 'lucide-react'
+import { Search, Network, ChevronRight, ArrowLeft, Zap, ListTree, GitBranch } from 'lucide-react'
 import { useDebounce } from '../../hooks/useDebounce'
 import * as api from '../../api/client'
+import { TreeExplorer } from './TreeExplorer'
+import { HierarchyView } from './HierarchyView'
 import type {
   GraphNodeSearchResult,
   GraphNodeDetail,
+  GraphNeighbor,
   GraphImpactResult,
   GraphStatsResponse,
 } from '../../types'
@@ -16,6 +19,7 @@ import { Input } from '../ui/Input'
 // ---------------------------------------------------------------------------
 
 type PanelView = 'overview' | 'neighbors' | 'impact'
+type ExploreMode = 'search' | 'tree' | 'hierarchy'
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -352,11 +356,64 @@ function Row({ label, value, isLast }: { label: string; value: string; isLast?: 
   )
 }
 
+interface Occurrence { file: string; lines: number[] }
+interface EdgeSource { path: string; file: string; detected_by: string }
+
+function EdgeEvidence({ attrs }: { attrs: Record<string, unknown> }) {
+  const occs = attrs.occurrences as Occurrence[] | undefined
+  const sources = attrs.sources as EdgeSource[] | undefined
+  const [expanded, setExpanded] = useState(false)
+
+  if (!occs?.length && !sources?.length) return null
+
+  const items = occs
+    ? occs.map(o => {
+        const parts = o.file.split('/')
+        const short = parts.slice(-2).join('/')
+        return { label: short, detail: o.file, sub: o.lines.length ? `lines: ${o.lines.slice(0, 8).join(', ')}${o.lines.length > 8 ? '…' : ''}` : '' }
+      })
+    : (sources ?? []).map(s => {
+        const parts = s.file.split('/')
+        const short = parts.slice(-2).join('/')
+        return { label: short, detail: s.file, sub: s.path }
+      })
+
+  const preview = items.slice(0, 2)
+  const rest = items.slice(2)
+
+  return (
+    <div style={{ padding: '4px 14px 8px 28px', borderBottom: '1px solid var(--border)' }}>
+      {preview.map((it, i) => (
+        <div key={i} style={{ marginBottom: 3 }}>
+          <span style={{ fontSize: '0.72rem', color: 'var(--fg1)', fontFamily: 'monospace' }} title={it.detail}>{it.label}</span>
+          {it.sub && <span style={{ fontSize: '0.68rem', color: 'var(--fg3)', marginLeft: 6 }}>{it.sub}</span>}
+        </div>
+      ))}
+      {rest.length > 0 && (
+        <>
+          {expanded && rest.map((it, i) => (
+            <div key={i} style={{ marginBottom: 3 }}>
+              <span style={{ fontSize: '0.72rem', color: 'var(--fg1)', fontFamily: 'monospace' }} title={it.detail}>{it.label}</span>
+              {it.sub && <span style={{ fontSize: '0.68rem', color: 'var(--fg3)', marginLeft: 6 }}>{it.sub}</span>}
+            </div>
+          ))}
+          <button
+            onClick={e => { e.stopPropagation(); setExpanded(v => !v) }}
+            style={{ fontSize: '0.68rem', color: 'var(--fg3)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', marginTop: 2 }}
+          >
+            {expanded ? '▲ show less' : `▼ +${rest.length} more`}
+          </button>
+        </>
+      )}
+    </div>
+  )
+}
+
 function NeighborsTab({
   relations,
   onNodeClick,
 }: {
-  relations: Record<string, { direction: string; relation: string; node: { id: number; kind: string; key: string; label: string } }[]>
+  relations: Record<string, GraphNeighbor[]>
   onNodeClick: (id: number) => void
 }) {
   const groups = Object.entries(relations)
@@ -404,11 +461,12 @@ function NeighborsTab({
               {relation}
             </div>
             {nbs.map(nb => (
-              <NodeRow
-                key={nb.node.id}
-                node={nb.node}
-                onClick={() => onNodeClick(nb.node.id)}
-              />
+              <div key={nb.node.id}>
+                <NodeRow node={nb.node} onClick={() => onNodeClick(nb.node.id)} />
+                {nb.edge_attrs && Object.keys(nb.edge_attrs).length > 0 && (
+                  <EdgeEvidence attrs={nb.edge_attrs as Record<string, unknown>} />
+                )}
+              </div>
             ))}
           </div>
         )
@@ -536,6 +594,7 @@ function ImpactTab({ impact }: { impact: GraphImpactResult | null }) {
 // ---------------------------------------------------------------------------
 
 export function GraphView() {
+  const [mode, setMode] = useState<ExploreMode>('search')
   const [query, setQuery] = useState('')
   const [namespace, setNamespace] = useState('')
   const [results, setResults] = useState<GraphNodeSearchResult[]>([])
@@ -608,12 +667,12 @@ export function GraphView() {
     setImpact(null)
   }, [])
 
-  const showDetail = selectedNodeID !== null
+  const showDetail = selectedNodeID !== null && mode !== 'hierarchy'
 
   return (
     <div className="content-pad" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 0, padding: 0 }}>
       <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
-        {/* Left panel — search */}
+        {/* Left panel — search / tree / hierarchy */}
         <div
           style={{
             width: showDetail ? 340 : '100%',
@@ -625,88 +684,140 @@ export function GraphView() {
             overflow: 'hidden',
           }}
         >
-          {/* Search bar */}
-          <div
-            style={{
-              padding: '14px 16px',
-              borderBottom: '1px solid var(--border)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 8,
-            }}
-          >
-            <Input
-              prefix={<Search size={15} />}
-              placeholder="Search nodes…"
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              autoFocus
-            />
-            {namespaces.length > 1 && (
-              <select
-                aria-label="Filter by namespace"
-                value={namespace}
-                onChange={e => setNamespace(e.target.value)}
+          {/* Mode tabs */}
+          <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+            {(
+              [
+                { id: 'search', label: 'Search', icon: <Search size={13} /> },
+                { id: 'tree', label: 'Tree', icon: <ListTree size={13} /> },
+                { id: 'hierarchy', label: 'Hierarchy', icon: <GitBranch size={13} /> },
+              ] as { id: ExploreMode; label: string; icon: React.ReactNode }[]
+            ).map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setMode(tab.id)}
                 style={{
-                  padding: '6px 10px',
-                  border: '1px solid var(--border-strong)',
-                  borderRadius: 'var(--radius-md)',
-                  background: 'var(--bg-sunken)',
-                  color: 'var(--fg1)',
-                  fontSize: '0.8125rem',
+                  flex: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  padding: '8px 4px',
+                  background: 'none',
+                  border: 'none',
+                  borderBottom: mode === tab.id ? '2px solid var(--accent)' : '2px solid transparent',
+                  color: mode === tab.id ? 'var(--fg1)' : 'var(--fg3)',
+                  fontWeight: mode === tab.id ? 600 : 400,
+                  fontSize: '0.78rem',
                   cursor: 'pointer',
                 }}
               >
-                <option value="">All namespaces</option>
-                {namespaces.map(ns => (
-                  <option key={ns} value={ns}>
-                    {ns}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-
-          {/* Results / stats */}
-          <div style={{ flex: 1, overflow: 'auto' }}>
-            {error && (
-              <div
-                style={{
-                  padding: '10px 14px',
-                  color: 'var(--red)',
-                  fontSize: '0.8125rem',
-                  borderBottom: '1px solid var(--border)',
-                }}
-              >
-                {error}
-              </div>
-            )}
-
-            {isSearching && (
-              <div style={{ padding: '10px 14px', color: 'var(--fg3)', fontSize: '0.8125rem' }}>
-                Searching…
-              </div>
-            )}
-
-            {!isSearching && query.trim() && results.length === 0 && !error && (
-              <div style={{ padding: '24px 16px', color: 'var(--fg3)', fontSize: '0.875rem', textAlign: 'center' }}>
-                No nodes found for &ldquo;{query}&rdquo;
-              </div>
-            )}
-
-            {!query.trim() && (
-              <StatsPanel statsResp={statsResp} />
-            )}
-
-            {results.map(r => (
-              <NodeRow
-                key={r.node.id}
-                node={r.node}
-                snippet={r.snippet}
-                onClick={() => selectNode(r.node.id)}
-              />
+                {tab.icon}
+                {tab.label}
+              </button>
             ))}
           </div>
+
+          {mode === 'hierarchy' ? (
+            selectedNodeID !== null ? (
+              <HierarchyView
+                rootNodeId={selectedNodeID}
+                namespace={namespace || undefined}
+                onSelectNode={selectNode}
+              />
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', padding: 24, color: 'var(--fg3)', fontSize: '0.875rem', textAlign: 'center' }}>
+                Select a node in Search or Tree first
+              </div>
+            )
+          ) : mode === 'tree' ? (
+            <TreeExplorer namespace={namespace || undefined} onSelectNode={selectNode} />
+          ) : (
+            <>
+              {/* Search bar */}
+              <div
+                style={{
+                  padding: '14px 16px',
+                  borderBottom: '1px solid var(--border)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                }}
+              >
+                <Input
+                  prefix={<Search size={15} />}
+                  placeholder="Search nodes…"
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                  autoFocus
+                />
+                {namespaces.length > 1 && (
+                  <select
+                    aria-label="Filter by namespace"
+                    value={namespace}
+                    onChange={e => setNamespace(e.target.value)}
+                    style={{
+                      padding: '6px 10px',
+                      border: '1px solid var(--border-strong)',
+                      borderRadius: 'var(--radius-md)',
+                      background: 'var(--bg-sunken)',
+                      color: 'var(--fg1)',
+                      fontSize: '0.8125rem',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <option value="">All namespaces</option>
+                    {namespaces.map(ns => (
+                      <option key={ns} value={ns}>
+                        {ns}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {/* Results / stats */}
+              <div style={{ flex: 1, overflow: 'auto' }}>
+                {error && (
+                  <div
+                    style={{
+                      padding: '10px 14px',
+                      color: 'var(--red)',
+                      fontSize: '0.8125rem',
+                      borderBottom: '1px solid var(--border)',
+                    }}
+                  >
+                    {error}
+                  </div>
+                )}
+
+                {isSearching && (
+                  <div style={{ padding: '10px 14px', color: 'var(--fg3)', fontSize: '0.8125rem' }}>
+                    Searching…
+                  </div>
+                )}
+
+                {!isSearching && query.trim() && results.length === 0 && !error && (
+                  <div style={{ padding: '24px 16px', color: 'var(--fg3)', fontSize: '0.875rem', textAlign: 'center' }}>
+                    No nodes found for &ldquo;{query}&rdquo;
+                  </div>
+                )}
+
+                {!query.trim() && (
+                  <StatsPanel statsResp={statsResp} />
+                )}
+
+                {results.map(r => (
+                  <NodeRow
+                    key={r.node.id}
+                    node={r.node}
+                    snippet={r.snippet}
+                    onClick={() => selectNode(r.node.id)}
+                  />
+                ))}
+              </div>
+            </>
+          )}
         </div>
 
         {/* Right panel — node detail */}
