@@ -11,20 +11,70 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
+	"github.com/Gentleman-Programming/mintag/internal/azure"
 	"github.com/Gentleman-Programming/mintag/internal/parser"
 	"github.com/Gentleman-Programming/mintag/internal/store"
 )
 
+const serverInstructions = `Mintag is a knowledge graph and meeting task tracker for software architecture.
+
+## Knowledge Graph
+
+The graph stores architectural nodes (repos, portals, menu options, use cases, team projects, API clients) linked by typed edges. Use it to answer questions like "what depends on X?", "what does portal Y expose?", or "which repos implement use case Z?".
+
+### Recommended workflow
+
+1. Call graph_stats first to discover what the graph contains (node and edge counts by kind).
+2. Use graph_search to find exact node keys before calling graph_node or graph_impact.
+3. Use graph_node to get a node's full 1-hop context (attributes + all relations grouped by type and direction).
+4. Use graph_neighbors when you only need one relation type (lighter than graph_node).
+5. Use graph_impact for blast-radius analysis: every node that transitively depends on the given node.
+
+### Node kinds
+
+repo | portal | menu_option | use_case | team_project | api_client | note
+
+### Edge relation types and direction convention
+
+Direction: SOURCE DEPENDS ON TARGET (the source needs the target to work).
+
+| Relation | Example |
+|---|---|
+| exposes | portal exposes menu_option |
+| consumes | menu_option consumes repo (micro-frontend) |
+| uses_client | repo uses_client api_client |
+| implemented_by | use_case implemented_by repo |
+| implements | repo implements use_case |
+| belongs_to | repo belongs_to team_project |
+| relates_to | general association |
+
+### Impact analysis
+
+graph_impact walks edges in reverse (inbound direction): it finds every node that transitively depends on the given node. Use kind_filter to narrow results (e.g. only portals or only repos affected by a change).
+
+## Meeting and task tools
+
+- meeting_import / meeting_find_or_create: import or upsert .vtt/.txt transcripts
+- task_create / task_upsert: create or dedup-safe upsert tasks from meeting context
+- task_update: update status, owner, priority — all changes recorded in history
+- meeting_search / task_search: FTS5 full-text search across transcripts and tasks
+- tasks_by_project: list tasks for a project filtered by status
+- task_history: full audit trail of a task across all meetings
+`
+
 func Serve(st *store.Store) error {
 	s := mcpserver.NewMCPServer("mintag", "1.0.0",
 		mcpserver.WithToolCapabilities(true),
+		mcpserver.WithInstructions(serverInstructions),
 	)
-	registerTools(s, st)
+	az := azure.NewClientFromEnv()
+	registerTools(s, st, az)
 	return mcpserver.ServeStdio(s)
 }
 
-func registerTools(s *mcpserver.MCPServer, st *store.Store) {
+func registerTools(s *mcpserver.MCPServer, st *store.Store, az *azure.Client) {
 	registerGraphTools(s, st)
+	registerActivityTools(s, st, az)
 
 	// --- project_create ---
 	s.AddTool(mcp.NewTool("project_create",
