@@ -11,6 +11,10 @@ import type {
   GraphNeighbor,
   GraphImpactResult,
   GraphStatsResponse,
+  DailyActivity,
+  UploadResult,
+  ActivityCatalog,
+  ActivityStatus,
 } from '../types'
 
 async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
@@ -138,4 +142,32 @@ export function graphStats(namespace?: string): Promise<GraphStatsResponse> {
 
 export function graphNamespaces(): Promise<string[]> {
   return request<string[]>('/api/graph/namespaces')
+}
+
+// --- Activities (Time Log) ---
+
+export function listActivities(date: string, status?: ActivityStatus): Promise<DailyActivity[]> {
+  const qs = new URLSearchParams({ date })
+  if (status && status !== ('all' as ActivityStatus)) qs.set('status', status)
+  return request<DailyActivity[]>(`/api/activities?${qs}`)
+}
+
+export function createActivity(body: Omit<DailyActivity, 'id' | 'created_at' | 'uploaded_at' | 'status'>): Promise<DailyActivity> {
+  return request<DailyActivity>('/api/activities', { method: 'POST', body: JSON.stringify(body) })
+}
+
+export function approveActivity(id: number): Promise<DailyActivity> {
+  return request<DailyActivity>(`/api/activities/${id}`, { method: 'PATCH', body: JSON.stringify({ action: 'approve' }) })
+}
+
+export function unapproveActivity(id: number): Promise<DailyActivity> {
+  return request<DailyActivity>(`/api/activities/${id}`, { method: 'PATCH', body: JSON.stringify({ action: 'unapprove' }) })
+}
+
+export function uploadActivities(date: string): Promise<UploadResult> {
+  return request<UploadResult>(`/api/activities/upload?date=${encodeURIComponent(date)}`, { method: 'POST' })
+}
+
+export function getActivityCatalog(): Promise<ActivityCatalog> {
+  return request<ActivityCatalog>('/api/activities/catalog')
 }
