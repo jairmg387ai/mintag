@@ -129,7 +129,36 @@ export interface GraphNodeDetail {
   neighbor_count: number
 }
 
-export type ViewName = 'dashboard' | 'tasks' | 'meetings' | 'graph'
+export type ViewName = 'dashboard' | 'tasks' | 'meetings' | 'graph' | 'activities'
+
+// --- Activity (Time Log) types ---
+
+export type ActivityStatus = 'pending' | 'approved' | 'uploaded'
+export type ActivitySource = 'manual' | 'llm_auto'
+
+export interface DailyActivity {
+  id: number
+  date: string
+  hours: number
+  project: string
+  category: string
+  registro_diario: string
+  source: ActivitySource
+  status: ActivityStatus
+  created_at: string
+  uploaded_at?: string
+}
+
+export interface UploadResult {
+  uploaded_count: number
+  failed_ids: number[]
+  errors: string[]
+}
+
+export interface ActivityCatalog {
+  projects: string[]
+  categories: string[]
+}
 export type TaskViewName = 'list' | 'kanban'
 export type ModalName = 'task' | 'new-task' | 'import' | 'new-project' | 'meeting' | null
 

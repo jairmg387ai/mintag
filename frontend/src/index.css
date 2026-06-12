@@ -264,6 +264,7 @@ body {
   .chip-block { color: var(--block-fg); background: var(--block-bg); }
   .chip-todo { color: var(--slate-600); background: var(--slate-100); }
   .chip-test { color: var(--info-fg); background: var(--info-bg); }
+  .chip-pending { color: var(--amber-700); background: var(--amber-50); }
 
   /* ---- priority labels ---- */
   .pri { font: var(--text-caption); font-weight: 600; padding: 2px 8px; border-radius: var(--radius-sm); }
@@ -332,4 +333,9 @@ body {
     background: var(--bg-hover);
     box-shadow: inset 2px 0 0 var(--brand);
   }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
 }
