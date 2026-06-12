@@ -88,7 +88,10 @@ Every `UpdateTask` call appends a row to `task_history`, making the full change 
 
 Uses `req.RequireString()` / `req.GetString()` from mcp-go v0.44+ — **do not** index `req.Params.Arguments` directly (it is `any`, not a map).
 
-Tools exposed: `project_create`, `project_list`, `meeting_import`, `meeting_search`, `task_create`, `task_update`, `task_search`, `task_history`, `tasks_by_project`
+Tools exposed:
+- **Meetings/Tasks**: `project_create`, `project_list`, `meeting_import`, `meeting_find_or_create`, `meeting_search`, `meeting_set_rich_content`, `task_create`, `task_upsert`, `task_update`, `task_search`, `task_history`, `tasks_by_project`
+- **Graph**: `graph_stats`, `graph_search`, `graph_node`, `graph_neighbors`, `graph_impact`, `graph_upsert_node`, `graph_upsert_edge`
+- **Activities (TimeLog)**: `activity_log`, `activity_list`, `activity_approve`, `activity_update`, `activity_upload`
 
 All tools serialize results as JSON text via `jsonResult()`. Errors are returned as `{"error":"..."}` text, never as Go errors, so Claude can read them.
 

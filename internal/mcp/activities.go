@@ -110,6 +110,40 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store, az *azure.Cl
 		return jsonResult(map[string]any{"approved": approved}, nil)
 	})
 
+	// --- activity_update ---
+	s.AddTool(mcp.NewTool("activity_update",
+		mcp.WithDescription("Update editable fields (hours, project, category, registro_diario) of a pending activity. Only pending activities can be edited."),
+		mcp.WithString("id", mcp.Required(), mcp.Description("Activity ID to update")),
+		mcp.WithString("hours", mcp.Description("New hours value, e.g. '2.5'")),
+		mcp.WithString("project", mcp.Description("New project name")),
+		mcp.WithString("category", mcp.Description("New activity category")),
+		mcp.WithString("registro_diario", mcp.Description("New work log description")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		idStr, err := req.RequireString("id")
+		if err != nil {
+			return errResult(err)
+		}
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			return errResult(fmt.Errorf("id must be an integer, got %q", idStr))
+		}
+
+		var hours float64
+		if h := req.GetString("hours", ""); h != "" {
+			hours, err = strconv.ParseFloat(h, 64)
+			if err != nil {
+				return errResult(fmt.Errorf("hours must be a number, got %q", h))
+			}
+		}
+
+		project := req.GetString("project", "")
+		category := req.GetString("category", "")
+		registroDiario := req.GetString("registro_diario", "")
+
+		a, err := st.UpdateActivity(ctx, id, hours, project, category, registroDiario)
+		return jsonResult(a, err)
+	})
+
 	// --- activity_upload ---
 	s.AddTool(mcp.NewTool("activity_upload",
 		mcp.WithDescription("Upload approved activity entries for a given date to Azure DevOps TimeLog. Requires MINTAG_AZURE_PAT environment variable."),

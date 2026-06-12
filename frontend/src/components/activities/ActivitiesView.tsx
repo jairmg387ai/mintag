@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, Fragment } from 'react'
-import { ChevronLeft, ChevronRight, Plus, Upload, CheckCircle, RotateCcw, RefreshCw } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Upload, CheckCircle, RotateCcw, RefreshCw, Pencil } from 'lucide-react'
 import type { DailyActivity, ActivityCatalog, UploadResult } from '../../types'
 import {
   listActivities,
@@ -10,6 +10,7 @@ import {
 } from '../../api/client'
 import { ActivityStatusBadge, ActivitySourceBadge } from './ActivityStatusBadge'
 import { NewActivityModal } from './NewActivityModal'
+import { EditActivityModal } from './EditActivityModal'
 
 function toYMD(d: Date): string {
   const y = d.getFullYear()
@@ -35,6 +36,7 @@ export function ActivitiesView() {
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [showNewModal, setShowNewModal] = useState(false)
+  const [editingActivity, setEditingActivity] = useState<DailyActivity | null>(null)
   const [rowErrors, setRowErrors] = useState<Record<number, string>>({})
 
   const fetchActivities = useCallback(async (d: string) => {
@@ -229,14 +231,24 @@ export function ActivitiesView() {
                     <td>
                       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                         {a.status === 'pending' && (
-                          <button
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => handleApprove(a.id)}
-                            title="Approve"
-                            aria-label="Approve activity"
-                          >
-                            <CheckCircle size={15} strokeWidth={1.75} />
-                          </button>
+                          <>
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => setEditingActivity(a)}
+                              title="Edit"
+                              aria-label="Edit activity"
+                            >
+                              <Pencil size={15} strokeWidth={1.75} />
+                            </button>
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => handleApprove(a.id)}
+                              title="Approve"
+                              aria-label="Approve activity"
+                            >
+                              <CheckCircle size={15} strokeWidth={1.75} />
+                            </button>
+                          </>
                         )}
                         {a.status === 'approved' && (
                           <button
@@ -328,6 +340,17 @@ export function ActivitiesView() {
           </div>
         )}
       </div>
+
+      <EditActivityModal
+        activity={editingActivity}
+        open={editingActivity !== null}
+        onClose={() => setEditingActivity(null)}
+        onSaved={() => {
+          setEditingActivity(null)
+          fetchActivities(date)
+        }}
+        catalog={catalog}
+      />
 
       <NewActivityModal
         open={showNewModal}

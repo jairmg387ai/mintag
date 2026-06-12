@@ -160,6 +160,13 @@ export function approveActivity(id: number): Promise<{ approved: number }> {
   return request<{ approved: number }>(`/api/activities/${id}`, { method: 'PATCH', body: JSON.stringify({ action: 'approve' }) })
 }
 
+export function updateActivity(
+  id: number,
+  body: { hours?: number; project?: string; category?: string; registro_diario?: string },
+): Promise<DailyActivity> {
+  return request<DailyActivity>(`/api/activities/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
+}
+
 export function unapproveActivity(id: number): Promise<DailyActivity> {
   return request<DailyActivity>(`/api/activities/${id}`, { method: 'PATCH', body: JSON.stringify({ action: 'unapprove' }) })
 }
