@@ -134,6 +134,10 @@ func (srv *Server) handlePatchActivity(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, a, err)
 
 	default:
+		if body.Action != "" {
+			http.Error(w, "unknown action: "+body.Action, http.StatusBadRequest)
+			return
+		}
 		a, err := srv.st.UpdateActivity(ctx, id, body.Hours, body.Project, body.Category, body.RegistroDiario)
 		if err != nil {
 			status := http.StatusUnprocessableEntity

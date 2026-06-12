@@ -129,16 +129,8 @@ func (s *Store) ApproveActivities(ctx context.Context, ids []int64) (int, error)
 	if len(ids) == 0 {
 		return 0, nil
 	}
-	// Validate each is currently pending before updating.
 	var approved int
 	for _, id := range ids {
-		a, err := s.GetActivity(ctx, id)
-		if err != nil {
-			return approved, err
-		}
-		if a.Status != "pending" {
-			return approved, fmt.Errorf("activity %d cannot be approved: current status is %q (must be pending)", id, a.Status)
-		}
 		res, err := s.db.ExecContext(ctx,
 			`UPDATE daily_activities SET status = 'approved' WHERE id = ? AND status = 'pending'`, id,
 		)
@@ -153,17 +145,20 @@ func (s *Store) ApproveActivities(ctx context.Context, ids []int64) (int, error)
 
 // UnapproveActivity transitions a single activity from approved → pending.
 func (s *Store) UnapproveActivity(ctx context.Context, id int64) error {
-	a, err := s.GetActivity(ctx, id)
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE daily_activities SET status = 'pending' WHERE id = ? AND status = 'approved'`, id,
+	)
 	if err != nil {
 		return err
 	}
-	if a.Status != "approved" {
+	if n, _ := res.RowsAffected(); n == 0 {
+		a, err := s.GetActivity(ctx, id)
+		if err != nil {
+			return err
+		}
 		return fmt.Errorf("activity %d cannot be unapproved: current status is %q (must be approved)", id, a.Status)
 	}
-	_, err = s.db.ExecContext(ctx,
-		`UPDATE daily_activities SET status = 'pending' WHERE id = ?`, id,
-	)
-	return err
+	return nil
 }
 
 // UpdateActivity updates editable fields (hours, project, category, registro_diario)

@@ -106,7 +106,10 @@ func OpenInMemory() (*Store, error) {
 	}
 	db.SetMaxOpenConns(1)
 	s := &Store{db: db}
-	return s, s.migrate()
+	if err := s.migrate(); err != nil {
+		return nil, err
+	}
+	return s, s.seedCatalogs()
 }
 
 func (s *Store) Close() error { return s.db.Close() }

@@ -122,7 +122,10 @@ func TestPostTimeEntry_PayloadShape(t *testing.T) {
 
 func TestPostTimeEntry_ISOWeekBoundary(t *testing.T) {
 	// 2025-12-29 is in ISO week 1 of year 2026.
-	got := isoWeekString("2025-12-29")
+	got, err := isoWeekString("2025-12-29")
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := "2026-W01"
 	if got != want {
 		t.Errorf("isoWeekString(2025-12-29) = %q, want %q", got, want)
@@ -232,7 +235,10 @@ func TestISOWeekString_KnownDates(t *testing.T) {
 		t.Run(tc.date, func(t *testing.T) {
 			parsed, _ := time.Parse("2006-01-02", tc.date)
 			y, w := parsed.ISOWeek()
-			got := isoWeekString(tc.date)
+			got, err := isoWeekString(tc.date)
+			if err != nil {
+				t.Fatal(err)
+			}
 			want := tc.want
 			_ = y
 			_ = w
