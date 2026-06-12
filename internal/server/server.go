@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/Gentleman-Programming/mintag/internal/azure"
 	"github.com/Gentleman-Programming/mintag/internal/parser"
 	"github.com/Gentleman-Programming/mintag/internal/store"
 	"github.com/Gentleman-Programming/mintag/internal/web"
@@ -17,10 +18,11 @@ import (
 
 type Server struct {
 	st *store.Store
+	az *azure.Client
 }
 
 func New(st *store.Store) *Server {
-	return &Server{st: st}
+	return &Server{st: st, az: azure.NewClientFromEnv()}
 }
 
 func (srv *Server) Handler() http.Handler {
@@ -65,6 +67,7 @@ func (srv *Server) Handler() http.Handler {
 		})
 
 		srv.registerGraphRoutes(r)
+		registerActivityRoutes(r, srv)
 	})
 
 	// SPA — serve embedded UI for everything else

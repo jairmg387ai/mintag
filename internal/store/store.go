@@ -87,7 +87,13 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	s := &Store{db: db}
-	return s, s.migrate()
+	if err := s.migrate(); err != nil {
+		return nil, err
+	}
+	if err := s.seedCatalogs(); err != nil {
+		return nil, err
+	}
+	return s, nil
 }
 
 // OpenInMemory opens a fresh in-memory SQLite store for testing.
@@ -204,7 +210,43 @@ func (s *Store) migrate() error {
 	if err := s.addColumnIfMissing("meetings", "content_type", "content_type TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
-	return s.migrateGraph()
+	if err := s.migrateGraph(); err != nil {
+		return err
+	}
+	return s.migrateActivities()
+}
+
+func (s *Store) migrateActivities() error {
+	_, err := s.db.Exec(`
+	CREATE TABLE IF NOT EXISTS daily_activities (
+		id              INTEGER PRIMARY KEY AUTOINCREMENT,
+		date            TEXT NOT NULL,
+		hours           REAL NOT NULL,
+		project         TEXT NOT NULL,
+		category        TEXT NOT NULL,
+		registro_diario TEXT NOT NULL,
+		source          TEXT NOT NULL DEFAULT 'manual',
+		status          TEXT NOT NULL DEFAULT 'pending',
+		created_at      TEXT NOT NULL,
+		uploaded_at     TEXT
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_activities_date     ON daily_activities(date);
+	CREATE INDEX IF NOT EXISTS idx_activities_project  ON daily_activities(project);
+	CREATE INDEX IF NOT EXISTS idx_activities_category ON daily_activities(category);
+	CREATE INDEX IF NOT EXISTS idx_activities_status   ON daily_activities(status);
+
+	CREATE TABLE IF NOT EXISTS timelog_projects (
+		id   INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL UNIQUE
+	);
+
+	CREATE TABLE IF NOT EXISTS timelog_categories (
+		id   INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL UNIQUE
+	);
+	`)
+	return err
 }
 
 func (s *Store) addColumnIfMissing(table, col, ddl string) error {
