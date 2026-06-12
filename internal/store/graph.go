@@ -293,6 +293,38 @@ func (s *Store) GetGraphNodeByKey(namespace, kind, key string) (*GraphNode, erro
 	return found, nil
 }
 
+// ListGraphNodesByKind returns all nodes of a kind ordered by label, for
+// tree-style explorers that need stable roots (e.g. portals). Namespace is
+// optional.
+func (s *Store) ListGraphNodesByKind(namespace, kind string, limit int) ([]*GraphNode, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	q := `SELECT ` + graphNodeCols + ` FROM graph_nodes WHERE kind = ?`
+	args := []any{kind}
+	if namespace != "" {
+		q += ` AND namespace = ?`
+		args = append(args, namespace)
+	}
+	q += ` ORDER BY label, key LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	nodes := []*GraphNode{}
+	for rows.Next() {
+		n, err := scanGraphNode(rows)
+		if err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, n)
+	}
+	return nodes, rows.Err()
+}
+
 // sanitizeFTSQuery wraps each whitespace-separated term in double quotes so
 // user input containing FTS5 operators (-, /, :) cannot break the MATCH
 // expression. Terms are AND-ed, matching FTS5's default.

@@ -41,6 +41,7 @@ const STATUSES: { value: Status; label: string }[] = [
   { value: 'todo', label: 'Todo' },
   { value: 'in_progress', label: 'In Progress' },
   { value: 'blocked', label: 'Blocked' },
+  { value: 'in_testing', label: 'In Testing' },
   { value: 'done', label: 'Done' },
   { value: 'cancelled', label: 'Cancelled' },
 ]

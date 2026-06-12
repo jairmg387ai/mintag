@@ -6,6 +6,7 @@ const FILTERS = [
   { value: 'todo', label: 'To Do' },
   { value: 'in_progress', label: 'In Progress' },
   { value: 'blocked', label: 'Blocked' },
+  { value: 'in_testing', label: 'In Testing' },
   { value: 'done', label: 'Done' },
 ]
 
