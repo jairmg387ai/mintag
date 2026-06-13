@@ -178,3 +178,39 @@ export function uploadActivities(date: string): Promise<UploadResult> {
 export function getActivityCatalog(): Promise<ActivityCatalog> {
   return request<ActivityCatalog>('/api/activities/catalog')
 }
+
+export async function deleteActivity(id: number): Promise<void> {
+  const res = await fetch(`/api/activities/${id}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!res.ok) throw new Error(await res.text())
+}
+
+export function addCatalogProject(name: string): Promise<{ name: string }> {
+  return request<{ name: string }>('/api/activities/catalog/projects', { method: 'POST', body: JSON.stringify({ name }) })
+}
+
+export async function removeCatalogProject(name: string): Promise<void> {
+  const res = await fetch(`/api/activities/catalog/projects/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!res.ok) throw new Error(await res.text())
+}
+
+export function addCatalogCategory(name: string): Promise<{ name: string }> {
+  return request<{ name: string }>('/api/activities/catalog/categories', { method: 'POST', body: JSON.stringify({ name }) })
+}
+
+export async function removeCatalogCategory(name: string): Promise<void> {
+  const res = await fetch(`/api/activities/catalog/categories/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!res.ok) throw new Error(await res.text())
+}
+
+export function updateMeetingSummary(id: number, summary: string): Promise<Meeting> {
+  return request<Meeting>(`/api/meetings/${id}/summary`, { method: 'PUT', body: JSON.stringify({ summary }) })
+}

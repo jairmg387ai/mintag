@@ -193,6 +193,19 @@ func (s *Store) UpdateActivity(ctx context.Context, id int64, hours float64, pro
 	return s.GetActivity(ctx, id)
 }
 
+// DeleteActivity removes a pending or approved activity. Uploaded activities cannot be deleted.
+func (s *Store) DeleteActivity(ctx context.Context, id int64) error {
+	a, err := s.GetActivity(ctx, id)
+	if err != nil {
+		return err
+	}
+	if a.Status == "uploaded" {
+		return fmt.Errorf("activity %d cannot be deleted: already uploaded", id)
+	}
+	_, err = s.db.ExecContext(ctx, `DELETE FROM daily_activities WHERE id = ?`, id)
+	return err
+}
+
 // MarkUploaded transitions a single activity from approved → uploaded and sets
 // uploaded_at to the current UTC time. Only the upload orchestration flow may
 // call this method.

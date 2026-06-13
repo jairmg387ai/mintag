@@ -10,7 +10,8 @@ import { Button } from '../ui/Button'
 import { StatusBadge } from '../shared/StatusBadge'
 import { PriorityTag } from '../shared/PriorityTag'
 import { Avatar } from '../shared/Avatar'
-import { getMeeting } from '../../api/client'
+import { Pencil } from 'lucide-react'
+import { getMeeting, updateMeetingSummary } from '../../api/client'
 import type { Meeting, Task, Status, Priority } from '../../types'
 import { useToast } from '../../hooks/useToast'
 
@@ -23,15 +24,27 @@ export function MeetingDetailModal() {
 
   const [meeting, setMeeting] = useState<Meeting | null>(null)
   const [activeTab, setActiveTab] = useState<ActiveTab>('summary')
+  const [editSummary, setEditSummary] = useState(false)
+  const [summaryDraft, setSummaryDraft] = useState('')
 
   useEffect(() => {
     if (!activeMeetingId) return
     setActiveTab('summary')
-    getMeeting(activeMeetingId).then(setMeeting).catch(e => {
+    setEditSummary(false)
+    getMeeting(activeMeetingId).then(m => {
+      setMeeting(m)
+      setSummaryDraft(m.summary ?? '')
+    }).catch(e => {
       pushToast(e instanceof Error ? e.message : 'Error', true)
       closeModal()
     })
   }, [activeMeetingId])
+
+  useEffect(() => {
+    if (meeting) {
+      setSummaryDraft(meeting.summary ?? '')
+    }
+  }, [meeting])
 
   if (!meeting) return null
 
@@ -117,8 +130,82 @@ export function MeetingDetailModal() {
               lineHeight: 1.6,
             }}
           >
-            {meeting.summary || (
-              <span style={{ color: 'var(--fg3)' }}>No summary available</span>
+            {editSummary ? (
+              <div>
+                <textarea
+                  value={summaryDraft}
+                  onChange={e => setSummaryDraft(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    border: '1px solid var(--border-strong)',
+                    borderRadius: 'var(--radius-md)',
+                    font: 'var(--text-body)',
+                    color: 'var(--fg1)',
+                    background: 'var(--bg-sunken)',
+                    outline: 'none',
+                    resize: 'vertical',
+                    minHeight: 120,
+                    fontFamily: 'inherit',
+                    boxSizing: 'border-box',
+                    marginBottom: 8,
+                  }}
+                />
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => { setEditSummary(false); setSummaryDraft(meeting.summary ?? '') }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={async () => {
+                      try {
+                        const updated = await updateMeetingSummary(meeting.id, summaryDraft)
+                        setMeeting(updated)
+                        setEditSummary(false)
+                      } catch (e: unknown) {
+                        pushToast(e instanceof Error ? e.message : 'Error saving summary', true)
+                      }
+                    }}
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ position: 'relative' }}>
+                <button
+                  onClick={() => setEditSummary(true)}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    right: 0,
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--fg3)',
+                    cursor: 'pointer',
+                    padding: 4,
+                    borderRadius: 'var(--radius-md)',
+                    display: 'flex',
+                    alignItems: 'center',
+                  }}
+                  title="Edit summary"
+                  aria-label="Edit summary"
+                >
+                  <Pencil size={14} strokeWidth={1.75} />
+                </button>
+                {meeting.summary ? (
+                  <div className="prose prose-invert max-w-none" style={{ paddingRight: 24 }}>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+                      {meeting.summary}
+                    </ReactMarkdown>
+                  </div>
+                ) : (
+                  <span style={{ color: 'var(--fg3)' }}>No summary available — click the pencil to add one</span>
+                )}
+              </div>
             )}
           </div>
 

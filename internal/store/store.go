@@ -388,6 +388,15 @@ func (s *Store) UpdateMeetingRichContent(id int64, content, contentType string) 
 	return s.GetMeeting(id)
 }
 
+// UpdateMeetingSummary replaces the summary field on a meeting and returns the updated record.
+func (s *Store) UpdateMeetingSummary(id int64, summary string) (*Meeting, error) {
+	_, err := s.db.Exec(`UPDATE meetings SET summary = ? WHERE id = ?`, summary, id)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetMeeting(id)
+}
+
 // --- Tasks ---
 
 // execer is the common interface shared by *sql.DB and *sql.Tx, allowing

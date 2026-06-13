@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Calendar } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { useAppState, useAppActions } from '../../store/AppContext'
 import { Modal, Field } from './Modal'
 import { Button } from '../ui/Button'
@@ -76,6 +78,7 @@ export function TaskDetailModal() {
   const [task, setTask] = useState<Task | null>(null)
   const [history, setHistory] = useState<TaskHistory[]>([])
   const [meetingCtx, setMeetingCtx] = useState<Meeting | null>(null)
+  const [descPreview, setDescPreview] = useState(false)
   const [form, setForm] = useState({
     status: '',
     priority: '',
@@ -262,11 +265,66 @@ export function TaskDetailModal() {
 
       {/* Description */}
       <Field label="Description">
-        <textarea
-          style={textareaStyle}
-          value={form.description}
-          onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-        />
+        <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+          <button
+            type="button"
+            onClick={() => setDescPreview(false)}
+            style={{
+              padding: '3px 10px',
+              borderRadius: 'var(--radius-md)',
+              font: 'var(--text-caption)',
+              fontWeight: descPreview ? 400 : 600,
+              border: '1px solid ' + (descPreview ? 'var(--border)' : 'var(--brand)'),
+              background: descPreview ? 'var(--bg-surface)' : 'color-mix(in srgb, var(--brand) 15%, var(--bg-surface))',
+              color: descPreview ? 'var(--fg2)' : 'var(--brand)',
+              cursor: 'pointer',
+            }}
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            onClick={() => setDescPreview(true)}
+            style={{
+              padding: '3px 10px',
+              borderRadius: 'var(--radius-md)',
+              font: 'var(--text-caption)',
+              fontWeight: descPreview ? 600 : 400,
+              border: '1px solid ' + (descPreview ? 'var(--brand)' : 'var(--border)'),
+              background: descPreview ? 'color-mix(in srgb, var(--brand) 15%, var(--bg-surface))' : 'var(--bg-surface)',
+              color: descPreview ? 'var(--brand)' : 'var(--fg2)',
+              cursor: 'pointer',
+            }}
+          >
+            Preview
+          </button>
+        </div>
+        {descPreview ? (
+          <div
+            className="prose prose-invert max-w-none"
+            style={{
+              padding: '8px 12px',
+              border: '1px solid var(--border-strong)',
+              borderRadius: 'var(--radius-md)',
+              background: 'var(--bg-sunken)',
+              minHeight: 80,
+              font: 'var(--text-body)',
+              color: 'var(--fg1)',
+              lineHeight: 1.6,
+            }}
+          >
+            {form.description
+              ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{form.description}</ReactMarkdown>
+              : <span style={{ color: 'var(--fg3)' }}>Nothing to preview</span>
+            }
+          </div>
+        ) : (
+          <textarea
+            style={textareaStyle}
+            value={form.description}
+            onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+          />
+        )}
       </Field>
 
       {/* Update note */}

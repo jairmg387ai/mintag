@@ -21,17 +21,27 @@ var reActivityDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 //
 // Routes:
 //
-//	GET  /api/activities             ?date=&status=
-//	POST /api/activities
-//	GET  /api/activities/catalog
-//	POST /api/activities/upload      ?date=
-//	PATCH /api/activities/{id}
+//	GET    /api/activities                           ?date=&status=
+//	POST   /api/activities
+//	GET    /api/activities/catalog
+//	POST   /api/activities/catalog/projects
+//	DELETE /api/activities/catalog/projects/{name}
+//	POST   /api/activities/catalog/categories
+//	DELETE /api/activities/catalog/categories/{name}
+//	POST   /api/activities/upload                    ?date=
+//	PATCH  /api/activities/{id}
+//	DELETE /api/activities/{id}
 func registerActivityRoutes(r chi.Router, srv *Server) {
 	r.Get("/activities", srv.handleListActivities)
 	r.Post("/activities", srv.handleCreateActivity)
 	r.Get("/activities/catalog", srv.handleActivityCatalog)
+	r.Post("/activities/catalog/projects", srv.handleAddCatalogProject)
+	r.Delete("/activities/catalog/projects/{name}", srv.handleRemoveCatalogProject)
+	r.Post("/activities/catalog/categories", srv.handleAddCatalogCategory)
+	r.Delete("/activities/catalog/categories/{name}", srv.handleRemoveCatalogCategory)
 	r.Post("/activities/upload", srv.handleUploadActivities)
 	r.Patch("/activities/{id}", srv.handlePatchActivity)
+	r.Delete("/activities/{id}", srv.handleDeleteActivity)
 }
 
 // GET /api/activities?date=YYYY-MM-DD&status=
@@ -189,4 +199,74 @@ func (srv *Server) handleActivityCatalog(w http.ResponseWriter, r *http.Request)
 		"projects":   projects,
 		"categories": categories,
 	}, nil)
+}
+
+// DELETE /api/activities/{id}
+func (srv *Server) handleDeleteActivity(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := srv.st.DeleteActivity(r.Context(), id); err != nil {
+		status := http.StatusUnprocessableEntity
+		if isNotFound(err) {
+			status = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// POST /api/activities/catalog/projects
+func (srv *Server) handleAddCatalogProject(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := srv.st.AddTimelogProject(body.Name); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	writeJSON(w, map[string]string{"name": body.Name}, nil)
+}
+
+// DELETE /api/activities/catalog/projects/{name}
+func (srv *Server) handleRemoveCatalogProject(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	if err := srv.st.RemoveTimelogProject(name); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// POST /api/activities/catalog/categories
+func (srv *Server) handleAddCatalogCategory(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := srv.st.AddTimelogCategory(body.Name); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	writeJSON(w, map[string]string{"name": body.Name}, nil)
+}
+
+// DELETE /api/activities/catalog/categories/{name}
+func (srv *Server) handleRemoveCatalogCategory(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	if err := srv.st.RemoveTimelogCategory(name); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

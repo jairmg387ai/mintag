@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"embed"
+	"fmt"
 	"strings"
 )
 
@@ -65,4 +66,36 @@ func (s *Store) listCatalog(table string) ([]string, error) {
 		out = append(out, name)
 	}
 	return out, rows.Err()
+}
+
+// AddTimelogProject adds a new project to the catalog. Duplicate names are silently ignored.
+func (s *Store) AddTimelogProject(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("project name cannot be empty")
+	}
+	_, err := s.db.Exec(`INSERT OR IGNORE INTO timelog_projects(name) VALUES (?)`, name)
+	return err
+}
+
+// RemoveTimelogProject deletes a project from the catalog by name.
+func (s *Store) RemoveTimelogProject(name string) error {
+	_, err := s.db.Exec(`DELETE FROM timelog_projects WHERE name = ?`, name)
+	return err
+}
+
+// AddTimelogCategory adds a new category to the catalog. Duplicate names are silently ignored.
+func (s *Store) AddTimelogCategory(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("category name cannot be empty")
+	}
+	_, err := s.db.Exec(`INSERT OR IGNORE INTO timelog_categories(name) VALUES (?)`, name)
+	return err
+}
+
+// RemoveTimelogCategory deletes a category from the catalog by name.
+func (s *Store) RemoveTimelogCategory(name string) error {
+	_, err := s.db.Exec(`DELETE FROM timelog_categories WHERE name = ?`, name)
+	return err
 }

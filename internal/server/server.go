@@ -56,6 +56,7 @@ func (srv *Server) Handler() http.Handler {
 			r.Post("/import", srv.handleImportMeeting)
 			r.Get("/{id}", srv.handleGetMeeting)
 			r.Put("/{id}/rich-content", srv.handleSetMeetingRichContent)
+			r.Put("/{id}/summary", srv.handleSetMeetingSummary)
 		})
 
 		r.Route("/tasks", func(r chi.Router) {
@@ -179,6 +180,27 @@ func (srv *Server) handleSetMeetingRichContent(w http.ResponseWriter, r *http.Re
 		return
 	}
 	m, err := srv.st.UpdateMeetingRichContent(id, body.Content, body.ContentType)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	writeJSON(w, m, nil)
+}
+
+func (srv *Server) handleSetMeetingSummary(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	var body struct {
+		Summary string `json:"summary"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	m, err := srv.st.UpdateMeetingSummary(id, body.Summary)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return

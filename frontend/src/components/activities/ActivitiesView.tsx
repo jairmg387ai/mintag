@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, Fragment } from 'react'
-import { ChevronLeft, ChevronRight, Plus, Upload, CheckCircle, RotateCcw, RefreshCw, Pencil } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Upload, CheckCircle, RotateCcw, RefreshCw, Pencil, Trash2, Settings } from 'lucide-react'
 import type { DailyActivity, ActivityCatalog, UploadResult } from '../../types'
 import {
   listActivities,
@@ -7,10 +7,12 @@ import {
   unapproveActivity,
   uploadActivities,
   getActivityCatalog,
+  deleteActivity,
 } from '../../api/client'
 import { ActivityStatusBadge, ActivitySourceBadge } from './ActivityStatusBadge'
 import { NewActivityModal } from './NewActivityModal'
 import { EditActivityModal } from './EditActivityModal'
+import { CatalogManagementModal } from './CatalogManagementModal'
 
 function toYMD(d: Date): string {
   const y = d.getFullYear()
@@ -38,6 +40,7 @@ export function ActivitiesView() {
   const [showNewModal, setShowNewModal] = useState(false)
   const [editingActivity, setEditingActivity] = useState<DailyActivity | null>(null)
   const [rowErrors, setRowErrors] = useState<Record<number, string>>({})
+  const [showCatalogModal, setShowCatalogModal] = useState(false)
 
   const fetchActivities = useCallback(async (d: string) => {
     setLoading(true)
@@ -95,6 +98,32 @@ export function ActivitiesView() {
     }
   }
 
+  async function handleDelete(id: number) {
+    setRowErrors(prev => { const n = { ...prev }; delete n[id]; return n })
+    try {
+      await deleteActivity(id)
+      await fetchActivities(date)
+    } catch (e: unknown) {
+      setRowErrors(prev => ({
+        ...prev,
+        [id]: e instanceof Error ? e.message : 'Delete failed',
+      }))
+    }
+  }
+
+  async function handleApproveAll() {
+    const ids = pending.map(a => a.id)
+    const results = await Promise.allSettled(ids.map(id => approveActivity(id)))
+    const errs: Record<number, string> = {}
+    results.forEach((r, i) => {
+      if (r.status === 'rejected') {
+        errs[ids[i]] = r.reason instanceof Error ? r.reason.message : 'Approval failed'
+      }
+    })
+    setRowErrors(prev => ({ ...prev, ...errs }))
+    await fetchActivities(date)
+  }
+
   async function handleUpload() {
     setUploading(true)
     setUploadResult(null)
@@ -147,7 +176,25 @@ export function ActivitiesView() {
           <ChevronRight size={16} strokeWidth={1.75} />
         </button>
 
-        <div style={{ marginLeft: 'auto' }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+          {pending.length > 1 && (
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={handleApproveAll}
+              title="Approve all pending activities"
+            >
+              <CheckCircle size={15} strokeWidth={1.75} />
+              Approve All
+            </button>
+          )}
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => setShowCatalogModal(true)}
+            title="Manage catalog"
+            aria-label="Manage catalog"
+          >
+            <Settings size={15} strokeWidth={1.75} />
+          </button>
           <button
             className="btn btn-primary btn-sm"
             onClick={() => setShowNewModal(true)}
@@ -248,17 +295,35 @@ export function ActivitiesView() {
                             >
                               <CheckCircle size={15} strokeWidth={1.75} />
                             </button>
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => handleDelete(a.id)}
+                              title="Delete"
+                              aria-label="Delete activity"
+                            >
+                              <Trash2 size={15} strokeWidth={1.75} />
+                            </button>
                           </>
                         )}
                         {a.status === 'approved' && (
-                          <button
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => handleUnapprove(a.id)}
-                            title="Unapprove"
-                            aria-label="Unapprove activity"
-                          >
-                            <RotateCcw size={15} strokeWidth={1.75} />
-                          </button>
+                          <>
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => handleUnapprove(a.id)}
+                              title="Unapprove"
+                              aria-label="Unapprove activity"
+                            >
+                              <RotateCcw size={15} strokeWidth={1.75} />
+                            </button>
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => handleDelete(a.id)}
+                              title="Delete"
+                              aria-label="Delete activity"
+                            >
+                              <Trash2 size={15} strokeWidth={1.75} />
+                            </button>
+                          </>
                         )}
                       </div>
                     </td>
@@ -361,6 +426,15 @@ export function ActivitiesView() {
         }}
         catalog={catalog}
         defaultDate={date}
+      />
+
+      <CatalogManagementModal
+        open={showCatalogModal}
+        onClose={() => setShowCatalogModal(false)}
+        catalog={catalog}
+        onCatalogChanged={() => {
+          getActivityCatalog().then(setCatalog).catch(() => setCatalog(null))
+        }}
       />
 
     </div>

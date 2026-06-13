@@ -1,4 +1,6 @@
 import { Calendar, History } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { TaskHistory } from '../../types'
 import { StatusBadge } from './StatusBadge'
 import type { Status } from '../../types'
@@ -71,7 +73,9 @@ export function Timeline({ history }: { history: TaskHistory[] }) {
                 </div>
               )}
               {h.note && (
-                <div style={{ fontSize: '0.83em', color: 'var(--fg2)' }}>{h.note}</div>
+                <div style={{ fontSize: '0.83em', color: 'var(--fg2)' }}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{h.note}</ReactMarkdown>
+                </div>
               )}
             </div>
           </div>

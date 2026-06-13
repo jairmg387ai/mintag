@@ -161,4 +161,83 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store, az *azure.Cl
 		result, err := st.UploadActivities(ctx, date, az)
 		return jsonResult(result, err)
 	})
+
+	// --- activity_delete ---
+	s.AddTool(mcp.NewTool("activity_delete",
+		mcp.WithDescription("Delete a pending or approved activity by ID. Uploaded activities cannot be deleted."),
+		mcp.WithString("id", mcp.Required(), mcp.Description("Activity ID to delete")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		idStr, err := req.RequireString("id")
+		if err != nil {
+			return errResult(err)
+		}
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			return errResult(fmt.Errorf("id must be an integer, got %q", idStr))
+		}
+		if err := st.DeleteActivity(ctx, id); err != nil {
+			return errResult(err)
+		}
+		return jsonResult(map[string]any{"deleted": id}, nil)
+	})
+
+	// --- catalog_project_add ---
+	s.AddTool(mcp.NewTool("catalog_project_add",
+		mcp.WithDescription("Add a new project to the TimeLog catalog."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Project name to add")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		name, err := req.RequireString("name")
+		if err != nil {
+			return errResult(err)
+		}
+		if err := st.AddTimelogProject(name); err != nil {
+			return errResult(err)
+		}
+		return jsonResult(map[string]string{"added": name}, nil)
+	})
+
+	// --- catalog_project_remove ---
+	s.AddTool(mcp.NewTool("catalog_project_remove",
+		mcp.WithDescription("Remove a project from the TimeLog catalog."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Project name to remove")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		name, err := req.RequireString("name")
+		if err != nil {
+			return errResult(err)
+		}
+		if err := st.RemoveTimelogProject(name); err != nil {
+			return errResult(err)
+		}
+		return jsonResult(map[string]string{"removed": name}, nil)
+	})
+
+	// --- catalog_category_add ---
+	s.AddTool(mcp.NewTool("catalog_category_add",
+		mcp.WithDescription("Add a new category to the TimeLog catalog."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Category name to add")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		name, err := req.RequireString("name")
+		if err != nil {
+			return errResult(err)
+		}
+		if err := st.AddTimelogCategory(name); err != nil {
+			return errResult(err)
+		}
+		return jsonResult(map[string]string{"added": name}, nil)
+	})
+
+	// --- catalog_category_remove ---
+	s.AddTool(mcp.NewTool("catalog_category_remove",
+		mcp.WithDescription("Remove a category from the TimeLog catalog."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Category name to remove")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		name, err := req.RequireString("name")
+		if err != nil {
+			return errResult(err)
+		}
+		if err := st.RemoveTimelogCategory(name); err != nil {
+			return errResult(err)
+		}
+		return jsonResult(map[string]string{"removed": name}, nil)
+	})
 }
