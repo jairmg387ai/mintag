@@ -75,6 +75,7 @@ func Serve(st *store.Store) error {
 func registerTools(s *mcpserver.MCPServer, st *store.Store, az *azure.Client) {
 	registerGraphTools(s, st)
 	registerActivityTools(s, st, az)
+	registerDeploymentWindowTools(s, st)
 
 	// --- project_create ---
 	s.AddTool(mcp.NewTool("project_create",

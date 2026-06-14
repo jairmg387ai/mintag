@@ -15,6 +15,11 @@ import type {
   UploadResult,
   ActivityCatalog,
   ActivityStatus,
+  DeploymentWindow,
+  DeploymentWindowDetail,
+  DWRepo,
+  DWArtifact,
+  DWTestScenario,
 } from '../types'
 
 async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
@@ -213,4 +218,104 @@ export async function removeCatalogCategory(name: string): Promise<void> {
 
 export function updateMeetingSummary(id: number, summary: string): Promise<Meeting> {
   return request<Meeting>(`/api/meetings/${id}/summary`, { method: 'PUT', body: JSON.stringify({ summary }) })
+}
+
+// --- Deployment Windows ---
+
+export function listDeploymentWindows(state?: string): Promise<DeploymentWindow[]> {
+  const qs = state ? `?state=${encodeURIComponent(state)}` : ''
+  return request<DeploymentWindow[]>(`/api/deployment-windows${qs}`)
+}
+
+export function getDeploymentWindow(id: number): Promise<DeploymentWindowDetail> {
+  return request<DeploymentWindowDetail>(`/api/deployment-windows/${id}`)
+}
+
+export function createDeploymentWindow(data: {
+  title: string
+  description?: string
+  created_by?: string
+  planned_at?: string
+}): Promise<DeploymentWindow> {
+  return request<DeploymentWindow>('/api/deployment-windows', { method: 'POST', body: JSON.stringify(data) })
+}
+
+export function updateDWState(id: number, state: string, rejection_note?: string): Promise<DeploymentWindow> {
+  return request<DeploymentWindow>(`/api/deployment-windows/${id}/state`, {
+    method: 'PATCH',
+    body: JSON.stringify({ state, rejection_note: rejection_note ?? '' }),
+  })
+}
+
+export async function exportDWMarkdown(id: number): Promise<string> {
+  const res = await fetch(`/api/deployment-windows/${id}/export`, {
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.text()
+}
+
+export function addDWTask(dwId: number, taskId: number, note?: string): Promise<void> {
+  return request<void>(`/api/deployment-windows/${dwId}/tasks`, {
+    method: 'POST',
+    body: JSON.stringify({ task_id: taskId, note: note ?? '' }),
+  })
+}
+
+export async function removeDWTask(dwId: number, taskId: number): Promise<void> {
+  const res = await fetch(`/api/deployment-windows/${dwId}/tasks/${taskId}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!res.ok) throw new Error(await res.text())
+}
+
+export function addDWRepo(dwId: number, data: { graph_node_key: string; version: string; notes?: string }): Promise<DWRepo> {
+  return request<DWRepo>(`/api/deployment-windows/${dwId}/repos`, { method: 'POST', body: JSON.stringify(data) })
+}
+
+export function updateDWRepo(dwId: number, repoId: number, data: { version: string; notes?: string }): Promise<DWRepo> {
+  return request<DWRepo>(`/api/deployment-windows/${dwId}/repos/${repoId}`, { method: 'PATCH', body: JSON.stringify(data) })
+}
+
+export async function removeDWRepo(dwId: number, repoId: number): Promise<void> {
+  const res = await fetch(`/api/deployment-windows/${dwId}/repos/${repoId}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!res.ok) throw new Error(await res.text())
+}
+
+export function addDWArtifact(dwId: number, data: { kind: string; name: string; path?: string; content?: string }): Promise<DWArtifact> {
+  return request<DWArtifact>(`/api/deployment-windows/${dwId}/artifacts`, { method: 'POST', body: JSON.stringify(data) })
+}
+
+export async function removeDWArtifact(dwId: number, artifactId: number): Promise<void> {
+  const res = await fetch(`/api/deployment-windows/${dwId}/artifacts/${artifactId}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!res.ok) throw new Error(await res.text())
+}
+
+export function addDWTestScenario(
+  dwId: number,
+  data: { title: string; description?: string; expected?: string; sort_order?: number },
+): Promise<DWTestScenario> {
+  return request<DWTestScenario>(`/api/deployment-windows/${dwId}/test-scenarios`, { method: 'POST', body: JSON.stringify(data) })
+}
+
+export async function removeDWTestScenario(dwId: number, scenarioId: number): Promise<void> {
+  const res = await fetch(`/api/deployment-windows/${dwId}/test-scenarios/${scenarioId}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!res.ok) throw new Error(await res.text())
+}
+
+export function signOffScenario(dwId: number, scenarioId: number, result: string, signed_off_by: string): Promise<DWTestScenario> {
+  return request<DWTestScenario>(`/api/deployment-windows/${dwId}/test-scenarios/${scenarioId}/sign-off`, {
+    method: 'PATCH',
+    body: JSON.stringify({ result, signed_off_by }),
+  })
 }

@@ -5,6 +5,7 @@ Personal knowledge graph, meeting task tracker, and daily work-log tool — all 
 - Import meeting transcriptions (`.vtt` / `.txt`), extract tasks, and track them across standups
 - Build an architectural knowledge graph linking repos, portals, use-cases, and teams
 - Log daily work activities throughout the day and upload them to Azure DevOps TimeLog at end-of-day
+- Plan and track deployment windows (maintenance windows) — group resolved bugs, version components, list artifacts, and generate the formal interventoría document
 
 All data lives in a local SQLite database. Runs as a web portal and as an MCP server so Claude can read and write everything directly inside a conversation.
 
@@ -30,6 +31,16 @@ All data lives in a local SQLite database. Runs as a web portal and as an MCP se
 1. **Log activities** throughout the day (via Claude auto-logging or the portal)
 2. **Review and approve** entries at end-of-day
 3. **Upload** approved entries to Azure DevOps TimeLog with one command
+
+### Deployment Windows (Ventanas de Mantenimiento)
+
+1. **Create a window** — give it a title, planned date, and author
+2. **Add resolved tasks** — link bugs by ID; their title and status are pulled automatically
+3. **Add components** — reference repos from the knowledge graph with a specific version; on submit, `deploys` edges are created in the graph for blast-radius tracking
+4. **Add artifacts** — list DB scripts, blobs, config files, or other items that go out with the deployment
+5. **Define test scenarios** — write what interventoría needs to validate, with expected results; sign off each scenario once tested
+6. **Advance the state** — `draft → submitted → approved → deployed` (submitted can return to draft with a rejection note)
+7. **Export** — generate the full formal Markdown document with one click or via the `dw_export_markdown` MCP tool
 
 ---
 
@@ -192,6 +203,28 @@ Restart Claude Code after editing the settings file.
 | `graph_upsert_node` | Create or update an architectural node |
 | `graph_upsert_edge` | Create or update a typed edge between two nodes |
 
+### Deployment Window tools
+
+| Tool | Description |
+|------|-------------|
+| `dw_create` | Create a new deployment window (draft state) |
+| `dw_list` | List all windows, optionally filtered by state |
+| `dw_get` | Get full detail: tasks, repos, artifacts, and test scenarios |
+| `dw_update_state` | Advance or revert state (`draft→submitted→approved→deployed`); rejection requires a note |
+| `dw_add_task` | Link a task/bug to the window |
+| `dw_remove_task` | Unlink a task |
+| `dw_add_repo` | Add a repo (by graph node key) with a pinned version |
+| `dw_update_repo` | Update the version or notes for a repo entry |
+| `dw_remove_repo` | Remove a repo from the window |
+| `dw_add_artifact` | Add a deployment artifact (`db_script`, `blob`, `config`, `other`) |
+| `dw_update_artifact` | Edit an artifact's kind, name, path, or content |
+| `dw_remove_artifact` | Remove an artifact |
+| `dw_add_test_scenario` | Add a test scenario for interventoría |
+| `dw_update_test_scenario` | Edit a scenario's title, description, or expected result |
+| `dw_remove_test_scenario` | Remove a scenario |
+| `dw_sign_off_scenario` | Mark a scenario as `pass` or `fail` with the reviewer's name |
+| `dw_export_markdown` | Generate the full formal Markdown document for interventoría |
+
 ### Activities (TimeLog) tools
 
 | Tool | Description |
@@ -231,6 +264,7 @@ Open `http://localhost:7430` after running `mintag.exe serve`.
 | Task detail | Full edit form + change history timeline |
 | Graph | Architectural knowledge graph explorer with hierarchy view |
 | Activities | Daily time-log: review, approve, and upload entries to Azure DevOps |
+| Ventanas | Deployment windows: create, manage, and export maintenance windows for interventoría |
 
 ---
 
@@ -269,6 +303,24 @@ POST  /api/activities
 GET   /api/activities/catalog
 PATCH /api/activities/:id          (action: approve | unapprove | edit fields)
 POST  /api/activities/upload?date=YYYY-MM-DD
+
+GET    /api/deployment-windows?state=<state>
+POST   /api/deployment-windows
+GET    /api/deployment-windows/:id
+PATCH  /api/deployment-windows/:id/state
+GET    /api/deployment-windows/:id/export          → Markdown attachment
+POST   /api/deployment-windows/:id/tasks
+DELETE /api/deployment-windows/:id/tasks/:task_id
+POST   /api/deployment-windows/:id/repos
+PATCH  /api/deployment-windows/:id/repos/:repo_id
+DELETE /api/deployment-windows/:id/repos/:repo_id
+POST   /api/deployment-windows/:id/artifacts
+PATCH  /api/deployment-windows/:id/artifacts/:artifact_id
+DELETE /api/deployment-windows/:id/artifacts/:artifact_id
+POST   /api/deployment-windows/:id/test-scenarios
+PATCH  /api/deployment-windows/:id/test-scenarios/:scenario_id
+DELETE /api/deployment-windows/:id/test-scenarios/:scenario_id
+PATCH  /api/deployment-windows/:id/test-scenarios/:scenario_id/sign-off
 ```
 
 ---
@@ -324,3 +376,22 @@ Direction convention: **source depends on target** (e.g. `menu_option consumes r
 | `source` | `manual` · `llm_auto` |
 
 Approved entries can be unapproved back to `pending` for editing. Uploaded entries are immutable.
+
+### Deployment window
+
+| Field | Values |
+|-------|--------|
+| `state` | `draft` → `submitted` → `approved` → `deployed` |
+
+Valid transitions: `draft→submitted`, `submitted→approved`, `submitted→draft` (rejection, requires `rejection_note`), `approved→deployed`. All other transitions are rejected.
+
+On `submitted`, `deploys` edges are written to the knowledge graph linking the window to each referenced repo — enabling blast-radius analysis via `graph_impact`.
+
+Child collections and their edit constraints:
+
+| Collection | Editable in | Sign-off in |
+|------------|-------------|-------------|
+| Tasks | `draft` only | — |
+| Repos | `draft` only | — |
+| Artifacts | `draft` only | — |
+| Test scenarios | `draft` only (add/remove) | `submitted`, `approved` |
