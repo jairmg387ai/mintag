@@ -129,7 +129,68 @@ export interface GraphNodeDetail {
   neighbor_count: number
 }
 
-export type ViewName = 'dashboard' | 'tasks' | 'meetings' | 'graph' | 'activities'
+export type ViewName = 'dashboard' | 'tasks' | 'meetings' | 'graph' | 'activities' | 'deployment-windows'
+
+// --- Deployment Window types ---
+
+export type DWState = 'draft' | 'submitted' | 'approved' | 'deployed'
+
+export interface DeploymentWindow {
+  id: number
+  title: string
+  description: string
+  state: DWState
+  created_by: string
+  planned_at: string
+  deployed_at?: string
+  rejection_note?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface DWTask {
+  dw_id: number
+  task_id: number
+  note: string
+  task_title?: string
+  task_status?: string
+}
+
+export interface DWRepo {
+  id: number
+  dw_id: number
+  graph_node_key: string
+  version: string
+  notes: string
+}
+
+export interface DWArtifact {
+  id: number
+  dw_id: number
+  kind: 'db_script' | 'blob' | 'config' | 'other'
+  name: string
+  path: string
+  content: string
+  created_at: string
+}
+
+export interface DWTestScenario {
+  id: number
+  dw_id: number
+  title: string
+  description: string
+  expected: string
+  result: 'pending' | 'pass' | 'fail'
+  signed_off_by: string
+  sort_order: number
+}
+
+export interface DeploymentWindowDetail extends DeploymentWindow {
+  tasks: DWTask[]
+  repos: DWRepo[]
+  artifacts: DWArtifact[]
+  test_scenarios: DWTestScenario[]
+}
 
 // --- Activity (Time Log) types ---
 
