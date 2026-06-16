@@ -134,8 +134,8 @@ export function ActivitiesView() {
       await fetchActivities(date)
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Upload failed'
-      if (msg.includes('503') || msg.includes('MINTAG_AZURE_PAT')) {
-        setUploadError('MINTAG_AZURE_PAT not configured')
+      if (msg.includes('503') || msg.includes('MINTAG_AZURE_TIMELOG_PAT')) {
+        setUploadError('MINTAG_AZURE_TIMELOG_PAT not configured')
       } else {
         setUploadError(msg)
       }

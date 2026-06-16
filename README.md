@@ -102,7 +102,7 @@ mintag.exe skills install vtt-task-extractor
 |----------|---------|-------------|
 | `MINTAG_DB` | `~/.mintag/mintag.db` | Path to SQLite database |
 | `MINTAG_PORT` | `7430` | HTTP port for `serve` |
-| `MINTAG_AZURE_PAT` | — | Azure DevOps Personal Access Token for TimeLog upload |
+| `MINTAG_AZURE_TIMELOG_PAT` | — | Azure DevOps Personal Access Token for TimeLog upload |
 
 ---
 

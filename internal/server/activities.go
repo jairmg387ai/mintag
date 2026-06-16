@@ -175,7 +175,7 @@ func (srv *Server) handleUploadActivities(w http.ResponseWriter, r *http.Request
 	if srv.az == nil || !srv.az.Enabled() {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(map[string]string{"error": "MINTAG_AZURE_PAT not set"})
+		json.NewEncoder(w).Encode(map[string]string{"error": "MINTAG_AZURE_TIMELOG_PAT not set"})
 		return
 	}
 

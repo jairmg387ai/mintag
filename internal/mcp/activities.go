@@ -146,11 +146,11 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store, az *azure.Cl
 
 	// --- activity_upload ---
 	s.AddTool(mcp.NewTool("activity_upload",
-		mcp.WithDescription("Upload approved activity entries for a given date to Azure DevOps TimeLog. Requires MINTAG_AZURE_PAT environment variable."),
+		mcp.WithDescription("Upload approved activity entries for a given date to Azure DevOps TimeLog. Requires MINTAG_AZURE_TIMELOG_PAT environment variable."),
 		mcp.WithString("date", mcp.Description("Date in YYYY-MM-DD format (default: today)")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if az == nil || !az.Enabled() {
-			return errResult(fmt.Errorf("MINTAG_AZURE_PAT not set — upload disabled"))
+			return errResult(fmt.Errorf("MINTAG_AZURE_TIMELOG_PAT not set — upload disabled"))
 		}
 
 		date := req.GetString("date", "")

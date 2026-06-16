@@ -13,7 +13,7 @@ import (
 )
 
 func TestNewClientFromEnv_Defaults(t *testing.T) {
-	t.Setenv("MINTAG_AZURE_PAT", "test-pat")
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "test-pat")
 	t.Setenv("MINTAG_AZURE_ORG", "")
 	t.Setenv("MINTAG_AZURE_USER", "")
 	t.Setenv("MINTAG_AZURE_USER_ID", "")

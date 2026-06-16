@@ -18,7 +18,7 @@ import (
 // Config holds the Azure TimeLog client configuration. All fields have
 // sensible defaults applied by NewClientFromEnv.
 type Config struct {
-	PAT        string // MINTAG_AZURE_PAT — empty means uploads are disabled
+	PAT        string // MINTAG_AZURE_TIMELOG_PAT — empty means uploads are disabled
 	Org        string // default: "RUNT2PSW"
 	WorkItemID int    // default: 156263
 	User       string // default: "Jair Reinel Muñoz Gomez"
@@ -44,11 +44,11 @@ func NewClient(cfg Config) *Client {
 	return &Client{cfg: cfg, http: &http.Client{Timeout: 30 * time.Second}}
 }
 
-// NewClientFromEnv reads MINTAG_AZURE_PAT (and optional overrides) from the
+// NewClientFromEnv reads MINTAG_AZURE_TIMELOG_PAT (and optional overrides) from the
 // environment and applies defaults for omitted values.
 func NewClientFromEnv() *Client {
 	cfg := Config{
-		PAT:        os.Getenv("MINTAG_AZURE_PAT"),
+		PAT:        os.Getenv("MINTAG_AZURE_TIMELOG_PAT"),
 		Org:        envOrDefault("MINTAG_AZURE_ORG", "RUNT2PSW"),
 		WorkItemID: 156263,
 		User:       envOrDefault("MINTAG_AZURE_USER", "Jair Reinel Muñoz Gomez"),
@@ -70,7 +70,7 @@ func (c *Client) SetHTTPClient(hc *http.Client) { c.http = hc }
 // response body in the error message. The PAT is never written to any log.
 func (c *Client) PostTimeEntry(ctx context.Context, e TimeEntry) error {
 	if !c.Enabled() {
-		return fmt.Errorf("MINTAG_AZURE_PAT is not configured")
+		return fmt.Errorf("MINTAG_AZURE_TIMELOG_PAT is not configured")
 	}
 
 	minutes := int(math.Round(e.Hours * 60))

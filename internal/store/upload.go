@@ -14,10 +14,10 @@ import (
 // immediately with no HTTP calls made.
 func (s *Store) UploadActivities(ctx context.Context, date string, az *azure.Client) (*UploadResult, error) {
 	if az == nil {
-		return nil, fmt.Errorf("MINTAG_AZURE_PAT is not configured")
+		return nil, fmt.Errorf("MINTAG_AZURE_TIMELOG_PAT is not configured")
 	}
 	if !az.Enabled() {
-		return nil, fmt.Errorf("MINTAG_AZURE_PAT is not configured")
+		return nil, fmt.Errorf("MINTAG_AZURE_TIMELOG_PAT is not configured")
 	}
 
 	activities, err := s.ListActivities(ctx, date, "approved")
