@@ -8,6 +8,9 @@ mintag_verify.exe
 .atl/
 .codegraph/
 
+# Design assets (not application source)
+Mintag-Design-System/
+
 # Local Azure request captures/secrets
 Peticione_creacion_reporte_azure.txt
 
