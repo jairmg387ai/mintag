@@ -39,6 +39,7 @@ func main() {
 
 func runServe(dbPath string) {
 	port := envOr("MINTAG_PORT", "7430")
+	host := envOr("MINTAG_HOST", "127.0.0.1")
 	st, err := store.Open(dbPath)
 	if err != nil {
 		log.Fatalf("cannot open db: %v", err)
@@ -46,8 +47,12 @@ func runServe(dbPath string) {
 	defer st.Close()
 
 	srv := server.New(st)
-	addr := ":" + port
-	fmt.Printf("mintag listening on http://localhost%s  (db: %s)\n", addr, dbPath)
+	addr := host + ":" + port
+	displayHost := host
+	if displayHost == "127.0.0.1" || displayHost == "::1" {
+		displayHost = "localhost"
+	}
+	fmt.Printf("mintag listening on http://%s:%s  (db: %s)\n", displayHost, port, dbPath)
 	if err := http.ListenAndServe(addr, srv.Handler()); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
@@ -170,6 +175,7 @@ Commands:
 Environment:
   MINTAG_DB     Path to SQLite database (default: ~/.mintag/mintag.db)
   MINTAG_PORT   HTTP port for serve command (default: 7430)
+  MINTAG_HOST   HTTP bind host for serve command (default: 127.0.0.1)
 `)
 	os.Exit(1)
 }
