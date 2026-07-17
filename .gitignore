@@ -6,6 +6,10 @@ mintag_verify.exe
 
 # SDD / AI tooling
 .atl/
+.codegraph/
+
+# Local Azure request captures/secrets
+Peticione_creacion_reporte_azure.txt
 
 # Database
 *.db
