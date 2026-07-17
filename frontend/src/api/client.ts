@@ -14,6 +14,9 @@ import type {
   DailyActivity,
   UploadResult,
   ActivityCatalog,
+  AzureTimeLogConfigStatus,
+  AzureDeviceCodeStartResponse,
+  AzureDeviceCodeCompleteResponse,
   ActivityStatus,
   DeploymentWindow,
   DeploymentWindowDetail,
@@ -178,6 +181,29 @@ export function unapproveActivity(id: number): Promise<DailyActivity> {
 
 export function uploadActivities(date: string): Promise<UploadResult> {
   return request<UploadResult>(`/api/activities/upload?date=${encodeURIComponent(date)}`, { method: 'POST' })
+}
+
+export function getAzureTimeLogConfig(): Promise<AzureTimeLogConfigStatus> {
+  return request<AzureTimeLogConfigStatus>('/api/activities/azure-config')
+}
+
+export function saveAzureTimeLogConfig(body: { token: string; auth_mode: 'bearer' | 'basic' }): Promise<AzureTimeLogConfigStatus> {
+  return request<AzureTimeLogConfigStatus>('/api/activities/azure-config', { method: 'PUT', body: JSON.stringify(body) })
+}
+
+export function clearAzureTimeLogConfig(): Promise<AzureTimeLogConfigStatus> {
+  return request<AzureTimeLogConfigStatus>('/api/activities/azure-config', { method: 'DELETE' })
+}
+
+export function startAzureDeviceAuth(): Promise<AzureDeviceCodeStartResponse> {
+  return request<AzureDeviceCodeStartResponse>('/api/activities/azure-auth/device/start', { method: 'POST', body: JSON.stringify({}) })
+}
+
+export function completeAzureDeviceAuth(deviceCode: string): Promise<AzureDeviceCodeCompleteResponse> {
+  return request<AzureDeviceCodeCompleteResponse>('/api/activities/azure-auth/device/complete', {
+    method: 'POST',
+    body: JSON.stringify({ device_code: deviceCode }),
+  })
 }
 
 export function getActivityCatalog(): Promise<ActivityCatalog> {

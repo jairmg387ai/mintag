@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -13,23 +14,25 @@ var reDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
 // DailyActivity represents a single work-log entry recorded by the user.
 type DailyActivity struct {
-	ID             int64   `json:"id"`
-	Date           string  `json:"date"`
-	Hours          float64 `json:"hours"`
-	Project        string  `json:"project"`
-	Category       string  `json:"category"`
-	RegistroDiario string  `json:"registro_diario"`
-	Source         string  `json:"source"`
-	Status         string  `json:"status"`
-	CreatedAt      string  `json:"created_at"`
-	UploadedAt     *string `json:"uploaded_at,omitempty"`
+	ID              int64   `json:"id"`
+	Date            string  `json:"date"`
+	Hours           float64 `json:"hours"`
+	Project         string  `json:"project"`
+	Category        string  `json:"category"`
+	RegistroDiario  string  `json:"registro_diario"`
+	Source          string  `json:"source"`
+	Status          string  `json:"status"`
+	CreatedAt       string  `json:"created_at"`
+	UploadedAt      *string `json:"uploaded_at,omitempty"`
+	AzureDocumentID *string `json:"azure_document_id,omitempty"`
 }
 
 // UploadResult summarises the outcome of an UploadActivities call.
 type UploadResult struct {
-	UploadedCount int      `json:"uploaded_count"`
-	FailedIDs     []int64  `json:"failed_ids"`
-	Errors        []string `json:"errors"`
+	UploadedCount    int              `json:"uploaded_count"`
+	FailedIDs        []int64          `json:"failed_ids"`
+	Errors           []string         `json:"errors"`
+	AzureDocumentIDs map[int64]string `json:"azure_document_ids,omitempty"`
 }
 
 // validateActivity checks inputs before any DB write.
@@ -80,10 +83,10 @@ func (s *Store) CreateActivity(ctx context.Context, date string, hours float64, 
 func (s *Store) GetActivity(ctx context.Context, id int64) (*DailyActivity, error) {
 	a := &DailyActivity{}
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, date, hours, project, category, registro_diario, source, status, created_at, uploaded_at
+		`SELECT id, date, hours, project, category, registro_diario, source, status, created_at, uploaded_at, azure_document_id
 		 FROM daily_activities WHERE id = ?`, id,
 	).Scan(&a.ID, &a.Date, &a.Hours, &a.Project, &a.Category, &a.RegistroDiario,
-		&a.Source, &a.Status, &a.CreatedAt, &a.UploadedAt)
+		&a.Source, &a.Status, &a.CreatedAt, &a.UploadedAt, &a.AzureDocumentID)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("activity not found: %d", id)
 	}
@@ -92,7 +95,7 @@ func (s *Store) GetActivity(ctx context.Context, id int64) (*DailyActivity, erro
 
 // ListActivities returns activities matching the optional filters, ordered by created_at ASC.
 func (s *Store) ListActivities(ctx context.Context, date, status string) ([]*DailyActivity, error) {
-	query := `SELECT id, date, hours, project, category, registro_diario, source, status, created_at, uploaded_at
+	query := `SELECT id, date, hours, project, category, registro_diario, source, status, created_at, uploaded_at, azure_document_id
 	          FROM daily_activities WHERE 1=1`
 	args := []any{}
 	if date != "" {
@@ -114,7 +117,7 @@ func (s *Store) ListActivities(ctx context.Context, date, status string) ([]*Dai
 	for rows.Next() {
 		a := &DailyActivity{}
 		if err := rows.Scan(&a.ID, &a.Date, &a.Hours, &a.Project, &a.Category, &a.RegistroDiario,
-			&a.Source, &a.Status, &a.CreatedAt, &a.UploadedAt); err != nil {
+			&a.Source, &a.Status, &a.CreatedAt, &a.UploadedAt, &a.AzureDocumentID); err != nil {
 			return nil, err
 		}
 		out = append(out, a)
@@ -209,7 +212,8 @@ func (s *Store) DeleteActivity(ctx context.Context, id int64) error {
 // MarkUploaded transitions a single activity from approved → uploaded and sets
 // uploaded_at to the current UTC time. Only the upload orchestration flow may
 // call this method.
-func (s *Store) MarkUploaded(ctx context.Context, id int64) error {
+func (s *Store) MarkUploaded(ctx context.Context, id int64, azureDocumentID string) error {
+	azureDocumentID = strings.TrimSpace(azureDocumentID)
 	a, err := s.GetActivity(ctx, id)
 	if err != nil {
 		return err
@@ -217,9 +221,12 @@ func (s *Store) MarkUploaded(ctx context.Context, id int64) error {
 	if a.Status != "approved" {
 		return fmt.Errorf("activity %d cannot be marked uploaded: current status is %q (must be approved)", id, a.Status)
 	}
+	if azureDocumentID == "" {
+		return fmt.Errorf("activity %d cannot be marked uploaded: azure document id is required", id)
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err = s.db.ExecContext(ctx,
-		`UPDATE daily_activities SET status = 'uploaded', uploaded_at = ? WHERE id = ?`, now, id,
+		`UPDATE daily_activities SET status = 'uploaded', uploaded_at = ?, azure_document_id = ? WHERE id = ?`, now, azureDocumentID, id,
 	)
 	return err
 }

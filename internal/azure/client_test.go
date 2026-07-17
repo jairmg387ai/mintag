@@ -14,14 +14,19 @@ import (
 
 func TestNewClientFromEnv_Defaults(t *testing.T) {
 	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "test-pat")
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TIMELOG_AUTH_MODE", "")
 	t.Setenv("MINTAG_AZURE_ORG", "")
 	t.Setenv("MINTAG_AZURE_USER", "")
 	t.Setenv("MINTAG_AZURE_USER_ID", "")
 	t.Setenv("MINTAG_AZURE_ENTRY_TYPE", "")
 
 	c := NewClientFromEnv()
-	if c.cfg.PAT != "test-pat" {
-		t.Errorf("expected PAT=test-pat, got %q", c.cfg.PAT)
+	if c.cfg.Token != "test-pat" {
+		t.Errorf("expected token=test-pat, got %q", c.cfg.Token)
+	}
+	if c.cfg.AuthMode != AuthModeBasic {
+		t.Errorf("expected auth_mode=basic for legacy PAT fallback, got %q", c.cfg.AuthMode)
 	}
 	if c.cfg.Org != "RUNT2PSW" {
 		t.Errorf("expected Org=RUNT2PSW, got %q", c.cfg.Org)
@@ -41,14 +46,14 @@ func TestNewClientFromEnv_Defaults(t *testing.T) {
 }
 
 func TestEnabled_FalseWhenNoPAT(t *testing.T) {
-	c := NewClient(Config{PAT: ""})
+	c := NewClient(Config{Token: ""})
 	if c.Enabled() {
 		t.Error("expected Enabled()=false when PAT is empty")
 	}
 }
 
 func TestEnabled_TrueWhenPATSet(t *testing.T) {
-	c := NewClient(Config{PAT: "some-pat"})
+	c := NewClient(Config{Token: "some-pat"})
 	if !c.Enabled() {
 		t.Error("expected Enabled()=true when PAT is set")
 	}
@@ -57,17 +62,27 @@ func TestEnabled_TrueWhenPATSet(t *testing.T) {
 func TestPostTimeEntry_PayloadShape(t *testing.T) {
 	var capturedBody []byte
 	var capturedAuth string
+	var capturedAccept string
+	var capturedFedAuthRedirect string
+	var capturedOrigin string
+	var capturedReferer string
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedAuth = r.Header.Get("Authorization")
+		capturedAccept = r.Header.Get("Accept")
+		capturedFedAuthRedirect = r.Header.Get("X-TFS-FedAuthRedirect")
+		capturedOrigin = r.Header.Get("Origin")
+		capturedReferer = r.Header.Get("Referer")
 		body, _ := io.ReadAll(r.Body)
 		capturedBody = body
 		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"doc-123"}`)) //nolint:errcheck
 	}))
 	defer srv.Close()
 
 	cfg := Config{
-		PAT:        "my-secret-pat",
+		Token:      "my-secret-pat",
+		AuthMode:   AuthModeBasic,
 		Org:        "TESTORG",
 		WorkItemID: 99999,
 		User:       "Test User",
@@ -89,7 +104,7 @@ func TestPostTimeEntry_PayloadShape(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := c.PostTimeEntry(ctx, entry); err != nil {
+	if _, err := c.PostTimeEntry(ctx, entry); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -97,6 +112,18 @@ func TestPostTimeEntry_PayloadShape(t *testing.T) {
 	expectedToken := "Basic " + base64.StdEncoding.EncodeToString([]byte(":my-secret-pat"))
 	if capturedAuth != expectedToken {
 		t.Errorf("auth header mismatch\n  want: %q\n  got:  %q", expectedToken, capturedAuth)
+	}
+	if !strings.Contains(capturedAccept, "excludeUrls=true") {
+		t.Errorf("expected Accept header to include excludeUrls=true, got %q", capturedAccept)
+	}
+	if capturedFedAuthRedirect != "Suppress" {
+		t.Errorf("expected X-TFS-FedAuthRedirect=Suppress, got %q", capturedFedAuthRedirect)
+	}
+	if capturedOrigin != "https://dev.azure.com" {
+		t.Errorf("expected Origin=https://dev.azure.com, got %q", capturedOrigin)
+	}
+	if capturedReferer != "https://dev.azure.com/" {
+		t.Errorf("expected Referer=https://dev.azure.com/, got %q", capturedReferer)
 	}
 
 	// Verify payload fields.
@@ -158,8 +185,8 @@ func TestPostTimeEntry_MissingPAT_NoHTTPCall(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(Config{PAT: ""})
-	err := c.PostTimeEntry(context.Background(), TimeEntry{Date: "2026-06-12", Hours: 1, RegistroDiario: "x"})
+	c := NewClient(Config{Token: ""})
+	_, err := c.PostTimeEntry(context.Background(), TimeEntry{Date: "2026-06-12", Hours: 1, RegistroDiario: "x"})
 	if err == nil {
 		t.Error("expected error when PAT is empty")
 	}
@@ -168,25 +195,116 @@ func TestPostTimeEntry_MissingPAT_NoHTTPCall(t *testing.T) {
 	}
 }
 
-func TestPostTimeEntry_NonTwoXXSurfacesBody(t *testing.T) {
+func TestPostTimeEntry_NonTwoXXSanitizesResponseBody(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"message":"invalid field"}`)) //nolint:errcheck
+		w.Write([]byte(`{"message":"invalid field","token":"must-not-leak"}`)) //nolint:errcheck
 	}))
 	defer srv.Close()
 
-	cfg := Config{PAT: "x", Org: "ORG", WorkItemID: 1, User: "U", UserID: "uid", EntryType: "T"}
+	cfg := Config{Token: "x", AuthMode: AuthModeBasic, Org: "ORG", WorkItemID: 1, User: "U", UserID: "uid", EntryType: "T"}
 	c := &Client{
 		cfg:  cfg,
 		http: &http.Client{Transport: redirectToServer(srv.URL)},
 	}
 
-	err := c.PostTimeEntry(context.Background(), TimeEntry{Date: "2026-06-12", Hours: 1, RegistroDiario: "x"})
+	_, err := c.PostTimeEntry(context.Background(), TimeEntry{Date: "2026-06-12", Hours: 1, RegistroDiario: "x"})
 	if err == nil {
 		t.Fatal("expected error for 400 response")
 	}
-	if !strings.Contains(err.Error(), "invalid field") {
-		t.Errorf("expected error to contain response body, got: %v", err)
+	if !strings.Contains(err.Error(), "unexpected status 400: invalid field") {
+		t.Errorf("expected sanitized status/message, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "must-not-leak") || strings.Contains(err.Error(), "token") {
+		t.Errorf("error leaked raw response body: %v", err)
+	}
+}
+
+func TestPostTimeEntry_TwoXXWithIDReturnsID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"azure-doc-123"}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", WorkItemID: 1, User: "U", UserID: "uid", EntryType: "T"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+
+	id, err := c.PostTimeEntry(context.Background(), TimeEntry{Date: "2026-06-12", Hours: 1, RegistroDiario: "x"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id != "azure-doc-123" {
+		t.Fatalf("expected id azure-doc-123, got %q", id)
+	}
+}
+
+func TestPostTimeEntry_TwoXXWithoutIDFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"url":"no-id"}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", WorkItemID: 1, User: "U", UserID: "uid", EntryType: "T"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+
+	_, err := c.PostTimeEntry(context.Background(), TimeEntry{Date: "2026-06-12", Hours: 1, RegistroDiario: "x"})
+	if err == nil {
+		t.Fatal("expected error when 2xx response omits id")
+	}
+	if !strings.Contains(err.Error(), "missing document id") {
+		t.Fatalf("expected missing id error, got %v", err)
+	}
+}
+
+func TestPostTimeEntry_TwoXXWithWhitespaceIDFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"   "}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", WorkItemID: 1, User: "U", UserID: "uid", EntryType: "T"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+
+	_, err := c.PostTimeEntry(context.Background(), TimeEntry{Date: "2026-06-12", Hours: 1, RegistroDiario: "x"})
+	if err == nil {
+		t.Fatal("expected error when 2xx response has whitespace id")
+	}
+	if !strings.Contains(err.Error(), "missing document id") {
+		t.Fatalf("expected missing id error, got %v", err)
+	}
+}
+
+func TestPostTimeEntry_TwoXXHTMLResponseFailsWithAuthHint(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`<!doctype html><html><body>sign in</body></html>`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", WorkItemID: 1, User: "U", UserID: "uid", EntryType: "T"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+
+	_, err := c.PostTimeEntry(context.Background(), TimeEntry{Date: "2026-06-12", Hours: 1, RegistroDiario: "x"})
+	if err == nil {
+		t.Fatal("expected error for HTML success response")
+	}
+	if !strings.Contains(err.Error(), "Azure returned HTML/sign-in response; token may be expired or auth mode invalid") {
+		t.Fatalf("expected clear HTML/auth error, got %v", err)
+	}
+	if strings.Contains(err.Error(), "invalid character") || strings.Contains(err.Error(), "sign in") || strings.Contains(err.Error(), "html") {
+		t.Fatalf("expected sanitized error without raw decode/body details, got %v", err)
 	}
 }
 

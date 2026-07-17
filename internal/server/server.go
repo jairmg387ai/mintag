@@ -1,11 +1,15 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -17,29 +21,26 @@ import (
 )
 
 type Server struct {
-	st *store.Store
-	az *azure.Client
+	st                    *store.Store
+	newAzureTimeLogClient func(context.Context) (*azure.Client, error)
+	newAzureOAuthClient   func(context.Context, azure.OAuthConfig) *azure.DeviceAuthClient
 }
 
 func New(st *store.Store) *Server {
-	return &Server{st: st, az: azure.NewClientFromEnv()}
+	return &Server{
+		st:                    st,
+		newAzureTimeLogClient: st.NewAzureTimeLogClient,
+		newAzureOAuthClient: func(_ context.Context, cfg azure.OAuthConfig) *azure.DeviceAuthClient {
+			return azure.NewDeviceAuthClient(cfg)
+		},
+	}
 }
 
 func (srv *Server) Handler() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	r.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-			if r.Method == http.MethodOptions {
-				w.WriteHeader(http.StatusNoContent)
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	})
+	r.Use(localCORSMiddleware)
 
 	// API
 	r.Route("/api", func(r chi.Router) {
@@ -134,9 +135,9 @@ func (srv *Server) handleListMeetings(w http.ResponseWriter, r *http.Request) {
 
 func (srv *Server) handleImportMeeting(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Path      string  `json:"path"`
-		ProjectID *int64  `json:"project_id"`
-		Summary   string  `json:"summary"`
+		Path      string `json:"path"`
+		ProjectID *int64 `json:"project_id"`
+		Summary   string `json:"summary"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -226,14 +227,14 @@ func (srv *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 
 func (srv *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Title       string  `json:"title"`
-		Description string  `json:"description"`
-		Owner       string  `json:"owner"`
-		Status      string  `json:"status"`
-		Priority    string  `json:"priority"`
-		DueDate     string  `json:"due_date"`
-		ProjectID   *int64  `json:"project_id"`
-		MeetingID   *int64  `json:"meeting_id"`
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		Owner       string `json:"owner"`
+		Status      string `json:"status"`
+		Priority    string `json:"priority"`
+		DueDate     string `json:"due_date"`
+		ProjectID   *int64 `json:"project_id"`
+		MeetingID   *int64 `json:"meeting_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -261,14 +262,14 @@ func (srv *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Status          string  `json:"status"`
-		Owner           string  `json:"owner"`
-		Priority        string  `json:"priority"`
-		DueDate         string  `json:"due_date"`
-		Description     string  `json:"description"`
-		Note            string  `json:"note"`
-		Author          string  `json:"author"`
-		SourceMeetingID *int64  `json:"source_meeting_id"`
+		Status          string `json:"status"`
+		Owner           string `json:"owner"`
+		Priority        string `json:"priority"`
+		DueDate         string `json:"due_date"`
+		Description     string `json:"description"`
+		Note            string `json:"note"`
+		Author          string `json:"author"`
+		SourceMeetingID *int64 `json:"source_meeting_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -313,6 +314,77 @@ func writeJSON(w http.ResponseWriter, v any, err error) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(v)
+}
+
+func localCORSMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if isLocalOrigin(origin) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+		}
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+
+		if r.Method == http.MethodOptions {
+			if origin != "" && !isLocalOrigin(origin) {
+				http.Error(w, "origin is not allowed", http.StatusForbidden)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func requireLocalRequest(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if origin := r.Header.Get("Origin"); origin != "" && !isLocalOrigin(origin) {
+			http.Error(w, "origin is not allowed", http.StatusForbidden)
+			return
+		}
+		if !isLocalHost(r.Host) {
+			http.Error(w, "host is not allowed", http.StatusForbidden)
+			return
+		}
+		if r.RemoteAddr != "" {
+			host, _, err := net.SplitHostPort(r.RemoteAddr)
+			if err == nil && !isLoopbackHost(host) {
+				http.Error(w, "remote address is not allowed", http.StatusForbidden)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func isLocalOrigin(origin string) bool {
+	if origin == "" {
+		return false
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	return isLocalHost(u.Host)
+}
+
+func isLocalHost(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	host = strings.Trim(host, "[]")
+	return host == "localhost" || isLoopbackHost(host)
+}
+
+func isLoopbackHost(host string) bool {
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func pathID(r *http.Request, param string) (int64, error) {

@@ -14,10 +14,10 @@ import (
 // immediately with no HTTP calls made.
 func (s *Store) UploadActivities(ctx context.Context, date string, az *azure.Client) (*UploadResult, error) {
 	if az == nil {
-		return nil, fmt.Errorf("MINTAG_AZURE_TIMELOG_PAT is not configured")
+		return nil, fmt.Errorf("Azure TimeLog token is not configured")
 	}
 	if !az.Enabled() {
-		return nil, fmt.Errorf("MINTAG_AZURE_TIMELOG_PAT is not configured")
+		return nil, fmt.Errorf("Azure TimeLog token is not configured")
 	}
 
 	activities, err := s.ListActivities(ctx, date, "approved")
@@ -26,8 +26,9 @@ func (s *Store) UploadActivities(ctx context.Context, date string, az *azure.Cli
 	}
 
 	result := &UploadResult{
-		FailedIDs: []int64{},
-		Errors:    []string{},
+		FailedIDs:        []int64{},
+		Errors:           []string{},
+		AzureDocumentIDs: map[int64]string{},
 	}
 
 	for _, a := range activities {
@@ -36,16 +37,18 @@ func (s *Store) UploadActivities(ctx context.Context, date string, az *azure.Cli
 			Hours:          a.Hours,
 			RegistroDiario: a.RegistroDiario,
 		}
-		if postErr := az.PostTimeEntry(ctx, entry); postErr != nil {
+		azureDocumentID, postErr := az.PostTimeEntry(ctx, entry)
+		if postErr != nil {
 			result.FailedIDs = append(result.FailedIDs, a.ID)
 			result.Errors = append(result.Errors, postErr.Error())
 			continue
 		}
-		if markErr := s.MarkUploaded(ctx, a.ID); markErr != nil {
+		if markErr := s.MarkUploaded(ctx, a.ID, azureDocumentID); markErr != nil {
 			result.FailedIDs = append(result.FailedIDs, a.ID)
 			result.Errors = append(result.Errors, markErr.Error())
 			continue
 		}
+		result.AzureDocumentIDs[a.ID] = azureDocumentID
 		result.UploadedCount++
 	}
 

@@ -208,12 +208,37 @@ export interface DailyActivity {
   status: ActivityStatus
   created_at: string
   uploaded_at?: string
+  azure_document_id?: string
 }
 
 export interface UploadResult {
   uploaded_count: number
   failed_ids: number[]
   errors: string[]
+  azure_document_ids?: Record<string, string>
+}
+
+export interface AzureTimeLogConfigStatus {
+  configured: boolean
+  auth_mode: 'bearer' | 'basic' | 'oauth'
+  source: string
+  oauth_connected?: boolean
+  oauth_access_token_expires_at?: string
+  oauth_tenant?: string
+  oauth_client_id?: string
+}
+
+export interface AzureDeviceCodeStartResponse {
+  device_code: string
+  user_code: string
+  verification_uri: string
+  expires_in: number
+  interval: number
+  message: string
+}
+
+export interface AzureDeviceCodeCompleteResponse {
+  status: 'pending' | 'complete' | 'declined' | 'expired'
 }
 
 export interface ActivityCatalog {

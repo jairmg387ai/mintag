@@ -10,13 +10,12 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
-	"github.com/Gentleman-Programming/mintag/internal/azure"
 	"github.com/Gentleman-Programming/mintag/internal/store"
 )
 
 // registerActivityTools registers the four daily-activity MCP tools:
 // activity_log, activity_list, activity_approve, activity_upload.
-func registerActivityTools(s *mcpserver.MCPServer, st *store.Store, az *azure.Client) {
+func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 
 	// --- activity_log ---
 	s.AddTool(mcp.NewTool("activity_log",
@@ -146,11 +145,15 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store, az *azure.Cl
 
 	// --- activity_upload ---
 	s.AddTool(mcp.NewTool("activity_upload",
-		mcp.WithDescription("Upload approved activity entries for a given date to Azure DevOps TimeLog. Requires MINTAG_AZURE_TIMELOG_PAT environment variable."),
+		mcp.WithDescription("Upload approved activity entries for a given date to Azure DevOps TimeLog. Requires a configured Azure TimeLog token."),
 		mcp.WithString("date", mcp.Description("Date in YYYY-MM-DD format (default: today)")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		az, err := st.NewAzureTimeLogClient(ctx)
+		if err != nil {
+			return errResult(err)
+		}
 		if az == nil || !az.Enabled() {
-			return errResult(fmt.Errorf("MINTAG_AZURE_TIMELOG_PAT not set — upload disabled"))
+			return errResult(fmt.Errorf("Azure TimeLog token is not configured — upload disabled"))
 		}
 
 		date := req.GetString("date", "")

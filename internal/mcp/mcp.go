@@ -11,7 +11,6 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
-	"github.com/Gentleman-Programming/mintag/internal/azure"
 	"github.com/Gentleman-Programming/mintag/internal/parser"
 	"github.com/Gentleman-Programming/mintag/internal/store"
 )
@@ -67,14 +66,13 @@ func Serve(st *store.Store) error {
 		mcpserver.WithToolCapabilities(true),
 		mcpserver.WithInstructions(serverInstructions),
 	)
-	az := azure.NewClientFromEnv()
-	registerTools(s, st, az)
+	registerTools(s, st)
 	return mcpserver.ServeStdio(s)
 }
 
-func registerTools(s *mcpserver.MCPServer, st *store.Store, az *azure.Client) {
+func registerTools(s *mcpserver.MCPServer, st *store.Store) {
 	registerGraphTools(s, st)
-	registerActivityTools(s, st, az)
+	registerActivityTools(s, st)
 	registerDeploymentWindowTools(s, st)
 
 	// --- project_create ---

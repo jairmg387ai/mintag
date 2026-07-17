@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -21,6 +22,8 @@ func fakeAzureServer(t *testing.T, responder func(callN int) int) *httptest.Serv
 		w.WriteHeader(code)
 		if code >= 400 {
 			w.Write([]byte(`{"message":"simulated azure error"}`)) //nolint:errcheck
+		} else {
+			w.Write([]byte(`{"id":"azure-doc-` + strconv.Itoa(n) + `"}`)) //nolint:errcheck
 		}
 	}))
 	return srv
@@ -29,7 +32,8 @@ func fakeAzureServer(t *testing.T, responder func(callN int) int) *httptest.Serv
 // azureClientForTest wires an azure.Client to use the given test server.
 func azureClientForTest(srv *httptest.Server) *azure.Client {
 	cfg := azure.Config{
-		PAT:        "test-pat",
+		Token:      "test-pat",
+		AuthMode:   azure.AuthModeBasic,
 		Org:        "TESTORG",
 		WorkItemID: 1,
 		User:       "Test",
@@ -107,6 +111,54 @@ func TestUploadActivities_FullSuccess(t *testing.T) {
 		if a.Status != "uploaded" {
 			t.Errorf("expected activity %d status=uploaded, got %q", id, a.Status)
 		}
+		if a.AzureDocumentID == nil || *a.AzureDocumentID == "" {
+			t.Errorf("expected activity %d to store azure_document_id", id)
+		}
+	}
+}
+
+func TestUploadActivities_TwoXXWithoutIDLeavesApproved(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	a, err := s.CreateActivity(ctx, "2026-06-12", 1.0, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo", "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApproveActivities(ctx, []int64{a.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"url":"created-but-no-id"}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+	az := azureClientForTest(srv)
+
+	result, err := s.UploadActivities(ctx, "2026-06-12", az)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.UploadedCount != 0 {
+		t.Fatalf("expected no uploads, got %d", result.UploadedCount)
+	}
+	if len(result.FailedIDs) != 1 || result.FailedIDs[0] != a.ID {
+		t.Fatalf("expected failed id %d, got %v", a.ID, result.FailedIDs)
+	}
+	updated, err := s.GetActivity(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != "approved" {
+		t.Fatalf("expected activity to remain approved, got %q", updated.Status)
+	}
+	if updated.AzureDocumentID != nil {
+		t.Fatalf("expected azure_document_id to remain empty, got %v", *updated.AzureDocumentID)
 	}
 }
 

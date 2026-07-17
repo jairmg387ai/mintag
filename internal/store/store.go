@@ -1,17 +1,21 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/Gentleman-Programming/mintag/internal/azure"
+
 	_ "modernc.org/sqlite"
 )
 
 type Store struct {
-	db *sql.DB
+	db                  *sql.DB
+	newAzureOAuthClient func(context.Context, azure.OAuthConfig) *azure.DeviceAuthClient
 }
 
 // --- Models ---
@@ -51,7 +55,7 @@ type Task struct {
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 	// joined
-	ProjectName string `json:"project_name,omitempty"`
+	ProjectName  string `json:"project_name,omitempty"`
 	MeetingTitle string `json:"meeting_title,omitempty"`
 }
 
@@ -69,10 +73,10 @@ type TaskHistory struct {
 }
 
 type SearchResult struct {
-	Kind    string `json:"kind"` // "task" | "meeting"
-	ID      int64  `json:"id"`
-	Title   string `json:"title"`
-	Snippet string `json:"snippet"`
+	Kind    string  `json:"kind"` // "task" | "meeting"
+	ID      int64   `json:"id"`
+	Title   string  `json:"title"`
+	Snippet string  `json:"snippet"`
 	Score   float64 `json:"score"`
 }
 
@@ -86,7 +90,7 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{db: db}
+	s := newStore(db)
 	if err := s.migrate(); err != nil {
 		return nil, err
 	}
@@ -105,7 +109,7 @@ func OpenInMemory() (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	s := &Store{db: db}
+	s := newStore(db)
 	if err := s.migrate(); err != nil {
 		return nil, err
 	}
@@ -113,6 +117,15 @@ func OpenInMemory() (*Store, error) {
 }
 
 func (s *Store) Close() error { return s.db.Close() }
+
+func newStore(db *sql.DB) *Store {
+	return &Store{
+		db: db,
+		newAzureOAuthClient: func(_ context.Context, cfg azure.OAuthConfig) *azure.DeviceAuthClient {
+			return azure.NewDeviceAuthClient(cfg)
+		},
+	}
+}
 
 // --- Schema ---
 
@@ -160,6 +173,12 @@ func (s *Store) migrate() error {
 		note              TEXT NOT NULL DEFAULT '',
 		author            TEXT NOT NULL DEFAULT '',
 		created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE TABLE IF NOT EXISTS app_settings (
+		key        TEXT PRIMARY KEY,
+		value      TEXT NOT NULL DEFAULT '',
+		updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);
 
 	CREATE VIRTUAL TABLE IF NOT EXISTS meetings_fts USING fts5(
@@ -234,7 +253,8 @@ func (s *Store) migrateActivities() error {
 		source          TEXT NOT NULL DEFAULT 'manual',
 		status          TEXT NOT NULL DEFAULT 'pending',
 		created_at      TEXT NOT NULL,
-		uploaded_at     TEXT
+		uploaded_at     TEXT,
+		azure_document_id TEXT
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_activities_date     ON daily_activities(date);
@@ -252,7 +272,10 @@ func (s *Store) migrateActivities() error {
 		name TEXT NOT NULL UNIQUE
 	);
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+	return s.addColumnIfMissing("daily_activities", "azure_document_id", "azure_document_id TEXT")
 }
 
 func (s *Store) addColumnIfMissing(table, col, ddl string) error {
@@ -946,13 +969,13 @@ func (s *Store) UpsertTask(meetingID, projectID *int64, title, description, stat
 // --- Stats ---
 
 type Stats struct {
-	TotalTasks    int `json:"total_tasks"`
-	TodoTasks     int `json:"todo_tasks"`
+	TotalTasks      int `json:"total_tasks"`
+	TodoTasks       int `json:"todo_tasks"`
 	InProgressTasks int `json:"in_progress_tasks"`
-	BlockedTasks  int `json:"blocked_tasks"`
-	DoneTasks     int `json:"done_tasks"`
-	TotalMeetings int `json:"total_meetings"`
-	TotalProjects int `json:"total_projects"`
+	BlockedTasks    int `json:"blocked_tasks"`
+	DoneTasks       int `json:"done_tasks"`
+	TotalMeetings   int `json:"total_meetings"`
+	TotalProjects   int `json:"total_projects"`
 }
 
 func (s *Store) GetStats() (*Stats, error) {

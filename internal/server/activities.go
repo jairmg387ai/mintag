@@ -2,12 +2,15 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/Gentleman-Programming/mintag/internal/azure"
 )
 
 func isNotFound(err error) bool {
@@ -23,6 +26,11 @@ var reActivityDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 //
 //	GET    /api/activities                           ?date=&status=
 //	POST   /api/activities
+//	GET    /api/activities/azure-config
+//	PUT    /api/activities/azure-config
+//	DELETE /api/activities/azure-config
+//	POST   /api/activities/azure-auth/device/start
+//	POST   /api/activities/azure-auth/device/complete
 //	GET    /api/activities/catalog
 //	POST   /api/activities/catalog/projects
 //	DELETE /api/activities/catalog/projects/{name}
@@ -34,12 +42,17 @@ var reActivityDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 func registerActivityRoutes(r chi.Router, srv *Server) {
 	r.Get("/activities", srv.handleListActivities)
 	r.Post("/activities", srv.handleCreateActivity)
+	r.With(requireLocalRequest).Get("/activities/azure-config", srv.handleGetAzureTimeLogConfig)
+	r.With(requireLocalRequest).Put("/activities/azure-config", srv.handleSaveAzureTimeLogConfig)
+	r.With(requireLocalRequest).Delete("/activities/azure-config", srv.handleClearAzureTimeLogConfig)
+	r.With(requireLocalRequest).Post("/activities/azure-auth/device/start", srv.handleStartAzureDeviceAuth)
+	r.With(requireLocalRequest).Post("/activities/azure-auth/device/complete", srv.handleCompleteAzureDeviceAuth)
 	r.Get("/activities/catalog", srv.handleActivityCatalog)
 	r.Post("/activities/catalog/projects", srv.handleAddCatalogProject)
 	r.Delete("/activities/catalog/projects/{name}", srv.handleRemoveCatalogProject)
 	r.Post("/activities/catalog/categories", srv.handleAddCatalogCategory)
 	r.Delete("/activities/catalog/categories/{name}", srv.handleRemoveCatalogCategory)
-	r.Post("/activities/upload", srv.handleUploadActivities)
+	r.With(requireLocalRequest).Post("/activities/upload", srv.handleUploadActivities)
 	r.Patch("/activities/{id}", srv.handlePatchActivity)
 	r.Delete("/activities/{id}", srv.handleDeleteActivity)
 }
@@ -172,15 +185,135 @@ func (srv *Server) handleUploadActivities(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if srv.az == nil || !srv.az.Enabled() {
+	az, err := srv.newAzureTimeLogClient(r.Context())
+	if err != nil {
+		writeJSON(w, nil, err)
+		return
+	}
+	if az == nil || !az.Enabled() {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(map[string]string{"error": "MINTAG_AZURE_TIMELOG_PAT not set"})
+		json.NewEncoder(w).Encode(map[string]string{"error": "Azure TimeLog token is not configured"})
 		return
 	}
 
-	result, err := srv.st.UploadActivities(r.Context(), date, srv.az)
+	result, err := srv.st.UploadActivities(r.Context(), date, az)
 	writeJSON(w, result, err)
+}
+
+// GET /api/activities/azure-config
+func (srv *Server) handleGetAzureTimeLogConfig(w http.ResponseWriter, r *http.Request) {
+	status, err := srv.st.AzureTimeLogConfigStatus(r.Context())
+	writeJSON(w, status, err)
+}
+
+// PUT /api/activities/azure-config
+func (srv *Server) handleSaveAzureTimeLogConfig(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Token    string `json:"token"`
+		AuthMode string `json:"auth_mode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	status, err := srv.st.SaveAzureTimeLogConfig(r.Context(), body.Token, body.AuthMode)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	writeJSON(w, status, nil)
+}
+
+// DELETE /api/activities/azure-config
+func (srv *Server) handleClearAzureTimeLogConfig(w http.ResponseWriter, r *http.Request) {
+	status, err := srv.st.ClearAzureTimeLogConfig(r.Context())
+	writeJSON(w, status, err)
+}
+
+// POST /api/activities/azure-auth/device/start
+func (srv *Server) handleStartAzureDeviceAuth(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Tenant   string `json:"tenant"`
+		ClientID string `json:"client_id"`
+		Scope    string `json:"scope"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+	}
+	cfg := srv.st.AzureOAuthConfig(r.Context())
+	if strings.TrimSpace(body.Tenant) != "" {
+		cfg.Tenant = strings.TrimSpace(body.Tenant)
+	}
+	if strings.TrimSpace(body.ClientID) != "" {
+		cfg.ClientID = strings.TrimSpace(body.ClientID)
+	}
+	if strings.TrimSpace(body.Scope) != "" {
+		cfg.Scope = strings.TrimSpace(body.Scope)
+	}
+	client := srv.newAzureOAuthClient(r.Context(), cfg)
+	device, err := client.StartDeviceCode(r.Context())
+	if err != nil {
+		http.Error(w, sanitizePublicError(err), http.StatusBadGateway)
+		return
+	}
+	if err := srv.st.SaveAzureOAuthConfig(r.Context(), client.Config()); err != nil {
+		writeJSON(w, nil, err)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"device_code":      device.DeviceCode,
+		"user_code":        device.UserCode,
+		"verification_uri": device.VerificationURI,
+		"expires_in":       device.ExpiresIn,
+		"interval":         device.Interval,
+		"message":          device.Message,
+	}, nil)
+}
+
+// POST /api/activities/azure-auth/device/complete
+func (srv *Server) handleCompleteAzureDeviceAuth(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		DeviceCode string `json:"device_code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(body.DeviceCode) == "" {
+		http.Error(w, "device_code is required", http.StatusBadRequest)
+		return
+	}
+	cfg := srv.st.AzureOAuthConfig(r.Context())
+	client := srv.newAzureOAuthClient(r.Context(), cfg)
+	token, status, err := client.PollDeviceCode(r.Context(), body.DeviceCode)
+	if errors.Is(err, azure.ErrAuthorizationPending) {
+		writeJSON(w, map[string]string{"status": azure.DeviceAuthStatusPending}, nil)
+		return
+	}
+	if err != nil {
+		http.Error(w, sanitizePublicError(err), http.StatusBadGateway)
+		return
+	}
+	if status != azure.DeviceAuthStatusComplete {
+		writeJSON(w, map[string]string{"status": status}, nil)
+		return
+	}
+	if err := srv.st.SaveAzureOAuthTokens(r.Context(), token, client.Config()); err != nil {
+		writeJSON(w, nil, err)
+		return
+	}
+	writeJSON(w, map[string]string{"status": azure.DeviceAuthStatusComplete}, nil)
+}
+
+func sanitizePublicError(err error) string {
+	msg := strings.TrimSpace(err.Error())
+	msg = strings.ReplaceAll(msg, "\r", " ")
+	msg = strings.ReplaceAll(msg, "\n", " ")
+	if len(msg) > 300 {
+		msg = msg[:300] + "..."
+	}
+	return msg
 }
 
 // GET /api/activities/catalog

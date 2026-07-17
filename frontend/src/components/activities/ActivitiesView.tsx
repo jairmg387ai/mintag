@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, Fragment } from 'react'
 import { ChevronLeft, ChevronRight, Plus, Upload, CheckCircle, RotateCcw, RefreshCw, Pencil, Trash2, Settings } from 'lucide-react'
-import type { DailyActivity, ActivityCatalog, UploadResult } from '../../types'
+import type { DailyActivity, ActivityCatalog, UploadResult, AzureTimeLogConfigStatus } from '../../types'
 import {
   listActivities,
   approveActivity,
@@ -8,6 +8,11 @@ import {
   uploadActivities,
   getActivityCatalog,
   deleteActivity,
+  getAzureTimeLogConfig,
+  saveAzureTimeLogConfig,
+  clearAzureTimeLogConfig,
+  startAzureDeviceAuth,
+  completeAzureDeviceAuth,
 } from '../../api/client'
 import { ActivityStatusBadge, ActivitySourceBadge } from './ActivityStatusBadge'
 import { NewActivityModal } from './NewActivityModal'
@@ -41,6 +46,12 @@ export function ActivitiesView() {
   const [editingActivity, setEditingActivity] = useState<DailyActivity | null>(null)
   const [rowErrors, setRowErrors] = useState<Record<number, string>>({})
   const [showCatalogModal, setShowCatalogModal] = useState(false)
+  const [azureConfig, setAzureConfig] = useState<AzureTimeLogConfigStatus | null>(null)
+  const [azureToken, setAzureToken] = useState('')
+  const [azureAuthMode, setAzureAuthMode] = useState<'bearer' | 'basic'>('bearer')
+  const [azureConfigMessage, setAzureConfigMessage] = useState<string | null>(null)
+  const [deviceAuth, setDeviceAuth] = useState<{ device_code: string; user_code: string; verification_uri: string; message: string; expires_in: number; interval: number } | null>(null)
+  const [deviceAuthLoading, setDeviceAuthLoading] = useState(false)
 
   const fetchActivities = useCallback(async (d: string) => {
     setLoading(true)
@@ -58,6 +69,10 @@ export function ActivitiesView() {
   // Catalog loads once on mount
   useEffect(() => {
     getActivityCatalog().then(setCatalog).catch(() => setCatalog(null))
+    getAzureTimeLogConfig().then(cfg => {
+      setAzureConfig(cfg)
+      setAzureAuthMode(cfg.auth_mode === 'basic' ? 'basic' : 'bearer')
+    }).catch(() => setAzureConfig(null))
   }, [])
 
   // Re-fetch on date change (also covers initial load)
@@ -134,13 +149,78 @@ export function ActivitiesView() {
       await fetchActivities(date)
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Upload failed'
-      if (msg.includes('503') || msg.includes('MINTAG_AZURE_TIMELOG_PAT')) {
-        setUploadError('MINTAG_AZURE_TIMELOG_PAT not configured')
+      if (msg.includes('503') || msg.includes('Azure TimeLog token')) {
+        setUploadError('Azure TimeLog token is not configured')
       } else {
         setUploadError(msg)
       }
     } finally {
       setUploading(false)
+    }
+  }
+
+  async function handleSaveAzureConfig() {
+    setAzureConfigMessage(null)
+    try {
+      const cfg = await saveAzureTimeLogConfig({ token: azureToken, auth_mode: azureAuthMode })
+      setAzureConfig(cfg)
+      setAzureToken('')
+      setAzureConfigMessage('Azure token saved. The token is hidden after saving.')
+    } catch (e: unknown) {
+      setAzureConfigMessage(e instanceof Error ? e.message : 'Failed to save Azure configuration')
+    }
+  }
+
+  async function handleClearAzureConfig() {
+    setAzureConfigMessage(null)
+    try {
+      const cfg = await clearAzureTimeLogConfig()
+      setAzureConfig(cfg)
+      setAzureToken('')
+      setAzureAuthMode(cfg.auth_mode === 'basic' ? 'basic' : 'bearer')
+      setDeviceAuth(null)
+      setAzureConfigMessage('Local Azure token cleared.')
+    } catch (e: unknown) {
+      setAzureConfigMessage(e instanceof Error ? e.message : 'Failed to clear Azure configuration')
+    }
+  }
+
+  async function handleStartDeviceAuth() {
+    setAzureConfigMessage(null)
+    setDeviceAuthLoading(true)
+    try {
+      const auth = await startAzureDeviceAuth()
+      setDeviceAuth(auth)
+      setAzureConfigMessage('Device sign-in started. Open the verification URL and enter the code, then complete sign-in here.')
+    } catch (e: unknown) {
+      setAzureConfigMessage(e instanceof Error ? e.message : 'Failed to start Microsoft sign-in')
+    } finally {
+      setDeviceAuthLoading(false)
+    }
+  }
+
+  async function handleCompleteDeviceAuth() {
+    if (!deviceAuth) return
+    setAzureConfigMessage(null)
+    setDeviceAuthLoading(true)
+    try {
+      const result = await completeAzureDeviceAuth(deviceAuth.device_code)
+      if (result.status === 'pending') {
+        setAzureConfigMessage('Authorization is still pending. Finish the browser sign-in and try Complete again.')
+        return
+      }
+      if (result.status !== 'complete') {
+        setAzureConfigMessage(`Microsoft sign-in ${result.status}. Start again to get a new code.`)
+        return
+      }
+      const cfg = await getAzureTimeLogConfig()
+      setAzureConfig(cfg)
+      setDeviceAuth(null)
+      setAzureConfigMessage('Microsoft sign-in connected. Mintag will refresh access automatically.')
+    } catch (e: unknown) {
+      setAzureConfigMessage(e instanceof Error ? e.message : 'Failed to complete Microsoft sign-in')
+    } finally {
+      setDeviceAuthLoading(false)
     }
   }
 
@@ -404,6 +484,92 @@ export function ActivitiesView() {
             {uploadError}
           </div>
         )}
+
+        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <span style={{ font: 'var(--text-label)', color: 'var(--fg3)', textTransform: 'uppercase', letterSpacing: 'var(--tracking-label)' }}>
+              Azure auth
+            </span>
+            <span className={`chip ${azureConfig?.configured ? 'chip-done' : 'chip-pending'}`}>
+              {azureConfig?.configured ? `Configured (${azureConfig.auth_mode})` : 'Not configured'}
+            </span>
+            {azureConfig?.oauth_connected && (
+              <span className="chip chip-done">Microsoft connected</span>
+            )}
+            {azureConfig?.source && azureConfig.source !== 'none' && (
+              <span style={{ font: 'var(--text-caption)', color: 'var(--fg3)' }}>Source: {azureConfig.source}</span>
+            )}
+            {azureConfig?.oauth_access_token_expires_at && (
+              <span style={{ font: 'var(--text-caption)', color: 'var(--fg3)' }}>
+                Access expires: {new Date(azureConfig.oauth_access_token_expires_at).toLocaleString()}
+              </span>
+            )}
+          </div>
+          <div style={{ padding: '12px', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <strong style={{ font: 'var(--text-body)', color: 'var(--fg1)' }}>Connect with Microsoft</strong>
+              <button className="btn btn-secondary btn-sm" onClick={handleStartDeviceAuth} disabled={deviceAuthLoading}>
+                {deviceAuthLoading ? 'Working...' : 'Start Device Sign-In'}
+              </button>
+              {deviceAuth && (
+                <button className="btn btn-primary btn-sm" onClick={handleCompleteDeviceAuth} disabled={deviceAuthLoading}>
+                  Complete Sign-In
+                </button>
+              )}
+            </div>
+            <div style={{ font: 'var(--text-caption)', color: 'var(--fg3)' }}>
+              Recommended for Mintag. It stores refresh credentials locally and does not display tokens.
+            </div>
+            {deviceAuth && (
+              <div style={{ padding: '10px 12px', background: 'var(--bg2)', borderRadius: 'var(--radius-md)', display: 'grid', gap: 6 }}>
+                <div style={{ font: 'var(--text-caption)', color: 'var(--fg2)' }}>{deviceAuth.message}</div>
+                <div style={{ font: 'var(--text-body)', color: 'var(--fg1)' }}>
+                  URL: <a href={deviceAuth.verification_uri} target="_blank" rel="noreferrer">{deviceAuth.verification_uri}</a>
+                </div>
+                <div style={{ font: 'var(--text-h3)', color: 'var(--fg1)' }}>Code: {deviceAuth.user_code}</div>
+                <div style={{ font: 'var(--text-caption)', color: 'var(--fg3)' }}>
+                  Expires in {Math.round(deviceAuth.expires_in / 60)} minutes. Poll interval: {deviceAuth.interval}s.
+                </div>
+              </div>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ font: 'var(--text-caption)', color: 'var(--fg3)', width: '100%' }}>Manual token fallback</span>
+            <select
+              className="input"
+              value={azureAuthMode}
+              onChange={e => setAzureAuthMode(e.target.value as 'bearer' | 'basic')}
+              style={{ width: 120 }}
+            >
+              <option value="bearer">Bearer</option>
+              <option value="basic">Basic PAT</option>
+            </select>
+            <input
+              className="input"
+              type="password"
+              placeholder="Paste new token"
+              value={azureToken}
+              onChange={e => setAzureToken(e.target.value)}
+              style={{ minWidth: 280 }}
+            />
+            <button className="btn btn-secondary btn-sm" onClick={handleSaveAzureConfig} disabled={azureToken.trim() === ''}>
+              Save Token
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={handleClearAzureConfig}>
+              Clear Local Token
+            </button>
+          </div>
+          {azureAuthMode === 'bearer' && (
+            <div style={{ font: 'var(--text-caption)', color: 'var(--amber-700)' }}>
+              Bearer access tokens expire. If Azure returns a sign-in response, replace this token with a fresh one.
+            </div>
+          )}
+          {azureConfigMessage && (
+            <div style={{ font: 'var(--text-caption)', color: azureConfigMessage.includes('Failed') ? 'var(--block-solid)' : 'var(--fg3)' }}>
+              {azureConfigMessage}
+            </div>
+          )}
+        </div>
       </div>
 
       <EditActivityModal

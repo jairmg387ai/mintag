@@ -311,7 +311,7 @@ func TestMarkUploaded_ApprovedToUploaded(t *testing.T) {
 	if _, err := s.ApproveActivities(ctx, []int64{a.ID}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.MarkUploaded(ctx, a.ID); err != nil {
+	if err := s.MarkUploaded(ctx, a.ID, "azure-doc-123"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -324,6 +324,9 @@ func TestMarkUploaded_ApprovedToUploaded(t *testing.T) {
 	}
 	if updated.UploadedAt == nil {
 		t.Error("expected uploaded_at to be set")
+	}
+	if updated.AzureDocumentID == nil || *updated.AzureDocumentID != "azure-doc-123" {
+		t.Fatalf("expected azure_document_id to be stored, got %v", updated.AzureDocumentID)
 	}
 }
 
@@ -340,8 +343,37 @@ func TestMarkUploaded_PendingRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Attempt to mark uploaded without approval — must fail.
-	err = s.MarkUploaded(ctx, a.ID)
+	err = s.MarkUploaded(ctx, a.ID, "azure-doc-123")
 	if err == nil {
 		t.Error("expected error when marking pending activity as uploaded")
+	}
+}
+
+func TestMarkUploaded_WhitespaceDocumentIDRejected(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	a, err := s.CreateActivity(ctx, "2026-06-12", 1, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo", "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApproveActivities(ctx, []int64{a.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	err = s.MarkUploaded(ctx, a.ID, "   ")
+	if err == nil {
+		t.Fatal("expected whitespace azure document id to be rejected")
+	}
+	updated, err := s.GetActivity(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != "approved" {
+		t.Fatalf("expected activity to remain approved, got %q", updated.Status)
 	}
 }
