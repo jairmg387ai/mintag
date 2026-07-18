@@ -86,7 +86,20 @@ func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", path+"?_journal_mode=WAL&_foreign_keys=on")
+	// modernc.org/sqlite only recognizes DSN pragmas via the `_pragma=name(value)`
+	// form (see sqlite.go's applyQueryParams) — the previous `_journal_mode=WAL`
+	// and `_foreign_keys=on` params were silently ignored, so this connection
+	// was actually running in the default rollback-journal mode. That matters
+	// for the newly added busy_timeout: with the default deferred transaction
+	// mode (`BEGIN`, not `BEGIN IMMEDIATE`), a transaction that reads before it
+	// writes only discovers the write conflict when it tries to upgrade its
+	// lock — and that specific SQLITE_BUSY is not always retried by the busy
+	// handler for a deferred transaction, so concurrent writers can still fail
+	// immediately even with busy_timeout set. `_txlock=immediate` makes every
+	// transaction request the write lock upfront at BEGIN, so a concurrent
+	// second writer blocks (and busy_timeout correctly retries) right there
+	// instead of racing during a later statement.
+	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_txlock=immediate")
 	if err != nil {
 		return nil, err
 	}
@@ -271,11 +284,43 @@ func (s *Store) migrateActivities() error {
 		id   INTEGER PRIMARY KEY AUTOINCREMENT,
 		name TEXT NOT NULL UNIQUE
 	);
+
+	CREATE TABLE IF NOT EXISTS azure_activities (
+		id           INTEGER PRIMARY KEY AUTOINCREMENT,
+		org          TEXT NOT NULL,
+		work_item_id INTEGER NOT NULL,
+		label        TEXT NOT NULL,
+		is_active    INTEGER NOT NULL DEFAULT 1,
+		is_default   INTEGER NOT NULL DEFAULT 0
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_azure_activities_active ON azure_activities(is_active);
+	CREATE UNIQUE INDEX IF NOT EXISTS uq_azure_activities_default
+		ON azure_activities(is_default) WHERE is_default = 1;
 	`)
 	if err != nil {
 		return err
 	}
-	return s.addColumnIfMissing("daily_activities", "azure_document_id", "azure_document_id TEXT")
+	if err := s.addColumnIfMissing("daily_activities", "azure_document_id", "azure_document_id TEXT"); err != nil {
+		return err
+	}
+	if err := s.addColumnIfMissing("daily_activities", "azure_activity_id", "azure_activity_id INTEGER"); err != nil {
+		return err
+	}
+	return s.seedDefaultAzureActivity()
+}
+
+// seedDefaultAzureActivity inserts the legacy hardcoded work item as the sole
+// default activity on first migration, so existing installs keep uploading to
+// the same work item with zero behavioral change. It is a no-op once any row
+// exists in azure_activities (idempotent across repeated migrate() calls).
+func (s *Store) seedDefaultAzureActivity() error {
+	_, err := s.db.Exec(`
+		INSERT INTO azure_activities (org, work_item_id, label, is_active, is_default)
+		SELECT 'RUNT2PSW', 156263, 'Default', 1, 1
+		WHERE NOT EXISTS (SELECT 1 FROM azure_activities)
+	`)
+	return err
 }
 
 func (s *Store) addColumnIfMissing(table, col, ddl string) error {
