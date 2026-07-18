@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, Fragment } from 'react'
-import { ChevronLeft, ChevronRight, Plus, Upload, CheckCircle, RotateCcw, RefreshCw, Pencil, Trash2, Settings } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Upload, CheckCircle, RotateCcw, RefreshCw, Pencil, Trash2, Settings, Eye } from 'lucide-react'
 import type { DailyActivity, ActivityCatalog, UploadResult, AzureTimeLogConfigStatus } from '../../types'
 import {
   listActivities,
@@ -18,6 +18,7 @@ import { ActivityStatusBadge, ActivitySourceBadge } from './ActivityStatusBadge'
 import { NewActivityModal } from './NewActivityModal'
 import { EditActivityModal } from './EditActivityModal'
 import { CatalogManagementModal } from './CatalogManagementModal'
+import { ActivityDetailModal } from './ActivityDetailModal'
 
 function toYMD(d: Date): string {
   const y = d.getFullYear()
@@ -44,6 +45,7 @@ export function ActivitiesView() {
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [showNewModal, setShowNewModal] = useState(false)
   const [editingActivity, setEditingActivity] = useState<DailyActivity | null>(null)
+  const [viewingActivity, setViewingActivity] = useState<DailyActivity | null>(null)
   const [rowErrors, setRowErrors] = useState<Record<number, string>>({})
   const [showCatalogModal, setShowCatalogModal] = useState(false)
   const [azureConfig, setAzureConfig] = useState<AzureTimeLogConfigStatus | null>(null)
@@ -349,7 +351,7 @@ export function ActivitiesView() {
                     <td style={{ font: 'var(--text-mono)', color: 'var(--fg1)' }}>{a.hours.toFixed(2)}</td>
                     <td style={{ color: 'var(--fg2)' }}>{a.category}</td>
                     <td style={{ color: 'var(--fg2)', maxWidth: 320 }}>
-                      <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span style={{ display: 'block', whiteSpace: 'normal', wordBreak: 'break-word' }}>
                         {a.registro_diario}
                       </span>
                     </td>
@@ -357,16 +359,26 @@ export function ActivitiesView() {
                     <td><ActivityStatusBadge status={a.status} /></td>
                     <td>
                       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => setViewingActivity(a)}
+                          title="Ver detalle"
+                          aria-label="Ver detalle de la actividad"
+                        >
+                          <Eye size={15} strokeWidth={1.75} />
+                        </button>
+                        {a.status !== 'uploaded' && (
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => setEditingActivity(a)}
+                            title="Edit"
+                            aria-label="Edit activity"
+                          >
+                            <Pencil size={15} strokeWidth={1.75} />
+                          </button>
+                        )}
                         {a.status === 'pending' && (
                           <>
-                            <button
-                              className="btn btn-ghost btn-sm"
-                              onClick={() => setEditingActivity(a)}
-                              title="Edit"
-                              aria-label="Edit activity"
-                            >
-                              <Pencil size={15} strokeWidth={1.75} />
-                            </button>
                             <button
                               className="btn btn-ghost btn-sm"
                               onClick={() => handleApprove(a.id)}
@@ -601,6 +613,12 @@ export function ActivitiesView() {
         onCatalogChanged={() => {
           getActivityCatalog().then(setCatalog).catch(() => setCatalog(null))
         }}
+      />
+
+      <ActivityDetailModal
+        activity={viewingActivity}
+        open={viewingActivity !== null}
+        onClose={() => setViewingActivity(null)}
       />
 
     </div>
