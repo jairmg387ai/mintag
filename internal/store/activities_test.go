@@ -296,6 +296,87 @@ func TestUnapproveActivity_ApprovedToPending(t *testing.T) {
 	}
 }
 
+func TestUpdateActivity_PendingSucceeds(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	a, err := s.CreateActivity(ctx, "2026-06-12", 1.0, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo", "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := s.UpdateActivity(ctx, a.ID, 2.5, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo actualizado")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if updated.Hours != 2.5 {
+		t.Errorf("expected hours=2.5, got %v", updated.Hours)
+	}
+	if updated.RegistroDiario != "Trabajo actualizado" {
+		t.Errorf("expected updated registro_diario, got %q", updated.RegistroDiario)
+	}
+}
+
+func TestUpdateActivity_ApprovedSucceeds(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	a, err := s.CreateActivity(ctx, "2026-06-12", 1.0, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo", "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApproveActivities(ctx, []int64{a.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := s.UpdateActivity(ctx, a.ID, 3.0, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo aprobado editado")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if updated.Status != "approved" {
+		t.Errorf("expected status to remain approved, got %q", updated.Status)
+	}
+	if updated.Hours != 3.0 {
+		t.Errorf("expected hours=3.0, got %v", updated.Hours)
+	}
+}
+
+func TestUpdateActivity_UploadedRejected(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	a, err := s.CreateActivity(ctx, "2026-06-12", 1.0, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo", "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApproveActivities(ctx, []int64{a.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkUploaded(ctx, a.ID, "azure-doc-123"); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = s.UpdateActivity(ctx, a.ID, 5.0, "RNCEA", "Actividades de arquitectura, diseño y código", "Intento de edición")
+	if err == nil {
+		t.Fatal("expected error when editing an uploaded activity")
+	}
+	if !strings.Contains(err.Error(), "already been uploaded") {
+		t.Errorf("expected 'already been uploaded' in error, got: %v", err)
+	}
+}
+
 func TestMarkUploaded_ApprovedToUploaded(t *testing.T) {
 	s, err := OpenInMemory()
 	if err != nil {
