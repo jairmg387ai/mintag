@@ -165,14 +165,15 @@ func (s *Store) UnapproveActivity(ctx context.Context, id int64) error {
 }
 
 // UpdateActivity updates editable fields (hours, project, category, registro_diario)
-// of a pending activity. Returns an error if the activity is not pending.
+// of a pending or approved activity. Returns an error if the activity has
+// already been uploaded to Azure.
 func (s *Store) UpdateActivity(ctx context.Context, id int64, hours float64, project, category, registroDiario string) (*DailyActivity, error) {
 	a, err := s.GetActivity(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if a.Status != "pending" {
-		return nil, fmt.Errorf("activity %d cannot be edited: current status is %q (must be pending)", id, a.Status)
+	if a.Status == "uploaded" {
+		return nil, fmt.Errorf("activity %d cannot be edited: it has already been uploaded to Azure", id)
 	}
 	if hours > 0 {
 		a.Hours = hours

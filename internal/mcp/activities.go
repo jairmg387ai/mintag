@@ -111,7 +111,7 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 
 	// --- activity_update ---
 	s.AddTool(mcp.NewTool("activity_update",
-		mcp.WithDescription("Update editable fields (hours, project, category, registro_diario) of a pending activity. Only pending activities can be edited."),
+		mcp.WithDescription("Update editable fields (hours, project, category, registro_diario) of a pending or approved activity. Activities already uploaded to Azure cannot be edited."),
 		mcp.WithString("id", mcp.Required(), mcp.Description("Activity ID to update")),
 		mcp.WithString("hours", mcp.Description("New hours value, e.g. '2.5'")),
 		mcp.WithString("project", mcp.Description("New project name")),

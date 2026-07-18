@@ -110,7 +110,7 @@ func (srv *Server) handleCreateActivity(w http.ResponseWriter, r *http.Request) 
 //
 //	{"action":"approve"}   → ApproveActivities
 //	{"action":"unapprove"} → UnapproveActivity
-//	{other fields}         → update pending activity
+//	{other fields}         → update pending or approved activity
 func (srv *Server) handlePatchActivity(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r, "id")
 	if err != nil {
