@@ -25,6 +25,7 @@ type DailyActivity struct {
 	CreatedAt       string  `json:"created_at"`
 	UploadedAt      *string `json:"uploaded_at,omitempty"`
 	AzureDocumentID *string `json:"azure_document_id,omitempty"`
+	AzureActivityID *int64  `json:"azure_activity_id,omitempty"`
 }
 
 // UploadResult summarises the outcome of an UploadActivities call.
@@ -83,10 +84,10 @@ func (s *Store) CreateActivity(ctx context.Context, date string, hours float64, 
 func (s *Store) GetActivity(ctx context.Context, id int64) (*DailyActivity, error) {
 	a := &DailyActivity{}
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, date, hours, project, category, registro_diario, source, status, created_at, uploaded_at, azure_document_id
+		`SELECT id, date, hours, project, category, registro_diario, source, status, created_at, uploaded_at, azure_document_id, azure_activity_id
 		 FROM daily_activities WHERE id = ?`, id,
 	).Scan(&a.ID, &a.Date, &a.Hours, &a.Project, &a.Category, &a.RegistroDiario,
-		&a.Source, &a.Status, &a.CreatedAt, &a.UploadedAt, &a.AzureDocumentID)
+		&a.Source, &a.Status, &a.CreatedAt, &a.UploadedAt, &a.AzureDocumentID, &a.AzureActivityID)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("activity not found: %d", id)
 	}
@@ -95,7 +96,7 @@ func (s *Store) GetActivity(ctx context.Context, id int64) (*DailyActivity, erro
 
 // ListActivities returns activities matching the optional filters, ordered by created_at ASC.
 func (s *Store) ListActivities(ctx context.Context, date, status string) ([]*DailyActivity, error) {
-	query := `SELECT id, date, hours, project, category, registro_diario, source, status, created_at, uploaded_at, azure_document_id
+	query := `SELECT id, date, hours, project, category, registro_diario, source, status, created_at, uploaded_at, azure_document_id, azure_activity_id
 	          FROM daily_activities WHERE 1=1`
 	args := []any{}
 	if date != "" {
@@ -117,7 +118,7 @@ func (s *Store) ListActivities(ctx context.Context, date, status string) ([]*Dai
 	for rows.Next() {
 		a := &DailyActivity{}
 		if err := rows.Scan(&a.ID, &a.Date, &a.Hours, &a.Project, &a.Category, &a.RegistroDiario,
-			&a.Source, &a.Status, &a.CreatedAt, &a.UploadedAt, &a.AzureDocumentID); err != nil {
+			&a.Source, &a.Status, &a.CreatedAt, &a.UploadedAt, &a.AzureDocumentID, &a.AzureActivityID); err != nil {
 			return nil, err
 		}
 		out = append(out, a)
@@ -230,4 +231,43 @@ func (s *Store) MarkUploaded(ctx context.Context, id int64, azureDocumentID stri
 		`UPDATE daily_activities SET status = 'uploaded', uploaded_at = ?, azure_document_id = ? WHERE id = ?`, now, azureDocumentID, id,
 	)
 	return err
+}
+
+// SetActivityAzureActivity assigns (or clears, when azureActivityID is nil)
+// the azure_activity_id FK on a daily activity. Kept separate from
+// CreateActivity/UpdateActivity so their existing positional signatures
+// (used across REST, MCP, and tests) do not need to widen.
+//
+// The column has no real SQL foreign key constraint (see
+// addColumnIfMissing("daily_activities", "azure_activity_id", ...) in
+// store.go), so this validates at the application level: when
+// azureActivityID is non-nil, it must reference an existing, active
+// (is_active=1) row in azure_activities.
+func (s *Store) SetActivityAzureActivity(ctx context.Context, id int64, azureActivityID *int64) error {
+	if azureActivityID != nil {
+		var isActive bool
+		err := s.db.QueryRowContext(ctx,
+			`SELECT is_active FROM azure_activities WHERE id = ?`, *azureActivityID,
+		).Scan(&isActive)
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("azure activity not found: %d", *azureActivityID)
+		}
+		if err != nil {
+			return err
+		}
+		if !isActive {
+			return fmt.Errorf("azure activity %d is inactive and cannot be assigned", *azureActivityID)
+		}
+	}
+
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE daily_activities SET azure_activity_id = ? WHERE id = ?`, azureActivityID, id,
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("activity not found: %d", id)
+	}
+	return nil
 }
