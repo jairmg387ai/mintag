@@ -3,8 +3,15 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 )
+
+// ErrNoDefaultAzureActivity is returned by GetDefaultAzureActivity when the
+// catalog has no row with is_default=1 AND is_active=1. Callers use
+// errors.Is to distinguish this expected, recoverable state from a genuine
+// query failure (e.g. a dropped connection), which is returned as-is.
+var ErrNoDefaultAzureActivity = errors.New("no default azure activity is configured")
 
 // AzureActivity represents a managed, labeled Azure work item that
 // daily_activities records can be assigned to. Exactly one row has
@@ -121,9 +128,12 @@ func (s *Store) GetDefaultAzureActivity(ctx context.Context) (*AzureActivity, er
 		`SELECT id, org, work_item_id, label, is_active, is_default FROM azure_activities WHERE is_default = 1 AND is_active = 1`,
 	).Scan(&a.ID, &a.Org, &a.WorkItemID, &a.Label, &a.IsActive, &a.IsDefault)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("no default azure activity is configured")
+		return nil, ErrNoDefaultAzureActivity
 	}
-	return a, err
+	if err != nil {
+		return nil, err
+	}
+	return a, nil
 }
 
 // SetDefaultAzureActivity promotes id to the sole default, clearing any

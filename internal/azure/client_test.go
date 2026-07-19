@@ -283,6 +283,64 @@ func TestPostTimeEntry_TwoXXWithWhitespaceIDFails(t *testing.T) {
 	}
 }
 
+func TestPostTimeEntry_EntryWorkItemIDOverridesConfig(t *testing.T) {
+	var capturedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		capturedBody = body
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"doc-override"}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", WorkItemID: 156263, User: "U", UserID: "uid", EntryType: "T"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+
+	entry := TimeEntry{Date: "2026-06-12", Hours: 1, RegistroDiario: "x", WorkItemID: 99887}
+	if _, err := c.PostTimeEntry(context.Background(), entry); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(capturedBody, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if got := payload["workItemId"]; got != float64(99887) {
+		t.Errorf("expected workItemId=99887 (entry override), got %v", got)
+	}
+}
+
+func TestPostTimeEntry_ZeroEntryWorkItemIDFallsBackToConfig(t *testing.T) {
+	var capturedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		capturedBody = body
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"doc-fallback"}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", WorkItemID: 156263, User: "U", UserID: "uid", EntryType: "T"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+
+	entry := TimeEntry{Date: "2026-06-12", Hours: 1, RegistroDiario: "x"} // WorkItemID zero-value
+	if _, err := c.PostTimeEntry(context.Background(), entry); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(capturedBody, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if got := payload["workItemId"]; got != float64(156263) {
+		t.Errorf("expected workItemId=156263 (config fallback), got %v", got)
+	}
+}
+
 func TestPostTimeEntry_TwoXXHTMLResponseFailsWithAuthHint(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -238,6 +240,111 @@ func TestUploadActivities_NoApprovedActivities(t *testing.T) {
 	}
 	if httpCallMade {
 		t.Error("no HTTP calls should be made when there are no approved activities")
+	}
+}
+
+// TestUploadActivities_NullActivityResolvesToSeededDefault verifies that a
+// daily_activities row with AzureActivityID=nil resolves to whatever
+// azure_activities row currently has is_default=1 (the seeded 156263 row on
+// a fresh store) and that the resolved work_item_id actually reaches the
+// Azure payload, not just cfg.WorkItemID from azureClientForTest (which is
+// intentionally set to a different value so this test cannot pass by
+// accident).
+func TestUploadActivities_NullActivityResolvesToSeededDefault(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	a, err := s.CreateActivity(ctx, "2026-06-12", 1.0, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo", "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApproveActivities(ctx, []int64{a.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	var capturedWorkItemID float64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &payload)
+		capturedWorkItemID, _ = payload["workItemId"].(float64)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"azure-doc-default"}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+	// azureClientForTest uses cfg.WorkItemID=1, deliberately different from
+	// the seeded default (156263), so this only passes if resolution
+	// actually reads from the azure_activities catalog.
+	az := azureClientForTest(srv)
+
+	result, err := s.UploadActivities(ctx, "2026-06-12", az)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.UploadedCount != 1 {
+		t.Fatalf("expected 1 upload, got %d (errors: %v)", result.UploadedCount, result.Errors)
+	}
+	if capturedWorkItemID != 156263 {
+		t.Errorf("expected workItemId=156263 (seeded default), got %v", capturedWorkItemID)
+	}
+}
+
+// TestUploadActivities_ExplicitActivityOverridesDefault seeds a non-default
+// azure activity, assigns it to a daily_activities row, and verifies the
+// uploaded payload targets that activity's work_item_id rather than the
+// default's — exercising per-entry resolution, not just the default path.
+func TestUploadActivities_ExplicitActivityOverridesDefault(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	nonDefault, err := s.AddAzureActivity(ctx, "RUNT2PSW", 999111, "QA Activity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nonDefault.IsDefault {
+		t.Fatal("expected the second-added activity to NOT be default (seeded default already exists)")
+	}
+
+	a, err := s.CreateActivity(ctx, "2026-06-12", 1.0, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo", "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetActivityAzureActivity(ctx, a.ID, &nonDefault.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApproveActivities(ctx, []int64{a.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	var capturedWorkItemID float64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &payload)
+		capturedWorkItemID, _ = payload["workItemId"].(float64)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"azure-doc-explicit"}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+	az := azureClientForTest(srv)
+
+	result, err := s.UploadActivities(ctx, "2026-06-12", az)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.UploadedCount != 1 {
+		t.Fatalf("expected 1 upload, got %d (errors: %v)", result.UploadedCount, result.Errors)
+	}
+	if capturedWorkItemID != 999111 {
+		t.Errorf("expected workItemId=999111 (explicit non-default activity), got %v", capturedWorkItemID)
 	}
 }
 
