@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Gentleman-Programming/mintag/internal/azure"
+	"github.com/Gentleman-Programming/mintag/internal/store"
 )
 
 func isNotFound(err error) bool {
@@ -36,6 +38,11 @@ var reActivityDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 //	DELETE /api/activities/catalog/projects/{name}
 //	POST   /api/activities/catalog/categories
 //	DELETE /api/activities/catalog/categories/{name}
+//	GET    /api/activities/azure-catalog
+//	POST   /api/activities/azure-catalog
+//	PATCH  /api/activities/azure-catalog/{id}
+//	DELETE /api/activities/azure-catalog/{id}
+//	POST   /api/activities/azure-catalog/{id}/default
 //	POST   /api/activities/upload                    ?date=
 //	PATCH  /api/activities/{id}
 //	DELETE /api/activities/{id}
@@ -52,6 +59,16 @@ func registerActivityRoutes(r chi.Router, srv *Server) {
 	r.Delete("/activities/catalog/projects/{name}", srv.handleRemoveCatalogProject)
 	r.Post("/activities/catalog/categories", srv.handleAddCatalogCategory)
 	r.Delete("/activities/catalog/categories/{name}", srv.handleRemoveCatalogCategory)
+	// azure-catalog routes are grouped here, before /activities/{id}, to
+	// match the reading order of /activities/catalog and /activities/upload
+	// above (chi's radix tree already prioritizes static segments over
+	// {id} regardless of registration order, so this is for readability,
+	// not a routing requirement).
+	r.Get("/activities/azure-catalog", srv.handleListAzureActivities)
+	r.With(requireLocalRequest).Post("/activities/azure-catalog", srv.handleAddAzureActivity)
+	r.With(requireLocalRequest).Patch("/activities/azure-catalog/{id}", srv.handleUpdateAzureActivity)
+	r.With(requireLocalRequest).Delete("/activities/azure-catalog/{id}", srv.handleDeactivateAzureActivity)
+	r.With(requireLocalRequest).Post("/activities/azure-catalog/{id}/default", srv.handleSetDefaultAzureActivity)
 	r.With(requireLocalRequest).Post("/activities/upload", srv.handleUploadActivities)
 	r.Patch("/activities/{id}", srv.handlePatchActivity)
 	r.Delete("/activities/{id}", srv.handleDeleteActivity)
@@ -76,12 +93,13 @@ func (srv *Server) handleListActivities(w http.ResponseWriter, r *http.Request) 
 // POST /api/activities
 func (srv *Server) handleCreateActivity(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Date           string  `json:"date"`
-		Hours          float64 `json:"hours"`
-		Project        string  `json:"project"`
-		Category       string  `json:"category"`
-		RegistroDiario string  `json:"registro_diario"`
-		Source         string  `json:"source"`
+		Date            string  `json:"date"`
+		Hours           float64 `json:"hours"`
+		Project         string  `json:"project"`
+		Category        string  `json:"category"`
+		RegistroDiario  string  `json:"registro_diario"`
+		Source          string  `json:"source"`
+		AzureActivityID *int64  `json:"azure_activity_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -95,14 +113,42 @@ func (srv *Server) handleCreateActivity(w http.ResponseWriter, r *http.Request) 
 		body.Source = "manual"
 	}
 
-	a, err := srv.st.CreateActivity(r.Context(), body.Date, body.Hours, body.Project, body.Category, body.RegistroDiario, body.Source)
+	ctx := r.Context()
+	a, err := srv.st.CreateActivity(ctx, body.Date, body.Hours, body.Project, body.Category, body.RegistroDiario, body.Source)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
 	}
+	if a, err = srv.applyAzureActivityID(w, ctx, a, body.AzureActivityID); err != nil {
+		return // response already written by applyAzureActivityID
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(a)
+}
+
+// applyAzureActivityID assigns azureActivityID (when non-nil) as the
+// activity's azure_activity_id FK and reloads the row, so callers see the
+// field populated in the response. Shared by handleCreateActivity and
+// handlePatchActivity's default case, which both need to set the FK right
+// after a create/update and return the refreshed activity. On error, it
+// writes the HTTP response itself (422 for a rejected FK — e.g. missing or
+// inactive azure activity — 500 for a reload failure) and returns a non-nil
+// error so the caller can short-circuit without writing a second response.
+func (srv *Server) applyAzureActivityID(w http.ResponseWriter, ctx context.Context, a *store.DailyActivity, azureActivityID *int64) (*store.DailyActivity, error) {
+	if azureActivityID == nil {
+		return a, nil
+	}
+	if err := srv.st.SetActivityAzureActivity(ctx, a.ID, azureActivityID); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return nil, err
+	}
+	a, err := srv.st.GetActivity(ctx, a.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return nil, err
+	}
+	return a, nil
 }
 
 // PATCH /api/activities/{id}
@@ -119,11 +165,12 @@ func (srv *Server) handlePatchActivity(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Action         string  `json:"action"`
-		Hours          float64 `json:"hours"`
-		Project        string  `json:"project"`
-		Category       string  `json:"category"`
-		RegistroDiario string  `json:"registro_diario"`
+		Action          string  `json:"action"`
+		Hours           float64 `json:"hours"`
+		Project         string  `json:"project"`
+		Category        string  `json:"category"`
+		RegistroDiario  string  `json:"registro_diario"`
+		AzureActivityID *int64  `json:"azure_activity_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -169,6 +216,9 @@ func (srv *Server) handlePatchActivity(w http.ResponseWriter, r *http.Request) {
 			}
 			http.Error(w, err.Error(), status)
 			return
+		}
+		if a, err = srv.applyAzureActivityID(w, ctx, a, body.AzureActivityID); err != nil {
+			return // response already written by applyAzureActivityID
 		}
 		writeJSON(w, a, nil)
 	}
@@ -402,4 +452,99 @@ func (srv *Server) handleRemoveCatalogCategory(w http.ResponseWriter, r *http.Re
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// GET /api/activities/azure-catalog
+func (srv *Server) handleListAzureActivities(w http.ResponseWriter, r *http.Request) {
+	activities, err := srv.st.ListAzureActivities(r.Context(), false)
+	writeJSON(w, activities, err)
+}
+
+// POST /api/activities/azure-catalog
+func (srv *Server) handleAddAzureActivity(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Org        string `json:"org"`
+		WorkItemID int    `json:"work_item_id"`
+		Label      string `json:"label"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	a, err := srv.st.AddAzureActivity(r.Context(), body.Org, body.WorkItemID, body.Label)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(a)
+}
+
+// PATCH /api/activities/azure-catalog/{id}
+// Despite the verb, this is a full replace, not a partial update: org and
+// label are both required (see UpdateAzureActivity), so a caller renaming
+// only one field must still send the other's current value.
+func (srv *Server) handleUpdateAzureActivity(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	var body struct {
+		Org   string `json:"org"`
+		Label string `json:"label"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	a, err := srv.st.UpdateAzureActivity(r.Context(), id, body.Org, body.Label)
+	if err != nil {
+		status := http.StatusUnprocessableEntity
+		if isNotFound(err) {
+			status = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	writeJSON(w, a, nil)
+}
+
+// DELETE /api/activities/azure-catalog/{id}
+func (srv *Server) handleDeactivateAzureActivity(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := srv.st.DeactivateAzureActivity(r.Context(), id); err != nil {
+		status := http.StatusUnprocessableEntity
+		if isNotFound(err) {
+			status = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// POST /api/activities/azure-catalog/{id}/default
+func (srv *Server) handleSetDefaultAzureActivity(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	ctx := r.Context()
+	if err := srv.st.SetDefaultAzureActivity(ctx, id); err != nil {
+		status := http.StatusUnprocessableEntity
+		if isNotFound(err) {
+			status = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	a, err := srv.st.GetDefaultAzureActivity(ctx)
+	writeJSON(w, a, err)
 }

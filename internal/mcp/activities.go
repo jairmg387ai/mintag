@@ -13,8 +13,10 @@ import (
 	"github.com/Gentleman-Programming/mintag/internal/store"
 )
 
-// registerActivityTools registers the four daily-activity MCP tools:
-// activity_log, activity_list, activity_approve, activity_upload.
+// registerActivityTools registers the daily-activity MCP tools: activity_log,
+// activity_list, activity_approve, activity_upload, the timelog_projects/
+// timelog_categories catalog tools, and the azure_activities catalog tools
+// (catalog_azure_activity_add/list/set_default/remove).
 func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 
 	// --- activity_log ---
@@ -242,5 +244,81 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 			return errResult(err)
 		}
 		return jsonResult(map[string]string{"removed": name}, nil)
+	})
+
+	// --- catalog_azure_activity_add ---
+	s.AddTool(mcp.NewTool("catalog_azure_activity_add",
+		mcp.WithDescription("Add a new Azure work-item activity to the catalog. The first activity added automatically becomes the default."),
+		mcp.WithString("org", mcp.Required(), mcp.Description("Azure DevOps organization/project key, e.g. 'RUNT2PSW'")),
+		mcp.WithString("work_item_id", mcp.Required(), mcp.Description("Azure DevOps work item ID, e.g. '156263'")),
+		mcp.WithString("label", mcp.Required(), mcp.Description("Human-readable label for this activity")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		org, err := req.RequireString("org")
+		if err != nil {
+			return errResult(err)
+		}
+		workItemIDStr, err := req.RequireString("work_item_id")
+		if err != nil {
+			return errResult(err)
+		}
+		workItemID, err := strconv.Atoi(workItemIDStr)
+		if err != nil {
+			return errResult(fmt.Errorf("work_item_id must be an integer, got %q", workItemIDStr))
+		}
+		label, err := req.RequireString("label")
+		if err != nil {
+			return errResult(err)
+		}
+		a, err := st.AddAzureActivity(ctx, org, workItemID, label)
+		return jsonResult(a, err)
+	})
+
+	// --- catalog_azure_activity_list ---
+	s.AddTool(mcp.NewTool("catalog_azure_activity_list",
+		mcp.WithDescription("List Azure work-item activities in the catalog."),
+		mcp.WithString("include_inactive", mcp.Description("'true' to include soft-deleted (inactive) activities; default 'false'")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		includeInactive := req.GetString("include_inactive", "") == "true"
+		activities, err := st.ListAzureActivities(ctx, includeInactive)
+		return jsonResult(activities, err)
+	})
+
+	// --- catalog_azure_activity_set_default ---
+	s.AddTool(mcp.NewTool("catalog_azure_activity_set_default",
+		mcp.WithDescription("Set an Azure activity as the default used when a daily activity has no explicit assignment."),
+		mcp.WithString("id", mcp.Required(), mcp.Description("Azure activity ID to promote to default")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		idStr, err := req.RequireString("id")
+		if err != nil {
+			return errResult(err)
+		}
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			return errResult(fmt.Errorf("id must be an integer, got %q", idStr))
+		}
+		if err := st.SetDefaultAzureActivity(ctx, id); err != nil {
+			return errResult(err)
+		}
+		a, err := st.GetDefaultAzureActivity(ctx)
+		return jsonResult(a, err)
+	})
+
+	// --- catalog_azure_activity_remove ---
+	s.AddTool(mcp.NewTool("catalog_azure_activity_remove",
+		mcp.WithDescription("Soft-delete (deactivate) an Azure activity from the catalog. The current default cannot be removed; promote another activity to default first."),
+		mcp.WithString("id", mcp.Required(), mcp.Description("Azure activity ID to deactivate")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		idStr, err := req.RequireString("id")
+		if err != nil {
+			return errResult(err)
+		}
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			return errResult(fmt.Errorf("id must be an integer, got %q", idStr))
+		}
+		if err := st.DeactivateAzureActivity(ctx, id); err != nil {
+			return errResult(err)
+		}
+		return jsonResult(map[string]any{"deactivated": id}, nil)
 	})
 }
