@@ -33,6 +33,7 @@ type TimeEntry struct {
 	Date           string  // YYYY-MM-DD
 	Hours          float64 // will be converted to integer minutes
 	RegistroDiario string  // sent as "comment"
+	WorkItemID     int     // per-entry override; 0 means fall back to Config.WorkItemID
 }
 
 // Client is the Azure TimeLog HTTP client.
@@ -98,13 +99,22 @@ func (c *Client) PostTimeEntry(ctx context.Context, e TimeEntry) (string, error)
 		return "", err
 	}
 
+	// Per-entry WorkItemID overrides the batch-level default so a single
+	// client/token can upload entries targeting different work items.
+	// >0 (not !=0) so a negative value is also treated as unset rather than
+	// forwarded to Azure as an invalid id.
+	workItemID := c.cfg.WorkItemID
+	if e.WorkItemID > 0 {
+		workItemID = e.WorkItemID
+	}
+
 	payload := map[string]any{
 		"minutes":    minutes,
 		"user":       c.cfg.User,
 		"userId":     c.cfg.UserID,
 		"date":       e.Date,
 		"dateWeek":   dateWeek,
-		"workItemId": c.cfg.WorkItemID,
+		"workItemId": workItemID,
 		"type":       c.cfg.EntryType,
 		"comment":    e.RegistroDiario,
 	}
