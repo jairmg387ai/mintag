@@ -171,3 +171,100 @@ func TestPatchActivitySetsAzureActivityID(t *testing.T) {
 		t.Fatalf("expected azure_activity_id=1, got %#v", patched.AzureActivityID)
 	}
 }
+
+// TestPatchActivityOmittingAzureActivityIDLeavesFKUntouched is a regression
+// test for a bug found during review: a bare *int64 can't distinguish
+// "azure_activity_id omitted from the request" from "explicitly null", so an
+// earlier version of applyAzureActivityID re-validated (and could reject) an
+// unrelated, already-set FK on every PATCH — even one that only changes
+// hours. It reproduces the reported failure mode: assign a non-default
+// activity, deactivate it (an explicitly supported state per
+// DeactivateAzureActivity's contract — historical references must survive
+// deactivation), then PATCH an unrelated field and confirm it still succeeds
+// and the FK is left exactly as it was.
+func TestPatchActivityOmittingAzureActivityIDLeavesFKUntouched(t *testing.T) {
+	base, _ := newTestServer(t)
+
+	addResp := doJSON(t, http.MethodPost, base+"/api/activities/azure-catalog", map[string]any{
+		"org": "RUNT2QA", "work_item_id": 999222, "label": "To be deactivated",
+	})
+	assertStatus(t, addResp, http.StatusCreated)
+	var added struct {
+		ID int64 `json:"id"`
+	}
+	decodeJSON(t, addResp, &added)
+
+	createResp := doJSON(t, http.MethodPost, base+"/api/activities", map[string]any{
+		"date": "2026-07-19", "hours": 1.0, "project": "RNCEA",
+		"category":          "Actividades de arquitectura, diseño y código",
+		"registro_diario":   "assigned to a soon-to-be-deactivated activity",
+		"source":            "manual",
+		"azure_activity_id": added.ID,
+	})
+	assertStatus(t, createResp, http.StatusCreated)
+	var created struct {
+		ID              int64  `json:"id"`
+		AzureActivityID *int64 `json:"azure_activity_id"`
+	}
+	decodeJSON(t, createResp, &created)
+	if created.AzureActivityID == nil || *created.AzureActivityID != added.ID {
+		t.Fatalf("expected azure_activity_id=%d, got %#v", added.ID, created.AzureActivityID)
+	}
+
+	// added.ID is not the default (seeded id=1 is), so it can be deactivated
+	// directly — deactivation must preserve the historical FK reference.
+	deactivateResp := doJSON(t, http.MethodDelete, base+"/api/activities/azure-catalog/"+strconv.FormatInt(added.ID, 10), nil)
+	assertStatus(t, deactivateResp, http.StatusNoContent)
+	deactivateResp.Body.Close()
+
+	// PATCH an unrelated field only — azure_activity_id is omitted, not null.
+	patchResp := doJSON(t, http.MethodPatch, base+"/api/activities/"+strconv.FormatInt(created.ID, 10), map[string]any{
+		"hours": 3.5, "project": "RNCEA", "category": "Actividades de arquitectura, diseño y código",
+		"registro_diario": "hours updated, azure activity untouched",
+	})
+	assertStatus(t, patchResp, http.StatusOK)
+	var patched struct {
+		Hours           float64 `json:"hours"`
+		AzureActivityID *int64  `json:"azure_activity_id"`
+	}
+	decodeJSON(t, patchResp, &patched)
+	if patched.Hours != 3.5 {
+		t.Fatalf("expected hours=3.5, got %v", patched.Hours)
+	}
+	if patched.AzureActivityID == nil || *patched.AzureActivityID != added.ID {
+		t.Fatalf("expected azure_activity_id to remain %d untouched, got %#v", added.ID, patched.AzureActivityID)
+	}
+}
+
+// TestPatchActivityExplicitNullClearsAzureActivityID verifies that sending
+// azure_activity_id as an explicit JSON null (as opposed to omitting the
+// field) clears the FK back to "use the current default", closing the gap
+// where the UI previously had no way to revert an explicit assignment.
+func TestPatchActivityExplicitNullClearsAzureActivityID(t *testing.T) {
+	base, _ := newTestServer(t)
+
+	createResp := doJSON(t, http.MethodPost, base+"/api/activities", map[string]any{
+		"date": "2026-07-19", "hours": 1.0, "project": "RNCEA",
+		"category":          "Actividades de arquitectura, diseño y código",
+		"registro_diario":   "will be cleared back to default",
+		"source":            "manual",
+		"azure_activity_id": 1,
+	})
+	assertStatus(t, createResp, http.StatusCreated)
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	decodeJSON(t, createResp, &created)
+
+	patchResp := doJSON(t, http.MethodPatch, base+"/api/activities/"+strconv.FormatInt(created.ID, 10), map[string]any{
+		"azure_activity_id": nil,
+	})
+	assertStatus(t, patchResp, http.StatusOK)
+	var patched struct {
+		AzureActivityID *int64 `json:"azure_activity_id"`
+	}
+	decodeJSON(t, patchResp, &patched)
+	if patched.AzureActivityID != nil {
+		t.Fatalf("expected azure_activity_id to be cleared to nil, got %#v", *patched.AzureActivityID)
+	}
+}

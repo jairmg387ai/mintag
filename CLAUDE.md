@@ -120,7 +120,7 @@ Tools exposed, by file:
 - **`mcp.go`** (Meetings/Tasks): `project_create`, `project_list`, `meeting_import`, `meeting_find_or_create`, `meeting_search`, `meeting_set_rich_content`, `task_create`, `task_upsert`, `task_update`, `task_search`, `task_history`, `tasks_by_project`
 - **`graph.go`** (Knowledge Graph): `graph_stats`, `graph_search`, `graph_node`, `graph_neighbors`, `graph_impact`, `graph_upsert_node`, `graph_upsert_edge`
 - **`deployment_windows.go`** (Deployment Windows): `dw_create`, `dw_list`, `dw_get`, `dw_update_state`, `dw_add_task`, `dw_remove_task`, `dw_add_repo`, `dw_update_repo`, `dw_remove_repo`, `dw_add_artifact`, `dw_update_artifact`, `dw_remove_artifact`, `dw_add_test_scenario`, `dw_update_test_scenario`, `dw_remove_test_scenario`, `dw_sign_off_scenario`, `dw_export_markdown`
-- **`activities.go`** (Activities/TimeLog + catalog): `activity_log`, `activity_list`, `activity_approve`, `activity_update`, `activity_upload`, `activity_delete`, `catalog_project_add`, `catalog_project_remove`, `catalog_category_add`, `catalog_category_remove`
+- **`activities.go`** (Activities/TimeLog + catalog): `activity_log`, `activity_list`, `activity_approve`, `activity_update`, `activity_upload`, `activity_delete`, `catalog_project_add`, `catalog_project_remove`, `catalog_category_add`, `catalog_category_remove`, `catalog_azure_activity_add`, `catalog_azure_activity_list`, `catalog_azure_activity_set_default`, `catalog_azure_activity_remove`
 
 All tools serialize results as JSON text via `jsonResult()`. Errors are returned as `{"error":"..."}` text, never as Go errors, so Claude can read them.
 

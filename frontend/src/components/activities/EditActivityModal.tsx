@@ -1,7 +1,8 @@
 import { useState, useEffect, type CSSProperties } from 'react'
 import { X } from 'lucide-react'
-import type { DailyActivity, ActivityCatalog } from '../../types'
+import type { DailyActivity, ActivityCatalog, AzureActivity } from '../../types'
 import { updateActivity } from '../../api/client'
+import { findDefaultAzureActivity } from './azureActivity'
 
 interface EditActivityModalProps {
   activity: DailyActivity | null
@@ -9,6 +10,7 @@ interface EditActivityModalProps {
   onClose: () => void
   onSaved: () => void
   catalog: ActivityCatalog | null
+  azureActivities: AzureActivity[]
 }
 
 const inputStyle: CSSProperties = {
@@ -46,11 +48,17 @@ function Field({ label, children, error }: { label: string; children: React.Reac
   )
 }
 
-export function EditActivityModal({ activity, open, onClose, onSaved, catalog }: EditActivityModalProps) {
+export function EditActivityModal({ activity, open, onClose, onSaved, catalog, azureActivities }: EditActivityModalProps) {
   const [hours, setHours] = useState('')
   const [project, setProject] = useState('')
   const [category, setCategory] = useState('')
   const [registroDiario, setRegistroDiario] = useState('')
+  const [azureActivityId, setAzureActivityId] = useState('')
+  // Snapshot of azureActivityId as loaded, so handleSubmit can tell "the
+  // user didn't touch this field" (send nothing, don't re-validate an
+  // unrelated FK) apart from "the user picked something different"
+  // (send the new value, including an explicit null to clear it).
+  const [initialAzureActivityId, setInitialAzureActivityId] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
@@ -61,12 +69,17 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog }:
       setProject(activity.project)
       setCategory(activity.category)
       setRegistroDiario(activity.registro_diario)
+      const loadedAzureActivityId = activity.azure_activity_id != null ? String(activity.azure_activity_id) : ''
+      setAzureActivityId(loadedAzureActivityId)
+      setInitialAzureActivityId(loadedAzureActivityId)
       setErrors({})
       setSubmitError('')
     }
   }, [open, activity])
 
   if (!open || !activity) return null
+
+  const defaultAzureActivity = findDefaultAzureActivity(azureActivities)
 
   function validate(): boolean {
     const errs: Record<string, string> = {}
@@ -89,6 +102,12 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog }:
         project: project.trim(),
         category: category.trim(),
         registro_diario: registroDiario.trim(),
+        // Omit the key entirely when the selection didn't change, so a save
+        // that only edits e.g. hours never re-touches (and re-validates) an
+        // unrelated, possibly since-deactivated Azure activity assignment.
+        ...(azureActivityId !== initialAzureActivityId
+          ? { azure_activity_id: azureActivityId ? Number(azureActivityId) : null }
+          : {}),
       })
       onSaved()
       onClose()
@@ -228,6 +247,23 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog }:
               onChange={e => setRegistroDiario(e.target.value)}
               placeholder="project/category/description..."
             />
+          </Field>
+
+          <Field label="Azure Activity">
+            <select
+              style={inputStyle}
+              value={azureActivityId}
+              onChange={e => setAzureActivityId(e.target.value)}
+            >
+              <option value="">
+                Use default{defaultAzureActivity ? ` (${defaultAzureActivity.label})` : ''}
+              </option>
+              {azureActivities.map(a => (
+                <option key={a.id} value={a.id}>
+                  {a.label}{a.is_default ? ' (default)' : ''}
+                </option>
+              ))}
+            </select>
           </Field>
 
           {submitError && (

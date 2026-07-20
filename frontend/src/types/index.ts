@@ -209,6 +209,16 @@ export interface DailyActivity {
   created_at: string
   uploaded_at?: string
   azure_document_id?: string
+  azure_activity_id?: number | null
+}
+
+export interface AzureActivity {
+  id: number
+  org: string
+  work_item_id: number
+  label: string
+  is_active: boolean
+  is_default: boolean
 }
 
 export interface UploadResult {

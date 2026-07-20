@@ -14,6 +14,7 @@ import type {
   DailyActivity,
   UploadResult,
   ActivityCatalog,
+  AzureActivity,
   AzureTimeLogConfigStatus,
   AzureDeviceCodeStartResponse,
   AzureDeviceCodeCompleteResponse,
@@ -170,7 +171,11 @@ export function approveActivity(id: number): Promise<{ approved: number }> {
 
 export function updateActivity(
   id: number,
-  body: { hours?: number; project?: string; category?: string; registro_diario?: string },
+  // azure_activity_id: number sets it, null clears it back to "use the
+  // current default", undefined (i.e. omitted) leaves it untouched —
+  // JSON.stringify drops undefined keys but keeps explicit null ones, and
+  // the backend's PATCH handler distinguishes the two the same way.
+  body: { hours?: number; project?: string; category?: string; registro_diario?: string; azure_activity_id?: number | null },
 ): Promise<DailyActivity> {
   return request<DailyActivity>(`/api/activities/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
 }
@@ -240,6 +245,32 @@ export async function removeCatalogCategory(name: string): Promise<void> {
     headers: { 'Content-Type': 'application/json' },
   })
   if (!res.ok) throw new Error(await res.text())
+}
+
+// --- Azure Activity Catalog (work items) ---
+
+export function listAzureActivities(): Promise<AzureActivity[]> {
+  return request<AzureActivity[]>('/api/activities/azure-catalog')
+}
+
+export function addAzureActivity(body: { org: string; work_item_id: number; label: string }): Promise<AzureActivity> {
+  return request<AzureActivity>('/api/activities/azure-catalog', { method: 'POST', body: JSON.stringify(body) })
+}
+
+export function updateAzureActivity(id: number, body: { org: string; label: string }): Promise<AzureActivity> {
+  return request<AzureActivity>(`/api/activities/azure-catalog/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
+}
+
+export async function deactivateAzureActivity(id: number): Promise<void> {
+  const res = await fetch(`/api/activities/azure-catalog/${id}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!res.ok) throw new Error(await res.text())
+}
+
+export function setDefaultAzureActivity(id: number): Promise<AzureActivity> {
+  return request<AzureActivity>(`/api/activities/azure-catalog/${id}/default`, { method: 'POST' })
 }
 
 export function updateMeetingSummary(id: number, summary: string): Promise<Meeting> {
