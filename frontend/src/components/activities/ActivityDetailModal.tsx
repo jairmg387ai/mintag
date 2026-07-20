@@ -1,12 +1,14 @@
 import type { CSSProperties } from 'react'
 import { X } from 'lucide-react'
-import type { DailyActivity } from '../../types'
+import type { DailyActivity, AzureActivity } from '../../types'
 import { ActivityStatusBadge, ActivitySourceBadge } from './ActivityStatusBadge'
+import { resolveAzureActivityLabel } from './azureActivity'
 
 interface ActivityDetailModalProps {
   activity: DailyActivity | null
   open: boolean
   onClose: () => void
+  azureActivities: AzureActivity[]
 }
 
 const valueStyle: CSSProperties = {
@@ -33,7 +35,7 @@ function DetailField({ label, children }: { label: string; children: React.React
   )
 }
 
-export function ActivityDetailModal({ activity, open, onClose }: ActivityDetailModalProps) {
+export function ActivityDetailModal({ activity, open, onClose, azureActivities }: ActivityDetailModalProps) {
   if (!open || !activity) return null
 
   return (
@@ -142,6 +144,12 @@ export function ActivityDetailModal({ activity, open, onClose }: ActivityDetailM
               <ActivityStatusBadge status={activity.status} />
             </DetailField>
           </div>
+
+          <DetailField label="Azure Activity">
+            <div style={valueStyle}>
+              {resolveAzureActivityLabel(activity.azure_activity_id, azureActivities)}
+            </div>
+          </DetailField>
 
           <DetailField label="Creado">
             <div style={valueStyle}>{new Date(activity.created_at).toLocaleString()}</div>

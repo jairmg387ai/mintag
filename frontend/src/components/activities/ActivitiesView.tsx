@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, Fragment } from 'react'
 import { ChevronLeft, ChevronRight, Plus, Upload, CheckCircle, RotateCcw, RefreshCw, Pencil, Trash2, Settings, Eye } from 'lucide-react'
-import type { DailyActivity, ActivityCatalog, UploadResult, AzureTimeLogConfigStatus } from '../../types'
+import type { DailyActivity, ActivityCatalog, UploadResult, AzureTimeLogConfigStatus, AzureActivity } from '../../types'
 import {
   listActivities,
   approveActivity,
@@ -13,8 +13,10 @@ import {
   clearAzureTimeLogConfig,
   startAzureDeviceAuth,
   completeAzureDeviceAuth,
+  listAzureActivities,
 } from '../../api/client'
 import { ActivityStatusBadge, ActivitySourceBadge } from './ActivityStatusBadge'
+import { resolveAzureActivityLabel } from './azureActivity'
 import { NewActivityModal } from './NewActivityModal'
 import { EditActivityModal } from './EditActivityModal'
 import { CatalogManagementModal } from './CatalogManagementModal'
@@ -38,6 +40,7 @@ export function ActivitiesView() {
   const [date, setDate] = useState<string>(() => toYMD(new Date()))
   const [activities, setActivities] = useState<DailyActivity[]>([])
   const [catalog, setCatalog] = useState<ActivityCatalog | null>(null)
+  const [azureActivities, setAzureActivities] = useState<AzureActivity[]>([])
   const [loading, setLoading] = useState(false)
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
@@ -68,14 +71,19 @@ export function ActivitiesView() {
     }
   }, [])
 
-  // Catalog loads once on mount
+  const refreshAzureActivities = useCallback(() => {
+    listAzureActivities().then(setAzureActivities).catch(() => setAzureActivities([]))
+  }, [])
+
+  // Catalogs load once on mount
   useEffect(() => {
     getActivityCatalog().then(setCatalog).catch(() => setCatalog(null))
     getAzureTimeLogConfig().then(cfg => {
       setAzureConfig(cfg)
       setAzureAuthMode(cfg.auth_mode === 'basic' ? 'basic' : 'bearer')
     }).catch(() => setAzureConfig(null))
-  }, [])
+    refreshAzureActivities()
+  }, [refreshAzureActivities])
 
   // Re-fetch on date change (also covers initial load)
   useEffect(() => {
@@ -339,6 +347,7 @@ export function ActivitiesView() {
                 <th>CATEGORÍA</th>
                 <th>REGISTRO DIARIO</th>
                 <th>ORIGEN</th>
+                <th>AZURE</th>
                 <th>ESTADO</th>
                 <th>ACCIONES</th>
               </tr>
@@ -356,6 +365,11 @@ export function ActivitiesView() {
                       </span>
                     </td>
                     <td><ActivitySourceBadge source={a.source} /></td>
+                    <td>
+                      <span style={{ font: 'var(--text-caption)', color: 'var(--fg3)' }}>
+                        {resolveAzureActivityLabel(a.azure_activity_id, azureActivities)}
+                      </span>
+                    </td>
                     <td><ActivityStatusBadge status={a.status} /></td>
                     <td>
                       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -422,7 +436,7 @@ export function ActivitiesView() {
                   </tr>
                   {rowErrors[a.id] && (
                     <tr>
-                      <td colSpan={7} style={{ padding: '4px 16px 10px', color: 'var(--block-solid)', font: 'var(--text-caption)' }}>
+                      <td colSpan={8} style={{ padding: '4px 16px 10px', color: 'var(--block-solid)', font: 'var(--text-caption)' }}>
                         {rowErrors[a.id]}
                       </td>
                     </tr>
@@ -593,6 +607,7 @@ export function ActivitiesView() {
           fetchActivities(date)
         }}
         catalog={catalog}
+        azureActivities={azureActivities}
       />
 
       <NewActivityModal
@@ -604,6 +619,7 @@ export function ActivitiesView() {
         }}
         catalog={catalog}
         defaultDate={date}
+        azureActivities={azureActivities}
       />
 
       <CatalogManagementModal
@@ -613,12 +629,15 @@ export function ActivitiesView() {
         onCatalogChanged={() => {
           getActivityCatalog().then(setCatalog).catch(() => setCatalog(null))
         }}
+        azureActivities={azureActivities}
+        onAzureActivitiesChanged={refreshAzureActivities}
       />
 
       <ActivityDetailModal
         activity={viewingActivity}
         open={viewingActivity !== null}
         onClose={() => setViewingActivity(null)}
+        azureActivities={azureActivities}
       />
 
     </div>

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"regexp"
 	"strings"
@@ -119,7 +120,10 @@ func (srv *Server) handleCreateActivity(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
 	}
-	if a, err = srv.applyAzureActivityID(w, ctx, a, body.AzureActivityID); err != nil {
+	// On create there's no prior state to preserve, so "field present in
+	// JSON" and "pointer non-nil" agree — no need for raw-body presence
+	// detection here (contrast with handlePatchActivity below).
+	if a, err = srv.applyAzureActivityID(w, ctx, a, body.AzureActivityID, body.AzureActivityID != nil); err != nil {
 		return // response already written by applyAzureActivityID
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -127,16 +131,18 @@ func (srv *Server) handleCreateActivity(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(a)
 }
 
-// applyAzureActivityID assigns azureActivityID (when non-nil) as the
-// activity's azure_activity_id FK and reloads the row, so callers see the
-// field populated in the response. Shared by handleCreateActivity and
-// handlePatchActivity's default case, which both need to set the FK right
-// after a create/update and return the refreshed activity. On error, it
+// applyAzureActivityID sets or clears the activity's azure_activity_id FK
+// and reloads the row, so callers see the field populated in the response.
+// provided distinguishes "the caller wants this field touched" (azureActivityID
+// itself may still be nil, meaning "clear it") from "leave it as-is" — callers
+// must compute this themselves, since a bare *int64 can't tell "omitted from
+// the request" and "explicitly set to null" apart. Shared by
+// handleCreateActivity and handlePatchActivity's default case. On error, it
 // writes the HTTP response itself (422 for a rejected FK — e.g. missing or
 // inactive azure activity — 500 for a reload failure) and returns a non-nil
 // error so the caller can short-circuit without writing a second response.
-func (srv *Server) applyAzureActivityID(w http.ResponseWriter, ctx context.Context, a *store.DailyActivity, azureActivityID *int64) (*store.DailyActivity, error) {
-	if azureActivityID == nil {
+func (srv *Server) applyAzureActivityID(w http.ResponseWriter, ctx context.Context, a *store.DailyActivity, azureActivityID *int64, provided bool) (*store.DailyActivity, error) {
+	if !provided {
 		return a, nil
 	}
 	if err := srv.st.SetActivityAzureActivity(ctx, a.ID, azureActivityID); err != nil {
@@ -164,6 +170,12 @@ func (srv *Server) handlePatchActivity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	var body struct {
 		Action          string  `json:"action"`
 		Hours           float64 `json:"hours"`
@@ -172,10 +184,19 @@ func (srv *Server) handlePatchActivity(w http.ResponseWriter, r *http.Request) {
 		RegistroDiario  string  `json:"registro_diario"`
 		AzureActivityID *int64  `json:"azure_activity_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.Unmarshal(bodyBytes, &body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	// A bare *int64 can't distinguish "azure_activity_id omitted" (leave
+	// unchanged) from "azure_activity_id explicitly null" (clear it back to
+	// the default) — both decode to a nil pointer. Check the raw JSON keys
+	// instead so a PATCH that only edits e.g. hours never re-touches (and
+	// re-validates) an unrelated, possibly since-deactivated FK.
+	var rawFields map[string]json.RawMessage
+	_ = json.Unmarshal(bodyBytes, &rawFields) // already validated above; re-parse can't fail
+	_, azureActivityIDProvided := rawFields["azure_activity_id"]
 
 	ctx := r.Context()
 	switch body.Action {
@@ -217,7 +238,7 @@ func (srv *Server) handlePatchActivity(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), status)
 			return
 		}
-		if a, err = srv.applyAzureActivityID(w, ctx, a, body.AzureActivityID); err != nil {
+		if a, err = srv.applyAzureActivityID(w, ctx, a, body.AzureActivityID, azureActivityIDProvided); err != nil {
 			return // response already written by applyAzureActivityID
 		}
 		writeJSON(w, a, nil)

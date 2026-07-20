@@ -1,7 +1,8 @@
 import { useState, useEffect, type CSSProperties } from 'react'
 import { X } from 'lucide-react'
-import type { ActivityCatalog } from '../../types'
+import type { ActivityCatalog, AzureActivity } from '../../types'
 import { createActivity } from '../../api/client'
+import { findDefaultAzureActivity } from './azureActivity'
 
 interface NewActivityModalProps {
   open: boolean
@@ -9,6 +10,7 @@ interface NewActivityModalProps {
   onCreated: () => void
   catalog: ActivityCatalog | null
   defaultDate: string // YYYY-MM-DD
+  azureActivities: AzureActivity[]
 }
 
 const selectStyle: CSSProperties = {
@@ -54,13 +56,14 @@ function Field({ label, children, error }: { label: string; children: React.Reac
   )
 }
 
-export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDate }: NewActivityModalProps) {
+export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDate, azureActivities }: NewActivityModalProps) {
   const [date, setDate] = useState(defaultDate)
   const [hours, setHours] = useState('')
   const [project, setProject] = useState('')
   const [category, setCategory] = useState('')
   const [description, setDescription] = useState('')
   const [descriptionTouched, setDescriptionTouched] = useState(false)
+  const [azureActivityId, setAzureActivityId] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
@@ -74,6 +77,7 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
       setCategory(catalog?.categories[0] ?? '')
       setDescription('')
       setDescriptionTouched(false)
+      setAzureActivityId('')
       setErrors({})
       setSubmitError('')
     }
@@ -87,6 +91,8 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
   }, [project, category, descriptionTouched])
 
   if (!open) return null
+
+  const defaultAzureActivity = findDefaultAzureActivity(azureActivities)
 
   const emptyCatalog =
     catalog !== null &&
@@ -131,6 +137,7 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
         category,
         registro_diario,
         source: 'manual',
+        ...(azureActivityId ? { azure_activity_id: Number(azureActivityId) } : {}),
       })
       onCreated()
       onClose()
@@ -302,6 +309,23 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
               }}
               placeholder={`${project || 'project'}/${category || 'category'}/description...`}
             />
+          </Field>
+
+          <Field label="Azure Activity">
+            <select
+              style={selectStyle}
+              value={azureActivityId}
+              onChange={e => setAzureActivityId(e.target.value)}
+            >
+              <option value="">
+                Use default{defaultAzureActivity ? ` (${defaultAzureActivity.label})` : ''}
+              </option>
+              {azureActivities.map(a => (
+                <option key={a.id} value={a.id}>
+                  {a.label}{a.is_default ? ' (default)' : ''}
+                </option>
+              ))}
+            </select>
           </Field>
 
           {submitError && (
