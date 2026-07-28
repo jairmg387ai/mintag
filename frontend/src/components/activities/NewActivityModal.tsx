@@ -1,4 +1,4 @@
-import { useState, useEffect, type CSSProperties } from 'react'
+import { useState, useEffect, useRef, type CSSProperties } from 'react'
 import { X } from 'lucide-react'
 import type { ActivityCatalog, AzureActivity } from '../../types'
 import { createActivity } from '../../api/client'
@@ -57,6 +57,7 @@ function Field({ label, children, error }: { label: string; children: React.Reac
 }
 
 export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDate, azureActivities }: NewActivityModalProps) {
+  const pressedOnOverlay = useRef(false)
   const [date, setDate] = useState(defaultDate)
   const [hours, setHours] = useState('')
   const [project, setProject] = useState('')
@@ -150,7 +151,11 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
 
   return (
     <div
-      onClick={onClose}
+      onMouseDown={e => { pressedOnOverlay.current = e.target === e.currentTarget }}
+      onClick={e => {
+        if (pressedOnOverlay.current && e.target === e.currentTarget) onClose()
+        pressedOnOverlay.current = false
+      }}
       style={{
         position: 'fixed',
         inset: 0,
