@@ -10,11 +10,11 @@ interface NavEntry {
 }
 
 const NAV_ITEMS: NavEntry[] = [
-  { id: 'dashboard', label: 'Dashboard',       icon: <LayoutDashboard size={18} strokeWidth={1.75} /> },
-  { id: 'tasks',     label: 'Tasks',           icon: <CheckSquare    size={18} strokeWidth={1.75} /> },
-  { id: 'meetings',  label: 'Meetings',        icon: <Users          size={18} strokeWidth={1.75} /> },
-  { id: 'graph',      label: 'Knowledge Graph', icon: <Network size={18} strokeWidth={1.75} /> },
-  { id: 'activities',          label: 'Activities',   icon: <Clock   size={18} strokeWidth={1.75} /> },
+  { id: 'dashboard', label: 'Panel',           icon: <LayoutDashboard size={18} strokeWidth={1.75} /> },
+  { id: 'tasks',     label: 'Tareas',          icon: <CheckSquare    size={18} strokeWidth={1.75} /> },
+  { id: 'meetings',  label: 'Reuniones',       icon: <Users          size={18} strokeWidth={1.75} /> },
+  { id: 'graph',      label: 'Grafo de Conocimiento', icon: <Network size={18} strokeWidth={1.75} /> },
+  { id: 'activities',          label: 'Actividades',   icon: <Clock   size={18} strokeWidth={1.75} /> },
   { id: 'deployment-windows', label: 'Ventanas',     icon: <Rocket  size={18} strokeWidth={1.75} /> },
 ]
 
@@ -36,7 +36,7 @@ export function Sidebar() {
 
       {/* Main nav */}
       <div className="sb-section">
-        <div className="head">Workspace</div>
+        <div className="head">Espacio de trabajo</div>
         {NAV_ITEMS.map(n => (
           <button
             key={n.id}
@@ -51,7 +51,7 @@ export function Sidebar() {
 
       {/* Projects */}
       <div className="sb-section">
-        <div className="head">Projects</div>
+        <div className="head">Proyectos</div>
         {projects.map(p => (
           <button
             key={p.id}
@@ -64,15 +64,15 @@ export function Sidebar() {
         ))}
         <button className="sb-item" onClick={() => openModal('new-project')}>
           <Plus size={16} strokeWidth={1.75} />
-          New project
+          Nuevo proyecto
         </button>
       </div>
 
       {/* Footer */}
       <div className="sb-foot">
-        <Avatar name="Local workspace" size={32} />
+        <Avatar name="Espacio local" size={32} />
         <div>
-          <div className="who">Local workspace</div>
+          <div className="who">Espacio local</div>
           <div className="role">Personal</div>
         </div>
       </div>
