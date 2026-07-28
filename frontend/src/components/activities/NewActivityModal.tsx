@@ -74,7 +74,7 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
       setDate(defaultDate)
       setHours('')
       setProject(catalog?.projects[0] ?? '')
-      setCategory(catalog?.categories[0] ?? '')
+      setCategory(catalog?.categories[0]?.name ?? '')
       setDescription('')
       setDescriptionTouched(false)
       setAzureActivityId('')
@@ -93,6 +93,19 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
   if (!open) return null
 
   const defaultAzureActivity = findDefaultAzureActivity(azureActivities)
+
+  // Only fires on an explicit user interaction with the category <select>
+  // (see the onChange handler below) — never on modal open, so it can never
+  // clobber a value the user hasn't touched. An unmapped or stale (inactive)
+  // mapping is left untouched, matching "unmapped category behaves as
+  // today" from the spec.
+  function handleCategoryChange(name: string) {
+    setCategory(name)
+    const mapped = catalog?.categories.find(c => c.name === name)?.azure_activity_id
+    if (mapped != null && azureActivities.some(a => a.id === mapped)) {
+      setAzureActivityId(String(mapped))
+    }
+  }
 
   const emptyCatalog =
     catalog !== null &&
@@ -277,14 +290,14 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
               <select
                 style={selectStyle}
                 value={category}
-                onChange={e => setCategory(e.target.value)}
+                onChange={e => handleCategoryChange(e.target.value)}
                 disabled={emptyCatalog}
               >
                 {catalog.categories.length === 0 ? (
                   <option value="">— no categories —</option>
                 ) : (
                   catalog.categories.map(c => (
-                    <option key={c} value={c}>{c}</option>
+                    <option key={c.id} value={c.name}>{c.name}</option>
                   ))
                 )}
               </select>

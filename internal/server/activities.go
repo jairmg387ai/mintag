@@ -39,6 +39,7 @@ var reActivityDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 //	DELETE /api/activities/catalog/projects/{name}
 //	POST   /api/activities/catalog/categories
 //	DELETE /api/activities/catalog/categories/{name}
+//	PUT    /api/activities/catalog/categories/{id}/azure-activity
 //	GET    /api/activities/azure-catalog
 //	POST   /api/activities/azure-catalog
 //	PATCH  /api/activities/azure-catalog/{id}
@@ -60,6 +61,7 @@ func registerActivityRoutes(r chi.Router, srv *Server) {
 	r.Delete("/activities/catalog/projects/{name}", srv.handleRemoveCatalogProject)
 	r.Post("/activities/catalog/categories", srv.handleAddCatalogCategory)
 	r.Delete("/activities/catalog/categories/{name}", srv.handleRemoveCatalogCategory)
+	r.Put("/activities/catalog/categories/{id}/azure-activity", srv.handleSetCategoryAzureActivity)
 	// azure-catalog routes are grouped here, before /activities/{id}, to
 	// match the reading order of /activities/catalog and /activities/upload
 	// above (chi's radix tree already prioritizes static segments over
@@ -387,8 +389,35 @@ func sanitizePublicError(err error) string {
 	return msg
 }
 
+// categoryResponse decorates a store.TimelogCategory with a derived,
+// read-only label for its Azure activity mapping. The embedded struct
+// flattens into the JSON response alongside AzureActivityLabel.
+//
+// The label is resolved against ListAzureActivities(ctx, true) (includes
+// inactive rows) so a stale mapping — one pointing at a since-deactivated
+// Azure activity — still displays a real label instead of a bare id. This
+// is presentation only: store.TimelogCategory itself stays free of it, and
+// every <select> that offers Azure activities as options keeps using the
+// active-only list (GET /activities/azure-catalog) as its single source, so
+// an inactive activity never becomes a selectable option anywhere.
+type categoryResponse struct {
+	store.TimelogCategory
+	AzureActivityLabel *string `json:"azure_activity_label,omitempty"`
+}
+
+// azureLabelByID indexes a list of Azure activities by id for O(1) label
+// lookups. Shared by the /catalog decorator above.
+func azureLabelByID(az []*store.AzureActivity) map[int64]string {
+	out := make(map[int64]string, len(az))
+	for _, a := range az {
+		out[a.ID] = a.Label
+	}
+	return out
+}
+
 // GET /api/activities/catalog
 func (srv *Server) handleActivityCatalog(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	projects, err := srv.st.ListTimelogProjects()
 	if err != nil {
 		writeJSON(w, nil, err)
@@ -399,10 +428,78 @@ func (srv *Server) handleActivityCatalog(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, nil, err)
 		return
 	}
+	// includeInactive=true: a stale mapping must still resolve to its real
+	// label (D5a) even though it can no longer be picked as a new option.
+	azureActivities, err := srv.st.ListAzureActivities(ctx, true)
+	if err != nil {
+		writeJSON(w, nil, err)
+		return
+	}
+	labels := azureLabelByID(azureActivities)
+
+	decorated := make([]categoryResponse, len(categories))
+	for i, c := range categories {
+		cr := categoryResponse{TimelogCategory: c}
+		if c.AzureActivityID != nil {
+			if label, ok := labels[*c.AzureActivityID]; ok {
+				cr.AzureActivityLabel = &label
+			}
+		}
+		decorated[i] = cr
+	}
+
 	writeJSON(w, map[string]any{
 		"projects":   projects,
-		"categories": categories,
+		"categories": decorated,
 	}, nil)
+}
+
+// PUT /api/activities/catalog/categories/{id}/azure-activity
+// Body: {"azure_activity_id": 3 | null}
+func (srv *Server) handleSetCategoryAzureActivity(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	var body struct {
+		AzureActivityID *int64 `json:"azure_activity_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+	if err := srv.st.SetCategoryAzureActivity(ctx, id, body.AzureActivityID); err != nil {
+		// isNotFound alone can't disambiguate here: both "unknown category"
+		// and "unknown azure activity id" errors contain "not found", but
+		// only the former is a 404 — an unknown/inactive azure_activity_id
+		// is a validation failure on an otherwise-valid category (422).
+		status := http.StatusUnprocessableEntity
+		if isNotFound(err) && strings.Contains(err.Error(), "timelog category") {
+			status = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+
+	categories, err := srv.st.ListTimelogCategories()
+	if err != nil {
+		writeJSON(w, nil, err)
+		return
+	}
+	for _, c := range categories {
+		if c.ID == id {
+			writeJSON(w, c, nil)
+			return
+		}
+	}
+	// SetCategoryAzureActivity above already validated the category exists
+	// (it errors with RowsAffected==0 otherwise, caught as 404 above), so
+	// reaching here would mean the row vanished between the two queries —
+	// treat it as a server error rather than inventing a 4xx for it.
+	http.Error(w, "category not found after update", http.StatusInternalServerError)
 }
 
 // DELETE /api/activities/{id}

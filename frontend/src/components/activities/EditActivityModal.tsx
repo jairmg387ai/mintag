@@ -81,6 +81,19 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
 
   const defaultAzureActivity = findDefaultAzureActivity(azureActivities)
 
+  // Only fires on an explicit user interaction with the category <select>
+  // (see the onChange handler below) — never from the open-gated effect
+  // above that seeds form state from the loaded activity, so opening Edit
+  // never retroactively overwrites a stored azure_activity_id even when the
+  // category happens to have a (possibly different) mapping.
+  function handleCategoryChange(name: string) {
+    setCategory(name)
+    const mapped = catalog?.categories.find(c => c.name === name)?.azure_activity_id
+    if (mapped != null && azureActivities.some(a => a.id === mapped)) {
+      setAzureActivityId(String(mapped))
+    }
+  }
+
   function validate(): boolean {
     const errs: Record<string, string> = {}
     const h = parseFloat(hours)
@@ -220,12 +233,12 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
               <select
                 style={inputStyle}
                 value={category}
-                onChange={e => setCategory(e.target.value)}
+                onChange={e => handleCategoryChange(e.target.value)}
               >
                 {catalog.categories.map(c => (
-                  <option key={c} value={c}>{c}</option>
+                  <option key={c.id} value={c.name}>{c.name}</option>
                 ))}
-                {!catalog.categories.includes(category) && category && (
+                {!catalog.categories.some(c => c.name === category) && category && (
                   <option value={category}>{category}</option>
                 )}
               </select>

@@ -68,6 +68,30 @@ func TestOpenMigratesExistingActivitiesWithoutDataLoss(t *testing.T) {
 	}
 }
 
+// TestMigrationIdempotency_TimelogCategoriesAzureActivityID verifies the
+// nullable timelog_categories.azure_activity_id column is created by
+// migrate() and that re-running migrate() on the same store is a no-op
+// (addColumnIfMissing idempotency), matching the daily_activities precedent.
+func TestMigrationIdempotency_TimelogCategoriesAzureActivityID(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	if !columnExists(t, s.db, "timelog_categories", "azure_activity_id") {
+		t.Fatal("expected timelog_categories.azure_activity_id column to exist after Open")
+	}
+
+	// run migrate again on the same store — addColumnIfMissing must be a no-op
+	if err := s.migrate(); err != nil {
+		t.Fatalf("second migrate() call failed: %v", err)
+	}
+	if !columnExists(t, s.db, "timelog_categories", "azure_activity_id") {
+		t.Fatal("expected timelog_categories.azure_activity_id column to still exist after re-migrate")
+	}
+}
+
 func columnExists(t *testing.T, db *sql.DB, table, column string) bool {
 	t.Helper()
 	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)

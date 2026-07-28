@@ -85,8 +85,8 @@ func TestListTimelogCategories_OrderedAlphabetically(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 1; i < len(cats); i++ {
-		if cats[i] < cats[i-1] {
-			t.Errorf("categories not ordered at index %d: %q before %q", i, cats[i-1], cats[i])
+		if cats[i].Name < cats[i-1].Name {
+			t.Errorf("categories not ordered at index %d: %q before %q", i, cats[i-1].Name, cats[i].Name)
 		}
 	}
 }
