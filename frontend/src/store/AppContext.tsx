@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback } from 'react'
-import type { Project, Meeting, Task, Stats, ViewName, TaskViewName, ModalName, Toast, Status } from '../types'
+import type { Project, Meeting, Task, Stats, ViewName, TaskViewName, ModalName, Toast, Status, MenuOptionStatus } from '../types'
 import * as api from '../api/client'
 
 interface AppState {
@@ -7,6 +7,7 @@ interface AppState {
   meetings: Meeting[]
   tasks: Task[]
   stats: Stats | null
+  menuOptions: MenuOptionStatus[]
   currentView: ViewName
   taskView: TaskViewName
   filterStatus: string
@@ -29,6 +30,7 @@ interface AppActions {
   closeModal: () => void
   pushToast: (message: string, isError?: boolean) => void
   updateTaskStatus: (id: number, status: Status) => Promise<void>
+  toggleMenuOption: (id: string, enabled: boolean) => Promise<void>
 }
 
 const defaultState: AppState = {
@@ -36,6 +38,7 @@ const defaultState: AppState = {
   meetings: [],
   tasks: [],
   stats: null,
+  menuOptions: [],
   currentView: 'dashboard',
   taskView: 'list',
   filterStatus: 'all',
@@ -55,13 +58,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AppState>(defaultState)
 
   const loadAll = useCallback(async () => {
-    const [projects, meetings, tasks, stats] = await Promise.all([
+    const [projects, meetings, tasks, stats, menuOptions] = await Promise.all([
       api.listProjects().catch(() => [] as Project[]),
       api.listMeetings().catch(() => [] as Meeting[]),
       api.listTasks().catch(() => [] as Task[]),
       api.getStats().catch(() => null),
+      api.listMenuOptions().catch(() => [] as MenuOptionStatus[]),
     ])
-    setState(prev => ({ ...prev, projects, meetings, tasks, stats }))
+    setState(prev => ({ ...prev, projects, meetings, tasks, stats, menuOptions }))
   }, [])
 
   const setView = useCallback((view: ViewName) => {
@@ -127,6 +131,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
+  // toggleMenuOption applies an optimistic enabled/disabled flip, then
+  // confirms against the server. On failure it reverts the flip and shows an
+  // error toast. On a successful disable of the currently active view, it
+  // redirects to the first still-enabled option — done here, not in a
+  // useEffect, so the transient pre-load empty state never triggers a
+  // spurious redirect (design decision #6).
+  const toggleMenuOption = useCallback(async (id: string, enabled: boolean) => {
+    let previous: MenuOptionStatus[] = []
+    setState(prev => {
+      previous = prev.menuOptions
+      return {
+        ...prev,
+        menuOptions: prev.menuOptions.map(m => m.id === id ? { ...m, enabled } : m),
+      }
+    })
+    try {
+      await api.setMenuOptionEnabled(id, enabled)
+      if (!enabled) {
+        setState(prev => {
+          if (prev.currentView !== id) return prev
+          const firstEnabled = prev.menuOptions.find(m => m.enabled)
+          return firstEnabled ? { ...prev, currentView: firstEnabled.id } : prev
+        })
+      }
+    } catch (err: unknown) {
+      setState(prev => ({ ...prev, menuOptions: previous }))
+      const message = err instanceof Error ? err.message : 'Failed to update menu option'
+      const toastId = ++toastIdCounter
+      setState(prev => ({ ...prev, toasts: [...prev.toasts, { id: toastId, message, isError: true }] }))
+      setTimeout(() => {
+        setState(prev => ({ ...prev, toasts: prev.toasts.filter(t => t.id !== toastId) }))
+      }, 3200)
+    }
+  }, [])
+
   const actions: AppActions = {
     loadAll,
     setView,
@@ -139,6 +178,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     closeModal,
     pushToast,
     updateTaskStatus,
+    toggleMenuOption,
   }
 
   return (
