@@ -129,7 +129,15 @@ export interface GraphNodeDetail {
   neighbor_count: number
 }
 
-export type ViewName = 'dashboard' | 'tasks' | 'meetings' | 'graph' | 'activities' | 'deployment-windows'
+export type ViewName = 'dashboard' | 'tasks' | 'meetings' | 'graph' | 'activities' | 'deployment-windows' | 'settings'
+
+// --- Menu Options (configurable sidebar catalog) ---
+
+export interface MenuOptionStatus {
+  id: ViewName
+  label: string
+  enabled: boolean
+}
 
 // --- Deployment Window types ---
 
