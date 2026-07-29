@@ -211,13 +211,11 @@ func (s *Store) SetMenuOptionEnabled(ctx context.Context, id string, enabled boo
 	return &MenuOptionStatus{ID: opt.ID, Label: opt.Label, Enabled: enabled}, nil
 }
 
-// hasPreExistingData reports whether this database already has any project,
-// task, meeting, daily activity, azure activity catalog, deployment window,
-// or graph node rows — used by migrateMenuOptions to distinguish a genuinely
-// fresh install from an upgrade of an existing one. All of projects, tasks,
-// meetings, daily_activities, deployment_windows, and graph_nodes are
-// independently reachable via MCP without ever touching projects/tasks/
-// meetings, so each must count toward "pre-existing".
+// hasPreExistingData reports whether this database already has any rows in
+// the nine tables listed in the query below — used by migrateMenuOptions to
+// distinguish a genuinely fresh install from an upgrade of an existing one.
+// Each of those tables is independently reachable via MCP without ever
+// touching any of the others, so each must count toward "pre-existing".
 //
 // azure_activities is special-cased: migrateActivities (which runs before
 // migrateMenuOptions in migrate()) unconditionally seeds one "Default" row
@@ -225,6 +223,11 @@ func (s *Store) SetMenuOptionEnabled(ctx context.Context, id string, enabled boo
 // database — fresh or not — always has at least 1 row there by the time
 // this runs. Only rows beyond that always-present seed indicate the catalog
 // was actually used.
+//
+// timelog_projects and timelog_categories need no such adjustment: they are
+// seeded by seedCatalogs(), which Open()/OpenInMemory() run only AFTER
+// migrate() (and therefore after hasPreExistingData()) returns, so both
+// tables are genuinely empty at this point on a true fresh DB.
 func (s *Store) hasPreExistingData() (bool, error) {
 	var count int
 	err := s.db.QueryRow(`
@@ -235,7 +238,9 @@ func (s *Store) hasPreExistingData() (bool, error) {
 			(SELECT COUNT(*) FROM daily_activities) +
 			(SELECT CASE WHEN COUNT(*) > 1 THEN COUNT(*) - 1 ELSE 0 END FROM azure_activities) +
 			(SELECT COUNT(*) FROM deployment_windows) +
-			(SELECT COUNT(*) FROM graph_nodes)
+			(SELECT COUNT(*) FROM graph_nodes) +
+			(SELECT COUNT(*) FROM timelog_projects) +
+			(SELECT COUNT(*) FROM timelog_categories)
 	`).Scan(&count)
 	if err != nil {
 		return false, err

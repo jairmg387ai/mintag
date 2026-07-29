@@ -414,6 +414,67 @@ func TestMigrateMenuOptions_ExistingDatabaseViaGraphNodeOnly(t *testing.T) {
 	}
 }
 
+// TestMigrateMenuOptions_ExistingDatabaseViaTimelogProjectOnly guards
+// against hasPreExistingData ignoring timelog_projects/timelog_categories:
+// an install that exclusively used the timelog catalog (reachable
+// independently via MCP through catalog_project_add/AddTimelogProject,
+// without ever touching projects/tasks/meetings/daily_activities/
+// deployment_windows/graph_nodes) must still be classified as a
+// pre-existing install, not a fresh one.
+func TestMigrateMenuOptions_ExistingDatabaseViaTimelogProjectOnly(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "mintag.db")
+	s, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+
+	// Open() already ran seedCatalogs(), which seeds default rows into both
+	// timelog_projects and timelog_categories. Clear both so this test can
+	// isolate a single custom timelog_projects row: projects, tasks,
+	// meetings, daily_activities, deployment_windows, graph_nodes, and
+	// timelog_categories all stay empty (azure_activities keeps only its
+	// always-present "Default" seed row).
+	if _, err := s.db.Exec(`DELETE FROM timelog_projects`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM timelog_categories`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddTimelogProject("Custom Project"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM app_settings WHERE key = ?`, "menu.options.policy_applied"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.migrateMenuOptions(); err != nil {
+		t.Fatal(err)
+	}
+
+	opts, err := s.ListMenuOptions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(opts) != len(menuOptionsCatalog) {
+		t.Fatalf("expected %d options, got %d", len(menuOptionsCatalog), len(opts))
+	}
+	for _, o := range opts {
+		if !o.Enabled {
+			t.Errorf("expected option %q to be explicitly enabled (timelog_projects-only install), got disabled", o.ID)
+		}
+	}
+
+	marker, ok, err := s.setting(ctx, "menu.options.policy_applied")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || marker != "1" {
+		t.Fatalf("expected policy_applied marker to be set after migration, got ok=%v value=%q", ok, marker)
+	}
+}
+
 func TestMigrateMenuOptions_RerunIsNoop(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "mintag.db")
 	s, err := Open(dbPath)
