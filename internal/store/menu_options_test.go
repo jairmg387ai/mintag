@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -320,27 +321,31 @@ func TestMigrateMenuOptions_FreshDatabaseUsesFallbackOnly(t *testing.T) {
 	}
 }
 
+// TestMigrateMenuOptions_ExistingDatabaseEnablesAllExplicitly covers the
+// file-existence-based "existing install" branch: the SQLite file already
+// exists on disk (even empty, e.g. touched by something external) *before*
+// the Open() call under test, so migrateMenuOptions must classify this as a
+// pre-existing install regardless of what — if anything — is in any table.
+// This is the safe-direction edge case called out in the design doc: an
+// empty pre-existing file still means "treat as existing".
 func TestMigrateMenuOptions_ExistingDatabaseEnablesAllExplicitly(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "mintag.db")
+
+	// Pre-create the file directly (no migrate(), no marker) to simulate a
+	// database that predates this feature entirely.
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dbPath, nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+
 	s, err := Open(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
 	ctx := context.Background()
-
-	// Simulate an install that predates this feature: data already exists,
-	// but the policy marker has not been applied yet.
-	if _, err := s.CreateProject("Existing Project", "", ""); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.db.Exec(`DELETE FROM app_settings WHERE key = ?`, "menu.options.policy_applied"); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := s.migrateMenuOptions(); err != nil {
-		t.Fatal(err)
-	}
 
 	opts, err := s.ListMenuOptions(ctx)
 	if err != nil {
@@ -351,7 +356,7 @@ func TestMigrateMenuOptions_ExistingDatabaseEnablesAllExplicitly(t *testing.T) {
 	}
 	for _, o := range opts {
 		if !o.Enabled {
-			t.Errorf("expected option %q to be explicitly enabled after non-fresh migration, got disabled", o.ID)
+			t.Errorf("expected option %q to be explicitly enabled (file pre-existed Open()), got disabled", o.ID)
 		}
 	}
 
@@ -364,177 +369,85 @@ func TestMigrateMenuOptions_ExistingDatabaseEnablesAllExplicitly(t *testing.T) {
 	}
 }
 
-// TestMigrateMenuOptions_ExistingDatabaseViaGraphNodeOnly guards against
-// hasPreExistingData only counting projects/tasks/meetings: an install that
-// exclusively used the knowledge graph (or activities/deployment windows,
-// all reachable independently via MCP) must still be classified as a
-// pre-existing install, not a fresh one.
-func TestMigrateMenuOptions_ExistingDatabaseViaGraphNodeOnly(t *testing.T) {
+// TestMigrateMenuOptions_ReopenIsIdempotent guards against a subtle timing
+// bug: after the very first Open() creates the file (fresh branch, fallback
+// only, marker set), a second Open() on that same now-existing file must NOT
+// retroactively treat it as "existing" and force-enable everything — the
+// policy_applied marker must short-circuit before file-existence is ever
+// re-consulted.
+func TestMigrateMenuOptions_ReopenIsIdempotent(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "mintag.db")
-	s, err := Open(dbPath)
+
+	s1, err := Open(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	if err := s1.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s2, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
 	ctx := context.Background()
 
-	// Simulate an install that predates this feature and only ever touched
-	// the knowledge graph: projects/tasks/meetings stay empty, but
-	// graph_nodes has data.
-	if _, _, err := s.UpsertGraphNode("default", "repo", "example/repo", "Example Repo", "", nil); err != nil {
+	var count int
+	if err := s2.db.QueryRow(`SELECT COUNT(*) FROM app_settings WHERE key LIKE 'menu.option.%'`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`DELETE FROM app_settings WHERE key = ?`, "menu.options.policy_applied"); err != nil {
-		t.Fatal(err)
+	if count != 0 {
+		t.Fatalf("expected reopening an already-migrated fresh DB to stay fallback-only, got %d menu.option.* rows", count)
 	}
 
-	if err := s.migrateMenuOptions(); err != nil {
-		t.Fatal(err)
-	}
-
-	opts, err := s.ListMenuOptions(ctx)
+	opts, err := s2.ListMenuOptions(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(opts) != len(menuOptionsCatalog) {
-		t.Fatalf("expected %d options, got %d", len(menuOptionsCatalog), len(opts))
+	wantEnabled := map[string]bool{
+		"dashboard": true, "tasks": true, "meetings": false,
+		"graph": false, "activities": true, "deployment-windows": false,
 	}
 	for _, o := range opts {
-		if !o.Enabled {
-			t.Errorf("expected option %q to be explicitly enabled (graph_nodes-only install), got disabled", o.ID)
+		if o.Enabled != wantEnabled[o.ID] {
+			t.Errorf("option %q: expected enabled=%v after reopen, got %v", o.ID, wantEnabled[o.ID], o.Enabled)
 		}
-	}
-
-	marker, ok, err := s.setting(ctx, "menu.options.policy_applied")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !ok || marker != "1" {
-		t.Fatalf("expected policy_applied marker to be set after migration, got ok=%v value=%q", ok, marker)
 	}
 }
 
-// TestMigrateMenuOptions_ExistingDatabaseViaTimelogProjectOnly guards
-// against hasPreExistingData ignoring timelog_projects/timelog_categories:
-// an install that exclusively used the timelog catalog (reachable
-// independently via MCP through catalog_project_add/AddTimelogProject,
-// without ever touching projects/tasks/meetings/daily_activities/
-// deployment_windows/graph_nodes) must still be classified as a
-// pre-existing install, not a fresh one.
-func TestMigrateMenuOptions_ExistingDatabaseViaTimelogProjectOnly(t *testing.T) {
+// TestMigrateMenuOptions_ChoiceSurvivesRestart proves the user's explicit
+// toggle is never re-forced by a later Open() call: the policy_applied
+// marker prevents the existing-install branch from re-running once it has
+// already applied, regardless of how many times the process restarts.
+func TestMigrateMenuOptions_ChoiceSurvivesRestart(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "mintag.db")
-	s, err := Open(dbPath)
+
+	s1, err := Open(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
 	ctx := context.Background()
-
-	// Open() already ran seedCatalogs(), which seeds default rows into both
-	// timelog_projects and timelog_categories. Clear both so this test can
-	// isolate a single custom timelog_projects row: projects, tasks,
-	// meetings, daily_activities, deployment_windows, graph_nodes, and
-	// timelog_categories all stay empty (azure_activities keeps only its
-	// always-present "Default" seed row).
-	if _, err := s.db.Exec(`DELETE FROM timelog_projects`); err != nil {
+	if _, err := s1.SetMenuOptionEnabled(ctx, "tasks", false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`DELETE FROM timelog_categories`); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.AddTimelogProject("Custom Project"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.db.Exec(`DELETE FROM app_settings WHERE key = ?`, "menu.options.policy_applied"); err != nil {
+	if err := s1.Close(); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := s.migrateMenuOptions(); err != nil {
-		t.Fatal(err)
-	}
-
-	opts, err := s.ListMenuOptions(ctx)
+	s2, err := Open(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(opts) != len(menuOptionsCatalog) {
-		t.Fatalf("expected %d options, got %d", len(menuOptionsCatalog), len(opts))
-	}
-	for _, o := range opts {
-		if !o.Enabled {
-			t.Errorf("expected option %q to be explicitly enabled (timelog_projects-only install), got disabled", o.ID)
-		}
-	}
+	defer s2.Close()
 
-	marker, ok, err := s.setting(ctx, "menu.options.policy_applied")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !ok || marker != "1" {
-		t.Fatalf("expected policy_applied marker to be set after migration, got ok=%v value=%q", ok, marker)
-	}
-}
-
-func TestMigrateMenuOptions_RerunIsNoop(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "mintag.db")
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
-	ctx := context.Background()
-
-	// Explicitly disable one option so a clobbering rerun would be detectable.
-	if _, err := s.SetMenuOptionEnabled(ctx, "tasks", false); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := s.migrate(); err != nil {
-		t.Fatal(err)
-	}
-
-	opts, err := s.ListMenuOptions(ctx)
+	opts, err := s2.ListMenuOptions(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, o := range opts {
 		if o.ID == "tasks" && o.Enabled {
-			t.Fatal("expected rerunning migrate() to preserve the disabled tasks option, but it was re-enabled")
+			t.Fatal("expected the disabled tasks option to survive a restart, but it was re-enabled")
 		}
 	}
-}
-
-func TestMigrateMenuOptions_PolicyPersistsAfterDataDeleted(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "mintag.db")
-	s, err := Open(dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
-	ctx := context.Background()
-
-	// First Open() ran migrate() against a fresh (empty) DB: fallback-only,
-	// no menu.option.* rows, marker set.
-	p, err := s.CreateProject("Temp Project", "", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.db.Exec(`DELETE FROM projects WHERE id = ?`, p.ID); err != nil {
-		t.Fatal(err)
-	}
-
-	// Rerunning migrate() after data was added then removed must not
-	// re-evaluate the policy — it already applied on the first Open().
-	if err := s.migrate(); err != nil {
-		t.Fatal(err)
-	}
-
-	var count int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM app_settings WHERE key LIKE 'menu.option.%'`).Scan(&count); err != nil {
-		t.Fatal(err)
-	}
-	if count != 0 {
-		t.Fatalf("expected policy to remain fallback-only after data was added then removed, got %d menu.option.* rows", count)
-	}
-	_ = ctx
 }

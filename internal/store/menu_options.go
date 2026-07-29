@@ -211,51 +211,24 @@ func (s *Store) SetMenuOptionEnabled(ctx context.Context, id string, enabled boo
 	return &MenuOptionStatus{ID: opt.ID, Label: opt.Label, Enabled: enabled}, nil
 }
 
-// hasPreExistingData reports whether this database already has any rows in
-// the nine tables listed in the query below — used by migrateMenuOptions to
-// distinguish a genuinely fresh install from an upgrade of an existing one.
-// Each of those tables is independently reachable via MCP without ever
-// touching any of the others, so each must count toward "pre-existing".
-//
-// azure_activities is special-cased: migrateActivities (which runs before
-// migrateMenuOptions in migrate()) unconditionally seeds one "Default" row
-// into azure_activities the first time the table is empty, so every
-// database — fresh or not — always has at least 1 row there by the time
-// this runs. Only rows beyond that always-present seed indicate the catalog
-// was actually used.
-//
-// timelog_projects and timelog_categories need no such adjustment: they are
-// seeded by seedCatalogs(), which Open()/OpenInMemory() run only AFTER
-// migrate() (and therefore after hasPreExistingData()) returns, so both
-// tables are genuinely empty at this point on a true fresh DB.
-func (s *Store) hasPreExistingData() (bool, error) {
-	var count int
-	err := s.db.QueryRow(`
-		SELECT
-			(SELECT COUNT(*) FROM projects) +
-			(SELECT COUNT(*) FROM tasks) +
-			(SELECT COUNT(*) FROM meetings) +
-			(SELECT COUNT(*) FROM daily_activities) +
-			(SELECT CASE WHEN COUNT(*) > 1 THEN COUNT(*) - 1 ELSE 0 END FROM azure_activities) +
-			(SELECT COUNT(*) FROM deployment_windows) +
-			(SELECT COUNT(*) FROM graph_nodes) +
-			(SELECT COUNT(*) FROM timelog_projects) +
-			(SELECT COUNT(*) FROM timelog_categories)
-	`).Scan(&count)
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
-}
-
 // migrateMenuOptions applies the sidebar menu options first-run policy
-// exactly once per database, gated by settingMenuOptionsPolicyApplied:
-//   - a fresh DB (no projects/tasks/meetings) writes only the marker, so
-//     ListMenuOptions resolves entirely through DefaultEnabled;
-//   - a non-fresh DB (upgrade of an existing install) writes an explicit
-//     menu.option.<id>=1 override for every catalog entry before the marker,
-//     so nothing an existing user relied on disappears from the sidebar.
-func (s *Store) migrateMenuOptions() error {
+// exactly once per database, gated by settingMenuOptionsPolicyApplied.
+// preExisting reports whether the SQLite file at the configured path already
+// existed on disk before the current Open() call (computed via os.Stat in
+// store.go, before sql.Open() creates the connection/file). This is
+// provably exhaustive — it does not enumerate which tables have rows, only
+// whether this file predates the current process — so it needs no
+// maintenance as new independently-writable data surfaces (tables,
+// app_settings keys) are added:
+//   - preExisting == false (this Open() call is the one creating the file)
+//     writes only the marker, so ListMenuOptions resolves entirely through
+//     DefaultEnabled;
+//   - preExisting == true (the file predates this process, i.e. mintag has
+//     been run against it before, regardless of what any table contains)
+//     writes an explicit menu.option.<id>=1 override for every catalog
+//     entry before the marker, so nothing an existing user relied on
+//     disappears from the sidebar.
+func (s *Store) migrateMenuOptions(preExisting bool) error {
 	ctx := context.Background()
 
 	applied, ok, err := s.setting(ctx, settingMenuOptionsPolicyApplied)
@@ -266,10 +239,6 @@ func (s *Store) migrateMenuOptions() error {
 		return nil
 	}
 
-	preExisting, err := s.hasPreExistingData()
-	if err != nil {
-		return err
-	}
 	if preExisting {
 		for _, m := range menuOptionsCatalog {
 			if err := s.setSetting(ctx, menuOptionKey(m.ID), "1"); err != nil {
