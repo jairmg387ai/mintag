@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -98,6 +100,17 @@ func Open(path string) (*Store, error) {
 	}
 	// Must be checked before sql.Open() below, which creates the file on
 	// first connect — see filePreExisted's doc comment and menu_options.go.
+	//
+	// KNOWN LIMITATION (accepted, not fixed): this os.Stat check and the
+	// file's actual creation (the first CREATE TABLE Exec inside migrate())
+	// are not atomic. If two mintag processes race to Open() the same
+	// not-yet-existing path at nearly the same instant (e.g. `mintag serve`
+	// and `mintag mcp` both defaulting to the same MINTAG_DB path), one
+	// process's migrate() can create the file before the other process's
+	// os.Stat runs here, so the second process observes preExisted=true for
+	// what is genuinely a brand-new database. See migrateMenuOptions in
+	// menu_options.go for the full rationale on why this narrow TOCTOU
+	// window is accepted rather than closed with an OS-level lock.
 	preExisted := fileExists(path)
 	// modernc.org/sqlite only recognizes DSN pragmas via the `_pragma=name(value)`
 	// form (see sqlite.go's applyQueryParams) — the previous `_journal_mode=WAL`
@@ -152,9 +165,22 @@ func (s *Store) Close() error { return s.db.Close() }
 // Open() to determine — before sql.Open() creates the SQLite file on first
 // connect — whether this database predates the current process. See
 // filePreExisted's doc comment on Store and menu_options.go.
+//
+// A stat error that is NOT "file does not exist" (permission denied, a
+// transient I/O error, a network-drive hiccup, etc.) is ambiguous: it does
+// not tell us the file is absent, only that we failed to confirm either way.
+// Per this feature's safe-direction posture (see migrateMenuOptions'
+// preExisting doc comment), an ambiguous result must resolve to the "file
+// exists" branch, never silently to "fresh install" — treating an existing,
+// merely-unreadable database as brand-new would run the fresh-install
+// migration path against it, which is the unsafe direction this design is
+// built to avoid. Only a genuine fs.ErrNotExist counts as "does not exist".
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
-	return err == nil
+	if err == nil {
+		return true
+	}
+	return !errors.Is(err, fs.ErrNotExist)
 }
 
 func newStore(db *sql.DB) *Store {

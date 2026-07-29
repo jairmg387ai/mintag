@@ -1,6 +1,8 @@
 package store
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -674,4 +676,40 @@ func TestFTS_Search(t *testing.T) {
 	if len(noMatch) != 0 {
 		t.Errorf("expected 0 results for no-match keyword, got %d", len(noMatch))
 	}
+}
+
+// TestFileExists covers the three outcomes fileExists must distinguish:
+// a genuinely missing path (false), a path that is actually there (true),
+// and a stat failure that is NOT "does not exist" — which must resolve to
+// the safe direction (true), never be conflated with "missing".
+func TestFileExists(t *testing.T) {
+	t.Run("missing path returns false", func(t *testing.T) {
+		dir := t.TempDir()
+		missing := filepath.Join(dir, "does-not-exist.db")
+		if fileExists(missing) {
+			t.Errorf("fileExists(%q) = true, want false", missing)
+		}
+	})
+
+	t.Run("existing path returns true", func(t *testing.T) {
+		dir := t.TempDir()
+		present := filepath.Join(dir, "present.db")
+		if err := os.WriteFile(present, []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if !fileExists(present) {
+			t.Errorf("fileExists(%q) = false, want true", present)
+		}
+	})
+
+	t.Run("non-ENOENT stat error resolves to the safe direction (true)", func(t *testing.T) {
+		// A NUL byte is invalid in a path on every supported platform, so
+		// os.Stat fails with a genuine (non-ENOENT) error here — not
+		// "file does not exist" — without relying on OS-specific
+		// permission setup that would be flaky across environments.
+		badPath := "bad\x00path"
+		if !fileExists(badPath) {
+			t.Errorf("fileExists(%q) = false, want true (ambiguous stat error must resolve to the safe/existing direction)", badPath)
+		}
+	})
 }

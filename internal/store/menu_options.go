@@ -228,6 +228,37 @@ func (s *Store) SetMenuOptionEnabled(ctx context.Context, id string, enabled boo
 //     writes an explicit menu.option.<id>=1 override for every catalog
 //     entry before the marker, so nothing an existing user relied on
 //     disappears from the sidebar.
+//
+// KNOWN LIMITATION (accepted, not fixed): preExisting is derived from a
+// plain os.Stat check at the top of Open() (see store.go), taken *before*
+// sql.Open() causes modernc.org/sqlite to physically create the file on
+// first connection (the first CREATE TABLE Exec inside migrate()). Those two
+// moments are not atomic. If two mintag processes race to Open() the same
+// not-yet-existing MINTAG_DB path at nearly the same instant — e.g. `mintag
+// serve` and `mintag mcp` both defaulting to the same path, launched together
+// — one process's migrate() can create the file before the other process's
+// os.Stat runs, so the second process observes preExisting=true for what is
+// genuinely a brand-new database.
+//
+// This is accepted rather than fixed because: (1) mintag is a single-user
+// local app, so the window only matters for a self-inflicted simultaneous
+// launch of two mintag processes against a database that doesn't exist yet;
+// (2) the outcome even when the race is lost is still safe-direction-only —
+// the losing process's fresh install ends up with all six catalog options
+// enabled instead of the curated 3-option default, which is extra visible
+// sidebar options, never lost or hidden data (the same safe-direction
+// trade-off already accepted throughout this design, see preExisting==true
+// above); (3) it is narrow — the window is only open between the os.Stat
+// call and the first CREATE TABLE statement of the losing process's own
+// migrate(), not the whole app lifetime.
+//
+// Closing this properly would require replacing the bare os.Stat with an
+// OS-level exclusive-create/lock pattern around Open() — e.g. attempting an
+// O_CREATE|O_EXCL sentinel file (or the SQLite file itself) to atomically
+// detect "I created this" vs. "this already existed", or an advisory
+// filesystem lock held across the stat-then-migrate window. That has been
+// deliberately deferred rather than implemented; revisit only if mintag
+// grows a real multi-process-on-first-launch use case.
 func (s *Store) migrateMenuOptions(preExisting bool) error {
 	ctx := context.Background()
 
