@@ -364,6 +364,56 @@ func TestMigrateMenuOptions_ExistingDatabaseEnablesAllExplicitly(t *testing.T) {
 	}
 }
 
+// TestMigrateMenuOptions_ExistingDatabaseViaGraphNodeOnly guards against
+// hasPreExistingData only counting projects/tasks/meetings: an install that
+// exclusively used the knowledge graph (or activities/deployment windows,
+// all reachable independently via MCP) must still be classified as a
+// pre-existing install, not a fresh one.
+func TestMigrateMenuOptions_ExistingDatabaseViaGraphNodeOnly(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "mintag.db")
+	s, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+
+	// Simulate an install that predates this feature and only ever touched
+	// the knowledge graph: projects/tasks/meetings stay empty, but
+	// graph_nodes has data.
+	if _, _, err := s.UpsertGraphNode("default", "repo", "example/repo", "Example Repo", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM app_settings WHERE key = ?`, "menu.options.policy_applied"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.migrateMenuOptions(); err != nil {
+		t.Fatal(err)
+	}
+
+	opts, err := s.ListMenuOptions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(opts) != len(menuOptionsCatalog) {
+		t.Fatalf("expected %d options, got %d", len(menuOptionsCatalog), len(opts))
+	}
+	for _, o := range opts {
+		if !o.Enabled {
+			t.Errorf("expected option %q to be explicitly enabled (graph_nodes-only install), got disabled", o.ID)
+		}
+	}
+
+	marker, ok, err := s.setting(ctx, "menu.options.policy_applied")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || marker != "1" {
+		t.Fatalf("expected policy_applied marker to be set after migration, got ok=%v value=%q", ok, marker)
+	}
+}
+
 func TestMigrateMenuOptions_RerunIsNoop(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "mintag.db")
 	s, err := Open(dbPath)
