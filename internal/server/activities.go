@@ -27,7 +27,7 @@ var reActivityDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 //
 // Routes:
 //
-//	GET    /api/activities                           ?date=&status=
+//	GET    /api/activities                           ?date=&status= or ?from=&to=&status=
 //	POST   /api/activities
 //	GET    /api/activities/azure-config
 //	PUT    /api/activities/azure-config
@@ -80,7 +80,22 @@ func registerActivityRoutes(r chi.Router, srv *Server) {
 }
 
 // GET /api/activities?date=YYYY-MM-DD&status=
+// GET /api/activities?from=YYYY-MM-DD&to=YYYY-MM-DD&status=
 func (srv *Server) handleListActivities(w http.ResponseWriter, r *http.Request) {
+	status := r.URL.Query().Get("status")
+
+	from := r.URL.Query().Get("from")
+	to := r.URL.Query().Get("to")
+	if from != "" || to != "" {
+		activities, err := srv.st.ListActivitiesRange(r.Context(), from, to, status)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, activities, nil)
+		return
+	}
+
 	date := r.URL.Query().Get("date")
 	if date == "" {
 		date = time.Now().Format("2006-01-02")
@@ -90,7 +105,6 @@ func (srv *Server) handleListActivities(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	status := r.URL.Query().Get("status")
 	activities, err := srv.st.ListActivities(r.Context(), date, status)
 	writeJSON(w, activities, err)
 }
