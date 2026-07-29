@@ -16,6 +16,16 @@ import (
 type Store struct {
 	db                  *sql.DB
 	newAzureOAuthClient func(context.Context, azure.OAuthConfig) *azure.DeviceAuthClient
+
+	// filePreExisted reports whether the SQLite file at the configured path
+	// already existed on disk before this Open() call created the
+	// connection. Open() sets it via fileExists(path), checked *before*
+	// sql.Open() would otherwise create the file. OpenInMemory() always
+	// leaves it false — there is no real file, so every in-memory store is a
+	// fresh instance. migrate() reads it once when calling
+	// migrateMenuOptions(); see menu_options.go for why file-existence (not
+	// table contents) is the fresh-vs-existing signal.
+	filePreExisted bool
 }
 
 // --- Models ---
@@ -86,6 +96,9 @@ func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return nil, err
 	}
+	// Must be checked before sql.Open() below, which creates the file on
+	// first connect — see filePreExisted's doc comment and menu_options.go.
+	preExisted := fileExists(path)
 	// modernc.org/sqlite only recognizes DSN pragmas via the `_pragma=name(value)`
 	// form (see sqlite.go's applyQueryParams) — the previous `_journal_mode=WAL`
 	// and `_foreign_keys=on` params were silently ignored, so this connection
@@ -104,6 +117,7 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	s := newStore(db)
+	s.filePreExisted = preExisted
 	if err := s.migrate(); err != nil {
 		return nil, err
 	}
@@ -123,6 +137,9 @@ func OpenInMemory() (*Store, error) {
 	}
 	db.SetMaxOpenConns(1)
 	s := newStore(db)
+	// No real file backs an in-memory store, so it is always "fresh" for the
+	// menu-options first-run policy — see filePreExisted's doc comment.
+	s.filePreExisted = false
 	if err := s.migrate(); err != nil {
 		return nil, err
 	}
@@ -130,6 +147,15 @@ func OpenInMemory() (*Store, error) {
 }
 
 func (s *Store) Close() error { return s.db.Close() }
+
+// fileExists reports whether path names something already on disk. Used by
+// Open() to determine — before sql.Open() creates the SQLite file on first
+// connect — whether this database predates the current process. See
+// filePreExisted's doc comment on Store and menu_options.go.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
 
 func newStore(db *sql.DB) *Store {
 	return &Store{
@@ -254,7 +280,7 @@ func (s *Store) migrate() error {
 	if err := s.migrateDeploymentWindows(); err != nil {
 		return err
 	}
-	return s.migrateMenuOptions()
+	return s.migrateMenuOptions(s.filePreExisted)
 }
 
 func (s *Store) migrateActivities() error {
