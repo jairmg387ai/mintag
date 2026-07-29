@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react'
+import { useRef, type CSSProperties } from 'react'
 import { X } from 'lucide-react'
 import type { DailyActivity, AzureActivity } from '../../types'
 import { ActivityStatusBadge, ActivitySourceBadge } from './ActivityStatusBadge'
@@ -36,11 +36,17 @@ function DetailField({ label, children }: { label: string; children: React.React
 }
 
 export function ActivityDetailModal({ activity, open, onClose, azureActivities }: ActivityDetailModalProps) {
+  const pressedOnOverlay = useRef(false)
+
   if (!open || !activity) return null
 
   return (
     <div
-      onClick={onClose}
+      onMouseDown={e => { pressedOnOverlay.current = e.target === e.currentTarget }}
+      onClick={e => {
+        if (pressedOnOverlay.current && e.target === e.currentTarget) onClose()
+        pressedOnOverlay.current = false
+      }}
       style={{
         position: 'fixed',
         inset: 0,
