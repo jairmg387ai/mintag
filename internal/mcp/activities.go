@@ -15,8 +15,9 @@ import (
 
 // registerActivityTools registers the daily-activity MCP tools: activity_log,
 // activity_list, activity_approve, activity_upload, the timelog_projects/
-// timelog_categories catalog tools, and the azure_activities catalog tools
-// (catalog_azure_activity_add/list/set_default/remove).
+// timelog_categories catalog tools (including catalog_category_set_azure_activity,
+// the category→Azure activity default mapping), and the azure_activities
+// catalog tools (catalog_azure_activity_add/list/set_default/remove).
 func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 
 	// --- activity_log ---
@@ -320,5 +321,44 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 			return errResult(err)
 		}
 		return jsonResult(map[string]any{"deactivated": id}, nil)
+	})
+
+	// --- catalog_category_set_azure_activity ---
+	s.AddTool(mcp.NewTool("catalog_category_set_azure_activity",
+		mcp.WithDescription("Assign or clear a TimeLog category's default Azure activity mapping. Omit or pass an empty azure_activity_id to clear the mapping."),
+		mcp.WithString("category_id", mcp.Required(), mcp.Description("TimeLog category ID to update")),
+		mcp.WithString("azure_activity_id", mcp.Description("Azure activity ID to map to this category; omit/empty to clear the mapping")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		categoryIDStr, err := req.RequireString("category_id")
+		if err != nil {
+			return errResult(err)
+		}
+		categoryID, err := strconv.ParseInt(categoryIDStr, 10, 64)
+		if err != nil {
+			return errResult(fmt.Errorf("category_id must be an integer, got %q", categoryIDStr))
+		}
+
+		var azureActivityID *int64
+		if azureActivityIDStr := req.GetString("azure_activity_id", ""); azureActivityIDStr != "" {
+			id, err := strconv.ParseInt(azureActivityIDStr, 10, 64)
+			if err != nil {
+				return errResult(fmt.Errorf("azure_activity_id must be an integer, got %q", azureActivityIDStr))
+			}
+			azureActivityID = &id
+		}
+
+		if err := st.SetCategoryAzureActivity(ctx, categoryID, azureActivityID); err != nil {
+			return errResult(err)
+		}
+		categories, err := st.ListTimelogCategories()
+		if err != nil {
+			return errResult(err)
+		}
+		for _, c := range categories {
+			if c.ID == categoryID {
+				return jsonResult(c, nil)
+			}
+		}
+		return errResult(fmt.Errorf("timelog category not found: %d", categoryID))
 	})
 }

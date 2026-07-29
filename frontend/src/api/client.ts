@@ -14,6 +14,7 @@ import type {
   DailyActivity,
   UploadResult,
   ActivityCatalog,
+  TimelogCategory,
   AzureActivity,
   AzureTimeLogConfigStatus,
   AzureDeviceCodeStartResponse,
@@ -245,6 +246,15 @@ export async function removeCatalogCategory(name: string): Promise<void> {
     headers: { 'Content-Type': 'application/json' },
   })
   if (!res.ok) throw new Error(await res.text())
+}
+
+// setCategoryAzureActivity assigns (azureActivityId a number) or clears
+// (azureActivityId null) a category's default Azure activity mapping.
+export function setCategoryAzureActivity(id: number, azureActivityId: number | null): Promise<TimelogCategory> {
+  return request<TimelogCategory>(`/api/activities/catalog/categories/${id}/azure-activity`, {
+    method: 'PUT',
+    body: JSON.stringify({ azure_activity_id: azureActivityId }),
+  })
 }
 
 // --- Azure Activity Catalog (work items) ---

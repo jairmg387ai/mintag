@@ -251,9 +251,16 @@ export interface AzureDeviceCodeCompleteResponse {
   status: 'pending' | 'complete' | 'declined' | 'expired'
 }
 
+export interface TimelogCategory {
+  id: number
+  name: string
+  azure_activity_id?: number | null
+  azure_activity_label?: string | null
+}
+
 export interface ActivityCatalog {
   projects: string[]
-  categories: string[]
+  categories: TimelogCategory[]
 }
 export type TaskViewName = 'list' | 'kanban'
 export type ModalName = 'task' | 'new-task' | 'import' | 'new-project' | 'meeting' | null

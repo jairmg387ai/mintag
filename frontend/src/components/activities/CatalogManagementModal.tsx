@@ -1,17 +1,31 @@
 import { useState, useRef, type CSSProperties } from 'react'
 import { X, Trash2, Plus, Star, Pencil, Check } from 'lucide-react'
-import type { ActivityCatalog, AzureActivity } from '../../types'
+import type { ActivityCatalog, AzureActivity, TimelogCategory } from '../../types'
 import {
   addCatalogProject,
   removeCatalogProject,
   addCatalogCategory,
   removeCatalogCategory,
+  setCategoryAzureActivity,
   addAzureActivity,
   updateAzureActivity,
   deactivateAzureActivity,
   setDefaultAzureActivity,
 } from '../../api/client'
 import { friendlyCatalogErrorMessage } from './azureActivity'
+
+// friendlyMappingErrorMessage maps the two known store-layer validation
+// failures for SetCategoryAzureActivity (unknown or inactive azure activity
+// id — both distinguishable by their English message text) to the exact
+// Spanish copy from the design; anything else (network failure, etc.) falls
+// back to the generic Spanish message.
+function friendlyMappingErrorMessage(e: unknown): string {
+  const message = e instanceof Error ? e.message : ''
+  if (/inactive|not found/i.test(message)) {
+    return 'La actividad de Azure seleccionada ya no está disponible'
+  }
+  return 'No se pudo guardar el mapeo de la categoría'
+}
 
 interface CatalogManagementModalProps {
   open: boolean
@@ -154,6 +168,210 @@ function CatalogSection({
               </button>
             </div>
           ))
+        )}
+      </div>
+    </div>
+  )
+}
+
+function CategorySection({
+  categories,
+  azureActivities,
+  onAdd,
+  onRemove,
+  onMappingChanged,
+}: {
+  categories: TimelogCategory[]
+  azureActivities: AzureActivity[]
+  onAdd: (name: string) => Promise<void>
+  onRemove: (name: string) => Promise<void>
+  onMappingChanged: () => void
+}) {
+  const [newName, setNewName] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [error, setError] = useState('')
+  const [removing, setRemoving] = useState<Record<string, boolean>>({})
+  const [savingMapping, setSavingMapping] = useState<Record<number, boolean>>({})
+
+  async function handleAdd() {
+    const name = newName.trim()
+    if (!name) return
+    setAdding(true)
+    setError('')
+    try {
+      await onAdd(name)
+      setNewName('')
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Error adding entry')
+    } finally {
+      setAdding(false)
+    }
+  }
+
+  async function handleRemove(name: string) {
+    setRemoving(prev => ({ ...prev, [name]: true }))
+    try {
+      await onRemove(name)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Error removing entry')
+    } finally {
+      setRemoving(prev => ({ ...prev, [name]: false }))
+    }
+  }
+
+  // Combo rule (D5, hard): this <select> is fed ONLY by azureActivities,
+  // which is already the active-only list (GET /activities/azure-catalog).
+  // No synthetic/disabled/"(inactive)" option is ever added here — a stale
+  // mapping is surfaced separately below as plain status text, not as an
+  // option.
+  async function handleSelectChange(category: TimelogCategory, value: string) {
+    setSavingMapping(prev => ({ ...prev, [category.id]: true }))
+    setError('')
+    try {
+      await setCategoryAzureActivity(category.id, value ? Number(value) : null)
+      onMappingChanged()
+    } catch (e: unknown) {
+      setError(friendlyMappingErrorMessage(e))
+    } finally {
+      setSavingMapping(prev => ({ ...prev, [category.id]: false }))
+    }
+  }
+
+  async function handleClearMapping(category: TimelogCategory) {
+    setSavingMapping(prev => ({ ...prev, [category.id]: true }))
+    setError('')
+    try {
+      await setCategoryAzureActivity(category.id, null)
+      onMappingChanged()
+    } catch (e: unknown) {
+      setError(friendlyMappingErrorMessage(e))
+    } finally {
+      setSavingMapping(prev => ({ ...prev, [category.id]: false }))
+    }
+  }
+
+  return (
+    <div style={{ flex: 1, minWidth: 0 }}>
+      <div
+        style={{
+          font: 'var(--text-h4)',
+          fontWeight: 600,
+          marginBottom: 12,
+          textTransform: 'uppercase',
+          letterSpacing: 'var(--tracking-label)',
+          fontSize: '0.75em',
+          color: 'var(--fg3)',
+        } as CSSProperties}
+      >
+        Categories
+      </div>
+
+      {/* Add row */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+        <input
+          type="text"
+          value={newName}
+          onChange={e => setNewName(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') handleAdd() }}
+          placeholder="New category..."
+          style={{ ...inputStyle, flex: 1 }}
+          disabled={adding}
+        />
+        <button
+          className="btn btn-primary btn-sm"
+          onClick={handleAdd}
+          disabled={adding || !newName.trim()}
+          aria-label="Add Categories"
+        >
+          <Plus size={14} strokeWidth={1.75} />
+        </button>
+      </div>
+
+      {error && (
+        <div style={{ font: 'var(--text-caption)', color: 'var(--block-solid)', marginBottom: 8 }}>
+          {error}
+        </div>
+      )}
+
+      {/* Item list */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 300, overflowY: 'auto' }}>
+        {categories.length === 0 ? (
+          <div style={{ font: 'var(--text-caption)', color: 'var(--fg3)', padding: '8px 0' }}>
+            No entries
+          </div>
+        ) : (
+          categories.map(c => {
+            // Stale = a mapping exists (azure_activity_id set) but the id is
+            // not present in the active-only azureActivities feed. Re-picking
+            // the already-empty "Sin mapeo" value in that state would not
+            // fire onChange (the DOM value never actually changes), so the
+            // stale state needs the explicit "Limpiar mapeo" button below —
+            // this is why it PUTs {azure_activity_id: null} directly instead
+            // of relying on the select.
+            const isStale = c.azure_activity_id != null && !azureActivities.some(a => a.id === c.azure_activity_id)
+            const selectValue = isStale ? '' : (c.azure_activity_id != null ? String(c.azure_activity_id) : '')
+            const busy = !!savingMapping[c.id]
+            return (
+              <div
+                key={c.id}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6,
+                  padding: '6px 10px',
+                  background: 'var(--bg-sunken)',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ flex: 1, font: 'var(--text-body)', color: 'var(--fg1)', fontSize: '0.9em' }}>
+                    {c.name}
+                  </span>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => handleRemove(c.name)}
+                    disabled={removing[c.name]}
+                    title={`Remove ${c.name}`}
+                    aria-label={`Remove ${c.name}`}
+                    style={{ padding: '2px 4px' }}
+                  >
+                    <Trash2 size={13} strokeWidth={1.75} />
+                  </button>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <select
+                    aria-label="Actividad de Azure"
+                    value={selectValue}
+                    onChange={e => handleSelectChange(c, e.target.value)}
+                    disabled={busy}
+                    style={{ ...inputStyle, fontSize: '0.85em', padding: '4px 8px' }}
+                  >
+                    <option value="">Sin mapeo</option>
+                    {azureActivities.map(a => (
+                      <option key={a.id} value={a.id}>{a.label}</option>
+                    ))}
+                  </select>
+                  {isStale && (
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => handleClearMapping(c)}
+                      disabled={busy}
+                      title={`Limpiar mapeo de ${c.name}`}
+                      aria-label={`Limpiar mapeo de ${c.name}`}
+                    >
+                      Limpiar mapeo
+                    </button>
+                  )}
+                </div>
+                {isStale && (
+                  <div style={{ font: 'var(--text-caption)', color: 'var(--fg3)', fontSize: '0.8em' }}>
+                    Mapeo actual: {c.azure_activity_label ?? `#${c.azure_activity_id}`} (inactiva — se ignora hasta que elijas otra)
+                  </div>
+                )}
+              </div>
+            )
+          })
         )}
       </div>
     </div>
@@ -500,11 +718,12 @@ export function CatalogManagementModal({ open, onClose, catalog, onCatalogChange
               onRemove={handleRemoveProject}
             />
             <div style={{ width: 1, background: 'var(--border)', flexShrink: 0 }} />
-            <CatalogSection
-              title="Categories"
-              items={catalog?.categories ?? []}
+            <CategorySection
+              categories={catalog?.categories ?? []}
+              azureActivities={azureActivities}
               onAdd={handleAddCategory}
               onRemove={handleRemoveCategory}
+              onMappingChanged={onCatalogChanged}
             />
           </div>
 
