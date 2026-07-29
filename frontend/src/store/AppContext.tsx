@@ -156,14 +156,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         ...prev,
         menuOptions: prev.menuOptions.map(m => m.id === id ? { ...m, enabled: !enabled } : m),
       }))
-      const message = err instanceof Error ? err.message : 'Failed to update menu option'
-      const toastId = ++toastIdCounter
-      setState(prev => ({ ...prev, toasts: [...prev.toasts, { id: toastId, message, isError: true }] }))
-      setTimeout(() => {
-        setState(prev => ({ ...prev, toasts: prev.toasts.filter(t => t.id !== toastId) }))
-      }, 3200)
+      const raw = err instanceof Error ? err.message : ''
+      const message = raw.includes('last enabled menu option')
+        ? 'No se puede deshabilitar la última opción de menú habilitada.'
+        : raw.includes('menu option not found')
+        ? 'Esa opción de menú no existe.'
+        : 'No se pudo actualizar la opción de menú.'
+      pushToast(message, true)
     }
-  }, [])
+  }, [pushToast])
 
   const actions: AppActions = {
     loadAll,
