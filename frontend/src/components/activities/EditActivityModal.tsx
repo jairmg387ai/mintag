@@ -174,7 +174,7 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
           }}
         >
           <h2 style={{ font: 'var(--text-h3)', color: 'var(--fg1)', flex: 1, margin: 0 }}>
-            Edit Activity
+            Editar actividad
           </h2>
           <button
             onClick={onClose}
