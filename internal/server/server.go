@@ -71,6 +71,7 @@ func (srv *Server) Handler() http.Handler {
 		srv.registerGraphRoutes(r)
 		registerActivityRoutes(r, srv)
 		registerDeploymentWindowRoutes(r, srv)
+		registerMenuOptionRoutes(r, srv)
 	})
 
 	// SPA — serve embedded UI for everything else
