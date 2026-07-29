@@ -1,26 +1,17 @@
-import { LayoutDashboard, CheckSquare, Users, Network, Plus, Clock, Rocket } from 'lucide-react'
+import { Plus, Settings } from 'lucide-react'
 import { useAppState, useAppActions } from '../../store/AppContext'
 import { Avatar } from '../shared/Avatar'
-import type { ViewName } from '../../types'
-
-interface NavEntry {
-  id: ViewName
-  label: string
-  icon: React.ReactNode
-}
-
-const NAV_ITEMS: NavEntry[] = [
-  { id: 'dashboard', label: 'Panel',           icon: <LayoutDashboard size={18} strokeWidth={1.75} /> },
-  { id: 'tasks',     label: 'Tareas',          icon: <CheckSquare    size={18} strokeWidth={1.75} /> },
-  { id: 'meetings',  label: 'Reuniones',       icon: <Users          size={18} strokeWidth={1.75} /> },
-  { id: 'graph',      label: 'Grafo de Conocimiento', icon: <Network size={18} strokeWidth={1.75} /> },
-  { id: 'activities',          label: 'Actividades',   icon: <Clock   size={18} strokeWidth={1.75} /> },
-  { id: 'deployment-windows', label: 'Ventanas',     icon: <Rocket  size={18} strokeWidth={1.75} /> },
-]
+import { NAV_ITEMS } from './navItems'
 
 export function Sidebar() {
-  const { currentView, projects, activeProject } = useAppState()
+  const { currentView, projects, activeProject, menuOptions } = useAppState()
   const { setView, setActiveProject, openModal } = useAppActions()
+
+  // Fail open: an empty menuOptions list (fetch hasn't resolved yet, or the
+  // request failed) must never produce an unusable, empty sidebar — render
+  // every nav item until the resolved catalog says otherwise.
+  const enabledIds = new Set(menuOptions.filter(m => m.enabled).map(m => m.id))
+  const visibleItems = menuOptions.length === 0 ? NAV_ITEMS : NAV_ITEMS.filter(n => enabledIds.has(n.id))
 
   return (
     <nav className="sidebar">
@@ -37,7 +28,7 @@ export function Sidebar() {
       {/* Main nav */}
       <div className="sb-section">
         <div className="head">Espacio de trabajo</div>
-        {NAV_ITEMS.map(n => (
+        {visibleItems.map(n => (
           <button
             key={n.id}
             className={`sb-item${currentView === n.id ? ' active' : ''}`}
@@ -71,10 +62,19 @@ export function Sidebar() {
       {/* Footer */}
       <div className="sb-foot">
         <Avatar name="Espacio local" size={32} />
-        <div>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div className="who">Espacio local</div>
           <div className="role">Personal</div>
         </div>
+        <button
+          className="sb-item"
+          style={{ width: 'auto', padding: 8, marginBottom: 0 }}
+          onClick={() => setView('settings')}
+          title="Configuración"
+          aria-label="Configuración"
+        >
+          <Settings size={18} strokeWidth={1.75} />
+        </button>
       </div>
     </nav>
   )
