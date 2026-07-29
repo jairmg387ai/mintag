@@ -1,20 +1,12 @@
-Actividades de arquitectura, diseño y código
-Gestión y análisis de requisitos
-Ejecución y gestión de pruebas
-Gestión de despliegues y liberaciones
-Gestión y resolución de defectos
-Soporte a producción
-Soporte transversal y operación
-Reuniones y sesiones de trabajo
-Gestión de oficios y comunicaciones
-Aseguramiento, seguridad y calidad
-Gestión de procesos de calidad
-Gestión administrativa
-Gestión de indicadores
-Gestión de acciones de mejoramiento
-Novedad: Incapacidad
-Novedad: Permiso
-Novedad: Vacaciones
-Novedad: Licencias
-Novedad: Elecciones
-Novedad: Día de la familia
+Arquitectura|Esta actividad solo puede ser utilizada por los 2 Arquitectos
+Bridge|
+Controles de cambios (MT17 - Planilla PPC)|
+Corrección de defectos|Esta actividad debe ser registrada por cada bug/mantis que se revise
+Gestión|Esta actividad solo puede ser utilizada por: Jefe funcional - Dueños de producto - Coordinador de procesos desarrollo - Jefe de proyecto - Coordinador de pruebas.
+Mejoras|No se trata de bugs que ponen como mejoras, sino de las mejoras acordadas con el MT e INT
+Permiso|Todo permiso solicitado debe quedar a través de BUK y debe ser registrado acá
+Reuniones|Voy a estar revisando el registro en esta actividad; si veo la necesidad de que se detallen las reuniones porque todo lo están llevando a esta actividad, se los informaré.
+Vacaciones|
+Administración configuración|
+Desarrollos PL|
+Gestión de oficios|Además de las personas que responden oficios, aquí también debe registrar el Auxiliar administrativo de proyectos.

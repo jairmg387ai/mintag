@@ -20,7 +20,7 @@ func (s *Store) seedCatalogs() error {
 	if err := s.seedTable("timelog_projects", "seed/timelog_projects.txt"); err != nil {
 		return err
 	}
-	return s.seedTable("timelog_categories", "seed/timelog_categories.txt")
+	return s.seedCategoriesTable("seed/timelog_categories.txt")
 }
 
 func (s *Store) seedTable(table, file string) error {
@@ -43,6 +43,37 @@ func (s *Store) seedTable(table, file string) error {
 	return sc.Err()
 }
 
+// seedCategoriesTable seeds timelog_categories from a "Name|Description"
+// per-line file (description may be empty). Like seedTable, this uses
+// INSERT OR IGNORE so it is safe to call on every Open() — already-present
+// rows (matched by name) are never touched or removed, only new inserts
+// happen.
+func (s *Store) seedCategoriesTable(file string) error {
+	data, err := catalogFS.ReadFile(file)
+	if err != nil {
+		return err
+	}
+	sc := bufio.NewScanner(bytes.NewReader(data))
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		name, description, _ := strings.Cut(line, "|")
+		name = strings.TrimSpace(name)
+		description = strings.TrimSpace(description)
+		if name == "" {
+			continue
+		}
+		if _, err := s.db.Exec(
+			`INSERT OR IGNORE INTO timelog_categories(name, description) VALUES (?, ?)`, name, description,
+		); err != nil {
+			return err
+		}
+	}
+	return sc.Err()
+}
+
 // ListTimelogProjects returns all project names in the catalog, ordered alphabetically.
 func (s *Store) ListTimelogProjects() ([]string, error) {
 	return s.listCatalog("timelog_projects")
@@ -53,6 +84,7 @@ func (s *Store) ListTimelogProjects() ([]string, error) {
 type TimelogCategory struct {
 	ID              int64  `json:"id"`
 	Name            string `json:"name"`
+	Description     string `json:"description"`
 	AzureActivityID *int64 `json:"azure_activity_id,omitempty"`
 }
 
@@ -60,7 +92,7 @@ type TimelogCategory struct {
 // alphabetically by name, including each row's optional Azure activity
 // mapping.
 func (s *Store) ListTimelogCategories() ([]TimelogCategory, error) {
-	rows, err := s.db.Query(`SELECT id, name, azure_activity_id FROM timelog_categories ORDER BY name ASC`)
+	rows, err := s.db.Query(`SELECT id, name, COALESCE(description, ''), azure_activity_id FROM timelog_categories ORDER BY name ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +100,7 @@ func (s *Store) ListTimelogCategories() ([]TimelogCategory, error) {
 	out := make([]TimelogCategory, 0)
 	for rows.Next() {
 		var c TimelogCategory
-		if err := rows.Scan(&c.ID, &c.Name, &c.AzureActivityID); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Description, &c.AzureActivityID); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -145,12 +177,12 @@ func (s *Store) RemoveTimelogProject(name string) error {
 }
 
 // AddTimelogCategory adds a new category to the catalog. Duplicate names are silently ignored.
-func (s *Store) AddTimelogCategory(name string) error {
+func (s *Store) AddTimelogCategory(name, description string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return fmt.Errorf("category name cannot be empty")
 	}
-	_, err := s.db.Exec(`INSERT OR IGNORE INTO timelog_categories(name) VALUES (?)`, name)
+	_, err := s.db.Exec(`INSERT OR IGNORE INTO timelog_categories(name, description) VALUES (?, ?)`, name, strings.TrimSpace(description))
 	return err
 }
 
@@ -158,4 +190,28 @@ func (s *Store) AddTimelogCategory(name string) error {
 func (s *Store) RemoveTimelogCategory(name string) error {
 	_, err := s.db.Exec(`DELETE FROM timelog_categories WHERE name = ?`, name)
 	return err
+}
+
+// UpdateTimelogCategoryDescription updates an existing category's
+// description and returns the updated row. Mirrors SetCategoryAzureActivity's
+// existence check (RowsAffected==0 means the id doesn't exist).
+func (s *Store) UpdateTimelogCategoryDescription(ctx context.Context, id int64, description string) (*TimelogCategory, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE timelog_categories SET description = ? WHERE id = ?`, strings.TrimSpace(description), id,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, fmt.Errorf("timelog category not found: %d", id)
+	}
+
+	var c TimelogCategory
+	err = s.db.QueryRowContext(ctx,
+		`SELECT id, name, COALESCE(description, ''), azure_activity_id FROM timelog_categories WHERE id = ?`, id,
+	).Scan(&c.ID, &c.Name, &c.Description, &c.AzureActivityID)
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
 }

@@ -262,6 +262,7 @@ export interface AzureDeviceCodeCompleteResponse {
 export interface TimelogCategory {
   id: number
   name: string
+  description?: string
   azure_activity_id?: number | null
   azure_activity_label?: string | null
 }

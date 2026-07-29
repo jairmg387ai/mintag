@@ -221,12 +221,14 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 	s.AddTool(mcp.NewTool("catalog_category_add",
 		mcp.WithDescription("Add a new category to the TimeLog catalog."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Category name to add")),
+		mcp.WithString("description", mcp.Description("Optional category description")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		name, err := req.RequireString("name")
 		if err != nil {
 			return errResult(err)
 		}
-		if err := st.AddTimelogCategory(name); err != nil {
+		description := req.GetString("description", "")
+		if err := st.AddTimelogCategory(name, description); err != nil {
 			return errResult(err)
 		}
 		return jsonResult(map[string]string{"added": name}, nil)

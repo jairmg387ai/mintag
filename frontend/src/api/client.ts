@@ -243,8 +243,8 @@ export async function removeCatalogProject(name: string): Promise<void> {
   if (!res.ok) throw new Error(await res.text())
 }
 
-export function addCatalogCategory(name: string): Promise<{ name: string }> {
-  return request<{ name: string }>('/api/activities/catalog/categories', { method: 'POST', body: JSON.stringify({ name }) })
+export function addCatalogCategory(name: string, description?: string): Promise<{ name: string }> {
+  return request<{ name: string }>('/api/activities/catalog/categories', { method: 'POST', body: JSON.stringify({ name, description: description ?? '' }) })
 }
 
 export async function removeCatalogCategory(name: string): Promise<void> {
@@ -261,6 +261,14 @@ export function setCategoryAzureActivity(id: number, azureActivityId: number | n
   return request<TimelogCategory>(`/api/activities/catalog/categories/${id}/azure-activity`, {
     method: 'PUT',
     body: JSON.stringify({ azure_activity_id: azureActivityId }),
+  })
+}
+
+// updateCatalogCategoryDescription updates an existing category's description.
+export function updateCatalogCategoryDescription(id: number, description: string): Promise<TimelogCategory> {
+  return request<TimelogCategory>(`/api/activities/catalog/categories/${id}/description`, {
+    method: 'PUT',
+    body: JSON.stringify({ description }),
   })
 }
 

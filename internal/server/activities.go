@@ -41,6 +41,7 @@ var reActivityDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 //	POST   /api/activities/catalog/categories
 //	DELETE /api/activities/catalog/categories/{name}
 //	PUT    /api/activities/catalog/categories/{id}/azure-activity
+//	PUT    /api/activities/catalog/categories/{id}/description
 //	GET    /api/activities/export                    ?from=&to=
 //	GET    /api/activities/azure-catalog
 //	POST   /api/activities/azure-catalog
@@ -64,6 +65,7 @@ func registerActivityRoutes(r chi.Router, srv *Server) {
 	r.Post("/activities/catalog/categories", srv.handleAddCatalogCategory)
 	r.Delete("/activities/catalog/categories/{name}", srv.handleRemoveCatalogCategory)
 	r.Put("/activities/catalog/categories/{id}/azure-activity", srv.handleSetCategoryAzureActivity)
+	r.Put("/activities/catalog/categories/{id}/description", srv.handleUpdateCatalogCategoryDescription)
 	r.Get("/activities/export", srv.handleExportActivities)
 	// azure-catalog routes are grouped here, before /activities/{id}, to
 	// match the reading order of /activities/catalog and /activities/upload
@@ -521,6 +523,34 @@ func (srv *Server) handleSetCategoryAzureActivity(w http.ResponseWriter, r *http
 	http.Error(w, "category not found after update", http.StatusInternalServerError)
 }
 
+// PUT /api/activities/catalog/categories/{id}/description
+// Body: {"description": "..."}
+func (srv *Server) handleUpdateCatalogCategoryDescription(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	var body struct {
+		Description string `json:"description"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	c, err := srv.st.UpdateTimelogCategoryDescription(r.Context(), id, body.Description)
+	if err != nil {
+		status := http.StatusUnprocessableEntity
+		if isNotFound(err) {
+			status = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	writeJSON(w, c, nil)
+}
+
 // DELETE /api/activities/{id}
 func (srv *Server) handleDeleteActivity(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r, "id")
@@ -568,13 +598,14 @@ func (srv *Server) handleRemoveCatalogProject(w http.ResponseWriter, r *http.Req
 // POST /api/activities/catalog/categories
 func (srv *Server) handleAddCatalogCategory(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name string `json:"name"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := srv.st.AddTimelogCategory(body.Name); err != nil {
+	if err := srv.st.AddTimelogCategory(body.Name, body.Description); err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
 	}
