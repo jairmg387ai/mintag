@@ -25,6 +25,7 @@ import type {
   DWRepo,
   DWArtifact,
   DWTestScenario,
+  MenuOptionStatus,
 } from '../types'
 
 async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
@@ -415,4 +416,14 @@ export function signOffScenario(dwId: number, scenarioId: number, result: string
     method: 'PATCH',
     body: JSON.stringify({ result, signed_off_by }),
   })
+}
+
+// --- Menu Options (configurable sidebar catalog) ---
+
+export function listMenuOptions(): Promise<MenuOptionStatus[]> {
+  return request<MenuOptionStatus[]>('/api/menu-options')
+}
+
+export function setMenuOptionEnabled(id: string, enabled: boolean): Promise<MenuOptionStatus> {
+  return request<MenuOptionStatus>(`/api/menu-options/${id}`, { method: 'PATCH', body: JSON.stringify({ enabled }) })
 }

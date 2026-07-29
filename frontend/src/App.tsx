@@ -8,6 +8,7 @@ import { MeetingsView } from './components/meetings/MeetingsView'
 import { GraphView } from './components/graph/GraphView'
 import { ActivitiesView } from './components/activities/ActivitiesView'
 import { DeploymentWindowsView } from './components/deployment-windows/DeploymentWindowsView'
+import { SettingsView } from './components/settings/SettingsView'
 import { TaskDetailModal } from './components/modals/TaskDetailModal'
 import { NewTaskModal } from './components/modals/NewTaskModal'
 import { ImportMeetingModal } from './components/modals/ImportMeetingModal'
@@ -22,6 +23,7 @@ const VIEW_TITLES: Record<string, string> = {
   graph: 'Grafo de Conocimiento',
   activities: 'Actividades',
   'deployment-windows': 'Ventanas de Mantenimiento',
+  settings: 'Configuración',
 }
 
 function AppInner() {
@@ -47,6 +49,7 @@ function AppInner() {
             {currentView === 'graph' && <GraphView />}
             {currentView === 'activities' && <ActivitiesView />}
             {currentView === 'deployment-windows' && <DeploymentWindowsView />}
+            {currentView === 'settings' && <SettingsView />}
           </div>
         </div>
       </div>
