@@ -11,7 +11,7 @@ export function Sidebar() {
   // request failed) must never produce an unusable, empty sidebar — render
   // every nav item until the resolved catalog says otherwise.
   const enabledIds = new Set(menuOptions.filter(m => m.enabled).map(m => m.id))
-  const visibleItems = menuOptions.length === 0 ? NAV_ITEMS : NAV_ITEMS.filter(n => enabledIds.has(n.id))
+  const visibleItems = enabledIds.size === 0 ? NAV_ITEMS : NAV_ITEMS.filter(n => enabledIds.has(n.id))
 
   return (
     <nav className="sidebar">

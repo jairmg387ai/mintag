@@ -138,14 +138,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // useEffect, so the transient pre-load empty state never triggers a
   // spurious redirect (design decision #6).
   const toggleMenuOption = useCallback(async (id: string, enabled: boolean) => {
-    let previous: MenuOptionStatus[] = []
-    setState(prev => {
-      previous = prev.menuOptions
-      return {
-        ...prev,
-        menuOptions: prev.menuOptions.map(m => m.id === id ? { ...m, enabled } : m),
-      }
-    })
+    setState(prev => ({
+      ...prev,
+      menuOptions: prev.menuOptions.map(m => m.id === id ? { ...m, enabled } : m),
+    }))
     try {
       await api.setMenuOptionEnabled(id, enabled)
       if (!enabled) {
@@ -156,7 +152,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         })
       }
     } catch (err: unknown) {
-      setState(prev => ({ ...prev, menuOptions: previous }))
+      setState(prev => ({
+        ...prev,
+        menuOptions: prev.menuOptions.map(m => m.id === id ? { ...m, enabled: !enabled } : m),
+      }))
       const message = err instanceof Error ? err.message : 'Failed to update menu option'
       const toastId = ++toastIdCounter
       setState(prev => ({ ...prev, toasts: [...prev.toasts, { id: toastId, message, isError: true }] }))
