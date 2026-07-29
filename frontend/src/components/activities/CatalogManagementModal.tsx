@@ -7,6 +7,7 @@ import {
   addCatalogCategory,
   removeCatalogCategory,
   setCategoryAzureActivity,
+  updateCatalogCategoryDescription,
   addAzureActivity,
   updateAzureActivity,
   deactivateAzureActivity,
@@ -183,15 +184,18 @@ function CategorySection({
 }: {
   categories: TimelogCategory[]
   azureActivities: AzureActivity[]
-  onAdd: (name: string) => Promise<void>
+  onAdd: (name: string, description: string) => Promise<void>
   onRemove: (name: string) => Promise<void>
   onMappingChanged: () => void
 }) {
   const [newName, setNewName] = useState('')
+  const [newDescription, setNewDescription] = useState('')
   const [adding, setAdding] = useState(false)
   const [error, setError] = useState('')
   const [removing, setRemoving] = useState<Record<string, boolean>>({})
   const [savingMapping, setSavingMapping] = useState<Record<number, boolean>>({})
+  const [descDrafts, setDescDrafts] = useState<Record<number, string>>({})
+  const [savingDescription, setSavingDescription] = useState<Record<number, boolean>>({})
 
   async function handleAdd() {
     const name = newName.trim()
@@ -199,12 +203,42 @@ function CategorySection({
     setAdding(true)
     setError('')
     try {
-      await onAdd(name)
+      await onAdd(name, newDescription.trim())
       setNewName('')
+      setNewDescription('')
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'No se pudo agregar el registro')
     } finally {
       setAdding(false)
+    }
+  }
+
+  async function handleDescriptionBlur(category: TimelogCategory) {
+    const draft = descDrafts[category.id]
+    if (draft === undefined) return
+    const trimmed = draft.trim()
+    if (trimmed === (category.description ?? '')) {
+      setDescDrafts(prev => {
+        const next = { ...prev }
+        delete next[category.id]
+        return next
+      })
+      return
+    }
+    setSavingDescription(prev => ({ ...prev, [category.id]: true }))
+    setError('')
+    try {
+      await updateCatalogCategoryDescription(category.id, trimmed)
+      setDescDrafts(prev => {
+        const next = { ...prev }
+        delete next[category.id]
+        return next
+      })
+      onMappingChanged()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'No se pudo guardar la descripción')
+    } finally {
+      setSavingDescription(prev => ({ ...prev, [category.id]: false }))
     }
   }
 
@@ -267,14 +301,23 @@ function CategorySection({
       </div>
 
       {/* Add row */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
         <input
           type="text"
           value={newName}
           onChange={e => setNewName(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') handleAdd() }}
           placeholder="Nueva categoría..."
-          style={{ ...inputStyle, flex: 1 }}
+          style={{ ...inputStyle, flex: '1 1 140px' }}
+          disabled={adding}
+        />
+        <input
+          type="text"
+          value={newDescription}
+          onChange={e => setNewDescription(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') handleAdd() }}
+          placeholder="Descripción (opcional)..."
+          style={{ ...inputStyle, flex: '1 1 160px' }}
           disabled={adding}
         />
         <button
@@ -339,6 +382,17 @@ function CategorySection({
                     <Trash2 size={13} strokeWidth={1.75} />
                   </button>
                 </div>
+                <input
+                  type="text"
+                  aria-label={`Descripción de ${c.name}`}
+                  value={descDrafts[c.id] ?? c.description ?? ''}
+                  onChange={e => setDescDrafts(prev => ({ ...prev, [c.id]: e.target.value }))}
+                  onBlur={() => handleDescriptionBlur(c)}
+                  onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                  placeholder="Descripción..."
+                  disabled={!!savingDescription[c.id]}
+                  style={{ ...inputStyle, fontSize: '0.85em', padding: '4px 8px' }}
+                />
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <select
                     aria-label="Actividad de Azure"
@@ -636,8 +690,8 @@ export function CatalogManagementModal({ open, onClose, catalog, onCatalogChange
     onCatalogChanged()
   }
 
-  async function handleAddCategory(name: string) {
-    await addCatalogCategory(name)
+  async function handleAddCategory(name: string, description: string) {
+    await addCatalogCategory(name, description)
     onCatalogChanged()
   }
 
