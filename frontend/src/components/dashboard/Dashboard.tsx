@@ -1,16 +1,22 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   ListTodo,
   CircleDot,
   CircleAlert,
   CalendarCheck,
   Users,
+  Clock,
+  Target,
+  TriangleAlert,
 } from 'lucide-react'
 import { useAppState, useAppActions } from '../../store/AppContext'
+import { listActivitiesRange } from '../../api/client'
 import { StatCard } from '../shared/StatCard'
 import { StatusBadge } from '../shared/StatusBadge'
 import { Avatar } from '../shared/Avatar'
-import type { Status, ViewName } from '../../types'
+import type { DailyActivity, Status, ViewName } from '../../types'
+
+const DAILY_TARGET_HOURS = 8
 
 function fmt(dt: string) {
   if (!dt) return '—'
@@ -19,6 +25,27 @@ function fmt(dt: string) {
   } catch {
     return dt
   }
+}
+
+function toYMD(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${dd}`
+}
+
+// countBusinessDays counts Mon-Fri dates in [from, to] inclusive. No holiday
+// calendar exists in Mintag, so this is a deliberate approximation — it will
+// overcount expected hours on months with holidays.
+function countBusinessDays(from: Date, to: Date): number {
+  let count = 0
+  const cur = new Date(from)
+  while (cur <= to) {
+    const day = cur.getDay()
+    if (day !== 0 && day !== 6) count++
+    cur.setDate(cur.getDate() + 1)
+  }
+  return count
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -35,6 +62,34 @@ export function Dashboard() {
     () => [...meetings].sort((a, b) => b.id - a.id).slice(0, 5),
     [meetings]
   )
+
+  const [monthActivities, setMonthActivities] = useState<DailyActivity[]>([])
+  useEffect(() => {
+    const today = new Date()
+    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
+    listActivitiesRange(toYMD(monthStart), toYMD(today))
+      .then(setMonthActivities)
+      .catch(() => setMonthActivities([]))
+  }, [])
+
+  const timeLogKpis = useMemo(() => {
+    const today = new Date()
+    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
+    const todayStr = toYMD(today)
+    const isBusinessDayToday = today.getDay() !== 0 && today.getDay() !== 6
+
+    const expectedHours = countBusinessDays(monthStart, today) * DAILY_TARGET_HOURS
+    const registeredHours = monthActivities.reduce((sum, a) => sum + a.hours, 0)
+    const compliancePct = expectedHours > 0 ? Math.round((registeredHours / expectedHours) * 100) : 0
+    const loggedToday = monthActivities.some(a => a.date === todayStr)
+
+    return {
+      expectedHours,
+      registeredHours,
+      compliancePct,
+      showTodayAlert: isBusinessDayToday && !loggedToday,
+    }
+  }, [monthActivities])
 
   function openTask(id: number) { setEditingTaskId(id); openModal('task') }
   function openMeeting(id: number) { setActiveMeetingId(id); openModal('meeting') }
@@ -83,6 +138,65 @@ export function Dashboard() {
           value={stats?.total_meetings ?? 0}
           label="Reuniones"
           onClick={() => navTo('meetings')}
+        />
+      </div>
+
+      {/* Time log KPIs */}
+      {timeLogKpis.showTodayAlert && (
+        <button
+          onClick={() => navTo('activities')}
+          className="card"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            width: '100%',
+            textAlign: 'left',
+            padding: '12px 18px',
+            marginBottom: 16,
+            border: '1px solid var(--amber-200)',
+            background: 'var(--amber-50)',
+            cursor: 'pointer',
+          }}
+        >
+          <TriangleAlert size={18} color="var(--amber-700)" style={{ flex: 'none' }} />
+          <span style={{ font: 'var(--text-sm)', color: 'var(--amber-700)', fontWeight: 600 }}>
+            Todavía no registraste actividades hoy — hazlo antes de cerrar el día.
+          </span>
+        </button>
+      )}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, 1fr)',
+          gap: 16,
+          marginBottom: 24,
+        }}
+      >
+        <StatCard
+          icon={Clock}
+          iconBg="var(--indigo-50)"
+          iconFg="var(--indigo-700)"
+          value={`${timeLogKpis.registeredHours}h`}
+          label="Horas registradas (mes)"
+          onClick={() => navTo('activities')}
+        />
+        <StatCard
+          icon={Target}
+          iconBg="var(--emerald-50)"
+          iconFg="var(--emerald-700)"
+          value={`${timeLogKpis.expectedHours}h`}
+          label="Meta del mes (días hábiles × 8h)"
+          onClick={() => navTo('activities')}
+        />
+        <StatCard
+          icon={CircleDot}
+          iconBg={timeLogKpis.compliancePct < 90 ? 'var(--rose-50)' : 'var(--emerald-50)'}
+          iconFg={timeLogKpis.compliancePct < 90 ? 'var(--rose-700)' : 'var(--emerald-700)'}
+          value={`${timeLogKpis.compliancePct}%`}
+          label="Cumplimiento de registro"
+          emphasize={timeLogKpis.compliancePct < 90}
+          onClick={() => navTo('activities')}
         />
       </div>
 

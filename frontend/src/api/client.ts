@@ -162,6 +162,12 @@ export function listActivities(date: string, status?: ActivityStatus): Promise<D
   return request<DailyActivity[]>(`/api/activities?${qs}`)
 }
 
+export function listActivitiesRange(from: string, to: string, status?: ActivityStatus): Promise<DailyActivity[]> {
+  const qs = new URLSearchParams({ from, to })
+  if (status && status !== ('all' as ActivityStatus)) qs.set('status', status)
+  return request<DailyActivity[]>(`/api/activities?${qs}`)
+}
+
 export function createActivity(body: Omit<DailyActivity, 'id' | 'created_at' | 'uploaded_at' | 'status'>): Promise<DailyActivity> {
   return request<DailyActivity>('/api/activities', { method: 'POST', body: JSON.stringify(body) })
 }
