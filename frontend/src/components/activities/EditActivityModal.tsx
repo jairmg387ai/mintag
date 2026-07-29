@@ -1,4 +1,4 @@
-import { useState, useEffect, type CSSProperties } from 'react'
+import { useState, useEffect, useRef, type CSSProperties } from 'react'
 import { X } from 'lucide-react'
 import type { DailyActivity, ActivityCatalog, AzureActivity } from '../../types'
 import { updateActivity } from '../../api/client'
@@ -49,6 +49,7 @@ function Field({ label, children, error }: { label: string; children: React.Reac
 }
 
 export function EditActivityModal({ activity, open, onClose, onSaved, catalog, azureActivities }: EditActivityModalProps) {
+  const pressedOnOverlay = useRef(false)
   const [hours, setHours] = useState('')
   const [project, setProject] = useState('')
   const [category, setCategory] = useState('')
@@ -133,7 +134,11 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
 
   return (
     <div
-      onClick={onClose}
+      onMouseDown={e => { pressedOnOverlay.current = e.target === e.currentTarget }}
+      onClick={e => {
+        if (pressedOnOverlay.current && e.target === e.currentTarget) onClose()
+        pressedOnOverlay.current = false
+      }}
       style={{
         position: 'fixed',
         inset: 0,

@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useRef } from 'react'
 import { X } from 'lucide-react'
 import { useAppActions } from '../../store/AppContext'
 import { Button } from '../ui/Button'
@@ -12,10 +12,15 @@ interface ModalProps {
 
 export function Modal({ title, children, footer, maxWidth = 640 }: ModalProps) {
   const { closeModal } = useAppActions()
+  const pressedOnOverlay = useRef(false)
 
   return (
     <div
-      onClick={closeModal}
+      onMouseDown={e => { pressedOnOverlay.current = e.target === e.currentTarget }}
+      onClick={e => {
+        if (pressedOnOverlay.current && e.target === e.currentTarget) closeModal()
+        pressedOnOverlay.current = false
+      }}
       style={{
         position: 'fixed',
         inset: 0,
