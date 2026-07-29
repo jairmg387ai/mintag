@@ -283,6 +283,30 @@ export function setDefaultAzureActivity(id: number): Promise<AzureActivity> {
   return request<AzureActivity>(`/api/activities/azure-catalog/${id}/default`, { method: 'POST' })
 }
 
+// exportActivities downloads the .xlsx export for [from, to] (inclusive) and
+// triggers a browser download using the filename the server sent via
+// Content-Disposition, falling back to a locally built name if that header
+// is ever missing.
+export async function exportActivities(from: string, to: string): Promise<void> {
+  const qs = new URLSearchParams({ from, to })
+  const res = await fetch(`/api/activities/export?${qs}`)
+  if (!res.ok) throw new Error(await res.text())
+
+  const disposition = res.headers.get('Content-Disposition') ?? ''
+  const match = /filename="?([^"]+)"?/.exec(disposition)
+  const filename = match ? match[1] : `actividades_${from}_${to}.xlsx`
+
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 export function updateMeetingSummary(id: number, summary: string): Promise<Meeting> {
   return request<Meeting>(`/api/meetings/${id}/summary`, { method: 'PUT', body: JSON.stringify({ summary }) })
 }

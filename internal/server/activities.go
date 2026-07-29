@@ -40,6 +40,7 @@ var reActivityDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 //	POST   /api/activities/catalog/categories
 //	DELETE /api/activities/catalog/categories/{name}
 //	PUT    /api/activities/catalog/categories/{id}/azure-activity
+//	GET    /api/activities/export                    ?from=&to=
 //	GET    /api/activities/azure-catalog
 //	POST   /api/activities/azure-catalog
 //	PATCH  /api/activities/azure-catalog/{id}
@@ -62,6 +63,7 @@ func registerActivityRoutes(r chi.Router, srv *Server) {
 	r.Post("/activities/catalog/categories", srv.handleAddCatalogCategory)
 	r.Delete("/activities/catalog/categories/{name}", srv.handleRemoveCatalogCategory)
 	r.Put("/activities/catalog/categories/{id}/azure-activity", srv.handleSetCategoryAzureActivity)
+	r.Get("/activities/export", srv.handleExportActivities)
 	// azure-catalog routes are grouped here, before /activities/{id}, to
 	// match the reading order of /activities/catalog and /activities/upload
 	// above (chi's radix tree already prioritizes static segments over

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, Fragment } from 'react'
-import { ChevronLeft, ChevronRight, Plus, Upload, CheckCircle, RotateCcw, RefreshCw, Pencil, Trash2, Settings, Eye } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Upload, CheckCircle, RotateCcw, RefreshCw, Pencil, Trash2, Settings, Eye, FileDown } from 'lucide-react'
 import type { DailyActivity, ActivityCatalog, UploadResult, AzureTimeLogConfigStatus, AzureActivity } from '../../types'
 import {
   listActivities,
@@ -21,6 +21,7 @@ import { NewActivityModal } from './NewActivityModal'
 import { EditActivityModal } from './EditActivityModal'
 import { CatalogManagementModal } from './CatalogManagementModal'
 import { ActivityDetailModal } from './ActivityDetailModal'
+import { ExportActivitiesModal } from './ExportActivitiesModal'
 
 function toYMD(d: Date): string {
   const y = d.getFullYear()
@@ -51,6 +52,7 @@ export function ActivitiesView() {
   const [viewingActivity, setViewingActivity] = useState<DailyActivity | null>(null)
   const [rowErrors, setRowErrors] = useState<Record<number, string>>({})
   const [showCatalogModal, setShowCatalogModal] = useState(false)
+  const [showExportModal, setShowExportModal] = useState(false)
   const [azureConfig, setAzureConfig] = useState<AzureTimeLogConfigStatus | null>(null)
   const [azureToken, setAzureToken] = useState('')
   const [azureAuthMode, setAzureAuthMode] = useState<'bearer' | 'basic'>('bearer')
@@ -277,6 +279,15 @@ export function ActivitiesView() {
               Approve All
             </button>
           )}
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => setShowExportModal(true)}
+            title="Exportar actividades a Excel"
+            aria-label="Exportar actividades a Excel"
+          >
+            <FileDown size={15} strokeWidth={1.75} />
+            Exportar
+          </button>
           <button
             className="btn btn-ghost btn-sm"
             onClick={() => setShowCatalogModal(true)}
@@ -638,6 +649,12 @@ export function ActivitiesView() {
         open={viewingActivity !== null}
         onClose={() => setViewingActivity(null)}
         azureActivities={azureActivities}
+      />
+
+      <ExportActivitiesModal
+        open={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        defaultDate={date}
       />
 
     </div>
