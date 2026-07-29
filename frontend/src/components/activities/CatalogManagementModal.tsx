@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react'
+import { useState, useRef, type CSSProperties } from 'react'
 import { X, Trash2, Plus, Star, Pencil, Check } from 'lucide-react'
 import type { ActivityCatalog, AzureActivity, TimelogCategory } from '../../types'
 import {
@@ -622,6 +622,8 @@ function AzureActivitySection({
 }
 
 export function CatalogManagementModal({ open, onClose, catalog, onCatalogChanged, azureActivities, onAzureActivitiesChanged }: CatalogManagementModalProps) {
+  const pressedOnOverlay = useRef(false)
+
   if (!open) return null
 
   async function handleAddProject(name: string) {
@@ -646,7 +648,11 @@ export function CatalogManagementModal({ open, onClose, catalog, onCatalogChange
 
   return (
     <div
-      onClick={onClose}
+      onMouseDown={e => { pressedOnOverlay.current = e.target === e.currentTarget }}
+      onClick={e => {
+        if (pressedOnOverlay.current && e.target === e.currentTarget) onClose()
+        pressedOnOverlay.current = false
+      }}
       style={{
         position: 'fixed',
         inset: 0,
