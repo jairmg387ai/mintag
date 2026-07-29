@@ -4,7 +4,7 @@ interface StatCardProps {
   icon: LucideIcon
   iconBg: string
   iconFg: string
-  value: number
+  value: number | string
   label: string
   delta?: string
   deltaColor?: string
