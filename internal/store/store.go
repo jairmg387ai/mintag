@@ -251,7 +251,10 @@ func (s *Store) migrate() error {
 	if err := s.migrateActivities(); err != nil {
 		return err
 	}
-	return s.migrateDeploymentWindows()
+	if err := s.migrateDeploymentWindows(); err != nil {
+		return err
+	}
+	return s.migrateMenuOptions()
 }
 
 func (s *Store) migrateActivities() error {
