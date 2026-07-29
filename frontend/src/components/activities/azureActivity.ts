@@ -23,7 +23,7 @@ export function resolveAzureActivityLabel(
 ): string {
   if (azureActivityId == null) {
     const def = findDefaultAzureActivity(azureActivities)
-    return def ? formatAzureActivityLabel(def) : 'Default'
+    return def ? formatAzureActivityLabel(def) : 'Predeterminada'
   }
   const match = azureActivities.find(a => a.id === azureActivityId)
   return match ? formatAzureActivityLabel(match) : `#${azureActivityId}`

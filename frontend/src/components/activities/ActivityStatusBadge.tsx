@@ -6,9 +6,9 @@ interface ActivityStatusBadgeProps {
 }
 
 const STATUS_META: Record<ActivityStatus, { label: string; cls: string; icon: React.ElementType }> = {
-  pending:  { label: 'Pending',  cls: 'chip-pending', icon: Clock },
-  approved: { label: 'Approved', cls: 'chip-prog',    icon: CheckCircle },
-  uploaded: { label: 'Uploaded', cls: 'chip-done',    icon: Upload },
+  pending:  { label: 'Pendiente', cls: 'chip-pending', icon: Clock },
+  approved: { label: 'Aprobada',  cls: 'chip-prog',    icon: CheckCircle },
+  uploaded: { label: 'Subida',    cls: 'chip-done',    icon: Upload },
 }
 
 export function ActivityStatusBadge({ status }: ActivityStatusBadgeProps) {

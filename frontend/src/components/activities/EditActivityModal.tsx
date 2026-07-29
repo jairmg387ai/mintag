@@ -98,10 +98,10 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
   function validate(): boolean {
     const errs: Record<string, string> = {}
     const h = parseFloat(hours)
-    if (!hours || isNaN(h) || h <= 0) errs.hours = 'Hours must be greater than 0'
-    if (!project.trim()) errs.project = 'Project is required'
-    if (!category.trim()) errs.category = 'Category is required'
-    if (!registroDiario.trim()) errs.registroDiario = 'Description is required'
+    if (!hours || isNaN(h) || h <= 0) errs.hours = 'Las horas deben ser mayores que 0'
+    if (!project.trim()) errs.project = 'El proyecto es obligatorio'
+    if (!category.trim()) errs.category = 'La categoría es obligatoria'
+    if (!registroDiario.trim()) errs.registroDiario = 'La descripción es obligatoria'
     setErrors(errs)
     return Object.keys(errs).length === 0
   }
@@ -126,7 +126,7 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
       onSaved()
       onClose()
     } catch (e: unknown) {
-      setSubmitError(e instanceof Error ? e.message : 'Error updating activity')
+      setSubmitError(e instanceof Error ? e.message : 'No se pudo actualizar la actividad')
     } finally {
       setSubmitting(false)
     }
@@ -174,7 +174,7 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
           }}
         >
           <h2 style={{ font: 'var(--text-h3)', color: 'var(--fg1)', flex: 1, margin: 0 }}>
-            Edit Activity
+            Editar actividad
           </h2>
           <button
             onClick={onClose}
@@ -188,7 +188,7 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
               padding: 4,
               borderRadius: 'var(--radius-md)',
             }}
-            aria-label="Close"
+            aria-label="Cerrar"
           >
             <X size={18} strokeWidth={1.75} />
           </button>
@@ -196,7 +196,7 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
 
         {/* Body */}
         <div style={{ padding: '20px 22px', overflowY: 'auto', flex: 1 }}>
-          <Field label="Hours *" error={errors.hours}>
+          <Field label="Horas *" error={errors.hours}>
             <input
               type="number"
               step="0.25"
@@ -208,7 +208,7 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
             />
           </Field>
 
-          <Field label="Project *" error={errors.project}>
+          <Field label="Proyecto *" error={errors.project}>
             {catalog !== null ? (
               <select
                 style={inputStyle}
@@ -227,13 +227,13 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
                 type="text"
                 value={project}
                 onChange={e => setProject(e.target.value)}
-                placeholder="Project name"
+                placeholder="Nombre del proyecto"
                 style={inputStyle}
               />
             )}
           </Field>
 
-          <Field label="Category *" error={errors.category}>
+          <Field label="Categoría *" error={errors.category}>
             {catalog !== null ? (
               <select
                 style={inputStyle}
@@ -252,29 +252,29 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
                 type="text"
                 value={category}
                 onChange={e => setCategory(e.target.value)}
-                placeholder="Category"
+                placeholder="Categoría"
                 style={inputStyle}
               />
             )}
           </Field>
 
-          <Field label="Description *" error={errors.registroDiario}>
+          <Field label="Descripción *" error={errors.registroDiario}>
             <textarea
               style={textareaStyle}
               value={registroDiario}
               onChange={e => setRegistroDiario(e.target.value)}
-              placeholder="project/category/description..."
+              placeholder="proyecto/categoría/descripción..."
             />
           </Field>
 
-          <Field label="Azure Activity">
+          <Field label="Actividad de Azure">
             <select
               style={inputStyle}
               value={azureActivityId}
               onChange={e => setAzureActivityId(e.target.value)}
             >
               <option value="">
-                Use default{defaultAzureActivity ? ` (${formatAzureActivityLabel(defaultAzureActivity)})` : ''}
+                Usar predeterminada{defaultAzureActivity ? ` (${formatAzureActivityLabel(defaultAzureActivity)})` : ''}
               </option>
               {azureActivities.map(a => (
                 <option key={a.id} value={a.id}>
@@ -311,10 +311,10 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
           }}
         >
           <button onClick={onClose} className="btn btn-ghost" disabled={submitting}>
-            Cancel
+            Cancelar
           </button>
           <button onClick={handleSubmit} className="btn btn-primary" disabled={submitting}>
-            {submitting ? 'Saving...' : 'Save Changes'}
+            {submitting ? 'Guardando...' : 'Guardar cambios'}
           </button>
         </div>
       </div>

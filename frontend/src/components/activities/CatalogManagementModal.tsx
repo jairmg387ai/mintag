@@ -73,7 +73,7 @@ function CatalogSection({
       await onAdd(name)
       setNewName('')
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Error adding entry')
+      setError(e instanceof Error ? e.message : 'No se pudo agregar el registro')
     } finally {
       setAdding(false)
     }
@@ -84,7 +84,7 @@ function CatalogSection({
     try {
       await onRemove(name)
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Error removing entry')
+      setError(e instanceof Error ? e.message : 'No se pudo eliminar el registro')
     } finally {
       setRemoving(prev => ({ ...prev, [name]: false }))
     }
@@ -113,7 +113,7 @@ function CatalogSection({
           value={newName}
           onChange={e => setNewName(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') handleAdd() }}
-          placeholder={`New ${title.toLowerCase().slice(0, -1)}...`}
+          placeholder={`Nuevo ${title.toLowerCase().slice(0, -1)}...`}
           style={{ ...inputStyle, flex: 1 }}
           disabled={adding}
         />
@@ -121,7 +121,7 @@ function CatalogSection({
           className="btn btn-primary btn-sm"
           onClick={handleAdd}
           disabled={adding || !newName.trim()}
-          aria-label={`Add ${title}`}
+          aria-label={`Agregar ${title}`}
         >
           <Plus size={14} strokeWidth={1.75} />
         </button>
@@ -137,7 +137,7 @@ function CatalogSection({
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 300, overflowY: 'auto' }}>
         {items.length === 0 ? (
           <div style={{ font: 'var(--text-caption)', color: 'var(--fg3)', padding: '8px 0' }}>
-            No entries
+            Sin registros
           </div>
         ) : (
           items.map(item => (
@@ -160,8 +160,8 @@ function CatalogSection({
                 className="btn btn-ghost btn-sm"
                 onClick={() => handleRemove(item)}
                 disabled={removing[item]}
-                title={`Remove ${item}`}
-                aria-label={`Remove ${item}`}
+                title={`Eliminar ${item}`}
+                aria-label={`Eliminar ${item}`}
                 style={{ padding: '2px 4px' }}
               >
                 <Trash2 size={13} strokeWidth={1.75} />
@@ -202,7 +202,7 @@ function CategorySection({
       await onAdd(name)
       setNewName('')
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Error adding entry')
+      setError(e instanceof Error ? e.message : 'No se pudo agregar el registro')
     } finally {
       setAdding(false)
     }
@@ -213,7 +213,7 @@ function CategorySection({
     try {
       await onRemove(name)
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Error removing entry')
+      setError(e instanceof Error ? e.message : 'No se pudo eliminar el registro')
     } finally {
       setRemoving(prev => ({ ...prev, [name]: false }))
     }
@@ -263,7 +263,7 @@ function CategorySection({
           color: 'var(--fg3)',
         } as CSSProperties}
       >
-        Categories
+        Categorías
       </div>
 
       {/* Add row */}
@@ -273,7 +273,7 @@ function CategorySection({
           value={newName}
           onChange={e => setNewName(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') handleAdd() }}
-          placeholder="New category..."
+          placeholder="Nueva categoría..."
           style={{ ...inputStyle, flex: 1 }}
           disabled={adding}
         />
@@ -281,7 +281,7 @@ function CategorySection({
           className="btn btn-primary btn-sm"
           onClick={handleAdd}
           disabled={adding || !newName.trim()}
-          aria-label="Add Categories"
+          aria-label="Agregar categorías"
         >
           <Plus size={14} strokeWidth={1.75} />
         </button>
@@ -297,7 +297,7 @@ function CategorySection({
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 300, overflowY: 'auto' }}>
         {categories.length === 0 ? (
           <div style={{ font: 'var(--text-caption)', color: 'var(--fg3)', padding: '8px 0' }}>
-            No entries
+            Sin registros
           </div>
         ) : (
           categories.map(c => {
@@ -332,8 +332,8 @@ function CategorySection({
                     className="btn btn-ghost btn-sm"
                     onClick={() => handleRemove(c.name)}
                     disabled={removing[c.name]}
-                    title={`Remove ${c.name}`}
-                    aria-label={`Remove ${c.name}`}
+                    title={`Eliminar ${c.name}`}
+                    aria-label={`Eliminar ${c.name}`}
                     style={{ padding: '2px 4px' }}
                   >
                     <Trash2 size={13} strokeWidth={1.75} />
@@ -398,7 +398,7 @@ function AzureActivitySection({
   async function handleAdd() {
     const wid = parseInt(workItemId, 10)
     if (!org.trim() || !label.trim() || !workItemId.trim() || isNaN(wid)) {
-      setError('Org, work item ID, and label are all required')
+      setError('La organización, el ID del work item y la etiqueta son obligatorios')
       return
     }
     setAdding(true)
@@ -410,7 +410,7 @@ function AzureActivitySection({
       setLabel('')
       onChanged()
     } catch (e: unknown) {
-      setError(friendlyCatalogErrorMessage(e, 'Error adding activity'))
+      setError(friendlyCatalogErrorMessage(e, 'No se pudo agregar la actividad'))
     } finally {
       setAdding(false)
     }
@@ -425,7 +425,7 @@ function AzureActivitySection({
 
   async function saveEdit(id: number) {
     if (!editOrg.trim() || !editLabel.trim()) {
-      setError('Org and label are required')
+      setError('La organización y la etiqueta son obligatorias')
       return
     }
     setBusyId(id)
@@ -435,7 +435,7 @@ function AzureActivitySection({
       setEditingId(null)
       onChanged()
     } catch (e: unknown) {
-      setError(friendlyCatalogErrorMessage(e, 'Error updating activity'))
+      setError(friendlyCatalogErrorMessage(e, 'No se pudo actualizar la actividad'))
     } finally {
       setBusyId(null)
     }
@@ -448,7 +448,7 @@ function AzureActivitySection({
       await setDefaultAzureActivity(id)
       onChanged()
     } catch (e: unknown) {
-      setError(friendlyCatalogErrorMessage(e, 'Error setting default activity'))
+      setError(friendlyCatalogErrorMessage(e, 'No se pudo definir la actividad predeterminada'))
     } finally {
       setBusyId(null)
     }
@@ -461,7 +461,7 @@ function AzureActivitySection({
       await deactivateAzureActivity(id)
       onChanged()
     } catch (e: unknown) {
-      setError(friendlyCatalogErrorMessage(e, 'Error deactivating activity'))
+      setError(friendlyCatalogErrorMessage(e, 'No se pudo desactivar la actividad'))
     } finally {
       setBusyId(null)
     }
@@ -480,7 +480,7 @@ function AzureActivitySection({
           color: 'var(--fg3)',
         } as CSSProperties}
       >
-        Azure Work Items
+        Work items de Azure
       </div>
 
       {/* Add row */}
@@ -489,7 +489,7 @@ function AzureActivitySection({
           type="text"
           value={org}
           onChange={e => setOrg(e.target.value)}
-          placeholder="Org (e.g. RUNT2PSW)"
+          placeholder="Organización (ej. RUNT2PSW)"
           style={{ ...inputStyle, flex: '1 1 140px' }}
           disabled={adding}
         />
@@ -497,7 +497,7 @@ function AzureActivitySection({
           type="number"
           value={workItemId}
           onChange={e => setWorkItemId(e.target.value)}
-          placeholder="Work item ID"
+          placeholder="ID del work item"
           style={{ ...inputStyle, flex: '1 1 120px' }}
           disabled={adding}
         />
@@ -505,7 +505,7 @@ function AzureActivitySection({
           type="text"
           value={label}
           onChange={e => setLabel(e.target.value)}
-          placeholder="Label"
+          placeholder="Etiqueta"
           style={{ ...inputStyle, flex: '1 1 160px' }}
           disabled={adding}
         />
@@ -513,7 +513,7 @@ function AzureActivitySection({
           className="btn btn-primary btn-sm"
           onClick={handleAdd}
           disabled={adding || !org.trim() || !workItemId.trim() || !label.trim()}
-          aria-label="Add Azure activity"
+          aria-label="Agregar actividad de Azure"
         >
           <Plus size={14} strokeWidth={1.75} />
         </button>
@@ -529,7 +529,7 @@ function AzureActivitySection({
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 260, overflowY: 'auto' }}>
         {activities.length === 0 ? (
           <div style={{ font: 'var(--text-caption)', color: 'var(--fg3)', padding: '8px 0' }}>
-            No entries
+            Sin registros
           </div>
         ) : (
           activities.map(a => (
@@ -565,8 +565,8 @@ function AzureActivitySection({
                     className="btn btn-ghost btn-sm"
                     onClick={() => saveEdit(a.id)}
                     disabled={busyId === a.id}
-                    title="Save"
-                    aria-label={`Save ${a.label}`}
+                    title="Guardar"
+                    aria-label={`Guardar ${a.label}`}
                     style={{ padding: '2px 4px' }}
                   >
                     <Check size={13} strokeWidth={1.75} />
@@ -578,14 +578,14 @@ function AzureActivitySection({
                     {a.label} <span style={{ color: 'var(--fg3)' }}>— {a.org} / #{a.work_item_id}</span>
                   </span>
                   {a.is_default ? (
-                    <span className="chip chip-done" style={{ fontSize: '0.75em' }}>Default</span>
+                    <span className="chip chip-done" style={{ fontSize: '0.75em' }}>Predeterminada</span>
                   ) : (
                     <button
                       className="btn btn-ghost btn-sm"
                       onClick={() => handleSetDefault(a.id)}
                       disabled={busyId === a.id}
-                      title="Set as default"
-                      aria-label={`Set ${a.label} as default`}
+                      title="Definir como predeterminada"
+                      aria-label={`Definir ${a.label} como predeterminada`}
                       style={{ padding: '2px 4px' }}
                     >
                       <Star size={13} strokeWidth={1.75} />
@@ -595,8 +595,8 @@ function AzureActivitySection({
                     className="btn btn-ghost btn-sm"
                     onClick={() => startEdit(a)}
                     disabled={busyId === a.id}
-                    title="Edit"
-                    aria-label={`Edit ${a.label}`}
+                    title="Editar"
+                    aria-label={`Editar ${a.label}`}
                     style={{ padding: '2px 4px' }}
                   >
                     <Pencil size={13} strokeWidth={1.75} />
@@ -605,8 +605,8 @@ function AzureActivitySection({
                     className="btn btn-ghost btn-sm"
                     onClick={() => handleDeactivate(a.id)}
                     disabled={busyId === a.id || a.is_default}
-                    title={a.is_default ? 'Promote another activity to default first' : 'Deactivate'}
-                    aria-label={`Deactivate ${a.label}`}
+                    title={a.is_default ? 'Primero define otra actividad como predeterminada' : 'Desactivar'}
+                    aria-label={`Desactivar ${a.label}`}
                     style={{ padding: '2px 4px' }}
                   >
                     <Trash2 size={13} strokeWidth={1.75} />
@@ -688,7 +688,7 @@ export function CatalogManagementModal({ open, onClose, catalog, onCatalogChange
           }}
         >
           <h2 style={{ font: 'var(--text-h3)', color: 'var(--fg1)', flex: 1, margin: 0 }}>
-            Manage Catalog
+            Gestionar catálogo
           </h2>
           <button
             onClick={onClose}
@@ -702,7 +702,7 @@ export function CatalogManagementModal({ open, onClose, catalog, onCatalogChange
               padding: 4,
               borderRadius: 'var(--radius-md)',
             }}
-            aria-label="Close"
+            aria-label="Cerrar"
           >
             <X size={18} strokeWidth={1.75} />
           </button>
@@ -712,7 +712,7 @@ export function CatalogManagementModal({ open, onClose, catalog, onCatalogChange
         <div style={{ padding: '20px 22px', overflowY: 'auto', flex: 1 }}>
           <div style={{ display: 'flex', gap: 24 }}>
             <CatalogSection
-              title="Projects"
+              title="Proyectos"
               items={catalog?.projects ?? []}
               onAdd={handleAddProject}
               onRemove={handleRemoveProject}
@@ -740,7 +740,7 @@ export function CatalogManagementModal({ open, onClose, catalog, onCatalogChange
           }}
         >
           <button onClick={onClose} className="btn btn-ghost">
-            Close
+            Cerrar
           </button>
         </div>
       </div>
