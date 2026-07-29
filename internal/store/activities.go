@@ -109,6 +109,43 @@ func (s *Store) ListActivities(ctx context.Context, date, status string) ([]*Dai
 	}
 	query += " ORDER BY created_at ASC"
 
+	return s.queryActivities(ctx, query, args...)
+}
+
+// ListActivitiesRange returns activities whose date falls within [from, to]
+// inclusive, optionally filtered by status, ordered by date ASC then
+// created_at ASC. Both from and to are required and must be in YYYY-MM-DD
+// format; from must not be later than to (both checks are validation
+// errors, not empty results — see the activity-export spec's "Invalid range
+// is rejected" scenario).
+func (s *Store) ListActivitiesRange(ctx context.Context, from, to, status string) ([]*DailyActivity, error) {
+	if !reDate.MatchString(from) {
+		return nil, fmt.Errorf("from must be in YYYY-MM-DD format, got %q", from)
+	}
+	if !reDate.MatchString(to) {
+		return nil, fmt.Errorf("to must be in YYYY-MM-DD format, got %q", to)
+	}
+	// ISO 8601 (YYYY-MM-DD) dates compare correctly as plain strings.
+	if from > to {
+		return nil, fmt.Errorf("from (%q) must not be later than to (%q)", from, to)
+	}
+
+	query := `SELECT id, date, hours, project, category, registro_diario, source, status, created_at, uploaded_at, azure_document_id, azure_activity_id
+	          FROM daily_activities WHERE date >= ? AND date <= ?`
+	args := []any{from, to}
+	if status != "" {
+		query += " AND status = ?"
+		args = append(args, status)
+	}
+	query += " ORDER BY date ASC, created_at ASC"
+
+	return s.queryActivities(ctx, query, args...)
+}
+
+// queryActivities executes a SELECT against daily_activities and scans every
+// row into a DailyActivity. Shared by ListActivities and ListActivitiesRange
+// so the column list and scan order stay in exactly one place.
+func (s *Store) queryActivities(ctx context.Context, query string, args ...any) ([]*DailyActivity, error) {
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
