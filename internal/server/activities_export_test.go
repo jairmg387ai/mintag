@@ -63,7 +63,7 @@ func TestBuildActivitiesWorkbook_ColumnOrder(t *testing.T) {
 		},
 	}
 	azure := []*store.AzureActivity{
-		{ID: 5, Label: "QA Activity", IsActive: true},
+		{ID: 5, Label: "QA Activity", WorkItemID: 4321, IsActive: true},
 	}
 
 	data, err := buildActivitiesWorkbook(activities, azure)
@@ -73,7 +73,7 @@ func TestBuildActivitiesWorkbook_ColumnOrder(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("expected 2 rows (header + 1 data), got %d: %#v", len(rows), rows)
 	}
-	want := []string{"QA Activity", "RNCEA", "Diseño", "RNCEA/Diseño/trabajo hecho", "2026-06-15", "2.5"}
+	want := []string{"QA Activity (#4321)", "RNCEA", "Diseño", "RNCEA/Diseño/trabajo hecho", "2026-06-15", "2.5"}
 	got := rows[1]
 	if len(got) != len(want) {
 		t.Fatalf("expected %d data columns, got %d: %#v", len(want), len(got), got)
@@ -93,9 +93,9 @@ func TestBuildActivitiesWorkbook_D7LabelCases(t *testing.T) {
 	danglingID := int64(999)
 
 	azure := []*store.AzureActivity{
-		{ID: 1, Label: "Active Activity", IsActive: true, IsDefault: false},
-		{ID: 2, Label: "Inactive Activity", IsActive: false, IsDefault: false},
-		{ID: 3, Label: "The Default", IsActive: true, IsDefault: true},
+		{ID: 1, Label: "Active Activity", WorkItemID: 101, IsActive: true, IsDefault: false},
+		{ID: 2, Label: "Inactive Activity", WorkItemID: 102, IsActive: false, IsDefault: false},
+		{ID: 3, Label: "The Default", WorkItemID: 103, IsActive: true, IsDefault: true},
 	}
 
 	tests := []struct {
@@ -103,10 +103,10 @@ func TestBuildActivitiesWorkbook_D7LabelCases(t *testing.T) {
 		id   *int64
 		want string
 	}{
-		{"id set, found and active", &activeID, "Active Activity"},
-		{"id set, found but inactive", &inactiveID, "Inactive Activity"},
+		{"id set, found and active", &activeID, "Active Activity (#101)"},
+		{"id set, found but inactive", &inactiveID, "Inactive Activity (#102)"},
 		{"id set, dangling (row deleted outright)", &danglingID, "#999"},
-		{"id null, default exists", nil, "The Default (default)"},
+		{"id null, default exists", nil, "The Default (#103)"},
 	}
 
 	for _, tc := range tests {
@@ -156,7 +156,7 @@ func TestBuildActivitiesWorkbook_DeactivatedActivityKeepsRealLabel(t *testing.T)
 	// the slice passed to buildActivitiesWorkbook, only its IsActive flag
 	// flipped — mirroring what ListAzureActivities(ctx, true) returns.
 	azure := []*store.AzureActivity{
-		{ID: 7, Label: "Now Deactivated Activity", IsActive: false},
+		{ID: 7, Label: "Now Deactivated Activity", WorkItemID: 707, IsActive: false},
 	}
 
 	data, err := buildActivitiesWorkbook(activities, azure)
@@ -165,7 +165,7 @@ func TestBuildActivitiesWorkbook_DeactivatedActivityKeepsRealLabel(t *testing.T)
 	if len(rows) != 2 {
 		t.Fatalf("expected the row to be present, got %d rows", len(rows))
 	}
-	if rows[1][0] != "Now Deactivated Activity" {
+	if rows[1][0] != "Now Deactivated Activity (#707)" {
 		t.Fatalf("expected the real label to survive deactivation, got %q", rows[1][0])
 	}
 }
@@ -292,7 +292,7 @@ func TestExportActivitiesEndpoint_DeactivatedActivityKeepsRealLabel(t *testing.T
 	if len(rows) != 2 {
 		t.Fatalf("expected header + 1 data row, got %d: %#v", len(rows), rows)
 	}
-	if rows[1][0] != "Soon Deactivated" {
+	if rows[1][0] != "Soon Deactivated (#555)" {
 		t.Fatalf("expected the deactivated activity's real label, got %q", rows[1][0])
 	}
 }

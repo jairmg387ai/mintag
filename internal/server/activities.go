@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"regexp"
@@ -408,11 +409,13 @@ type categoryResponse struct {
 }
 
 // azureLabelByID indexes a list of Azure activities by id for O(1) label
-// lookups. Shared by the /catalog decorator above.
+// lookups. Shared by the /catalog decorator above and the xlsx export.
+// The work item id is included alongside the label everywhere this is
+// displayed — the label alone doesn't identify the Azure work item.
 func azureLabelByID(az []*store.AzureActivity) map[int64]string {
 	out := make(map[int64]string, len(az))
 	for _, a := range az {
-		out[a.ID] = a.Label
+		out[a.ID] = fmt.Sprintf("%s (#%d)", a.Label, a.WorkItemID)
 	}
 	return out
 }

@@ -12,7 +12,7 @@ import {
   deactivateAzureActivity,
   setDefaultAzureActivity,
 } from '../../api/client'
-import { friendlyCatalogErrorMessage } from './azureActivity'
+import { friendlyCatalogErrorMessage, formatAzureActivityLabel } from './azureActivity'
 
 // friendlyMappingErrorMessage maps the two known store-layer validation
 // failures for SetCategoryAzureActivity (unknown or inactive azure activity
@@ -349,7 +349,7 @@ function CategorySection({
                   >
                     <option value="">Sin mapeo</option>
                     {azureActivities.map(a => (
-                      <option key={a.id} value={a.id}>{a.label}</option>
+                      <option key={a.id} value={a.id}>{formatAzureActivityLabel(a)}</option>
                     ))}
                   </select>
                   {isStale && (

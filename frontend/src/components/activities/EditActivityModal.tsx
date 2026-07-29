@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, type CSSProperties } from 'react'
 import { X } from 'lucide-react'
 import type { DailyActivity, ActivityCatalog, AzureActivity } from '../../types'
 import { updateActivity } from '../../api/client'
-import { findDefaultAzureActivity } from './azureActivity'
+import { findDefaultAzureActivity, formatAzureActivityLabel } from './azureActivity'
 
 interface EditActivityModalProps {
   activity: DailyActivity | null
@@ -274,11 +274,11 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
               onChange={e => setAzureActivityId(e.target.value)}
             >
               <option value="">
-                Use default{defaultAzureActivity ? ` (${defaultAzureActivity.label})` : ''}
+                Use default{defaultAzureActivity ? ` (${formatAzureActivityLabel(defaultAzureActivity)})` : ''}
               </option>
               {azureActivities.map(a => (
                 <option key={a.id} value={a.id}>
-                  {a.label}{a.is_default ? ' (default)' : ''}
+                  {formatAzureActivityLabel(a)}
                 </option>
               ))}
             </select>
