@@ -16,11 +16,11 @@ import { MeetingDetailModal } from './components/modals/MeetingDetailModal'
 import { ToastContainer } from './components/shared/Toast'
 
 const VIEW_TITLES: Record<string, string> = {
-  dashboard: 'Dashboard',
-  tasks: 'Tasks',
-  meetings: 'Meetings',
-  graph: 'Knowledge Graph',
-  activities: 'Activities',
+  dashboard: 'Panel',
+  tasks: 'Tareas',
+  meetings: 'Reuniones',
+  graph: 'Grafo de Conocimiento',
+  activities: 'Actividades',
   'deployment-windows': 'Ventanas de Mantenimiento',
 }
 

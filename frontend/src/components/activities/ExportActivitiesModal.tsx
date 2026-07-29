@@ -131,7 +131,7 @@ export function ExportActivitiesModal({ open, onClose, defaultDate }: ExportActi
               padding: 4,
               borderRadius: 'var(--radius-md)',
             }}
-            aria-label="Close"
+            aria-label="Cerrar"
           >
             <X size={18} strokeWidth={1.75} />
           </button>

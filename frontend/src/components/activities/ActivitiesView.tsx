@@ -67,7 +67,7 @@ export function ActivitiesView() {
       const data = await listActivities(d)
       setActivities(data)
     } catch (e: unknown) {
-      setFetchError(e instanceof Error ? e.message : 'Failed to load activities')
+      setFetchError(e instanceof Error ? e.message : 'No se pudieron cargar las actividades')
     } finally {
       setLoading(false)
     }
@@ -107,7 +107,7 @@ export function ActivitiesView() {
     } catch (e: unknown) {
       setRowErrors(prev => ({
         ...prev,
-        [id]: e instanceof Error ? e.message : 'Approval failed',
+        [id]: e instanceof Error ? e.message : 'No se pudo aprobar la actividad',
       }))
     }
   }
@@ -120,7 +120,7 @@ export function ActivitiesView() {
     } catch (e: unknown) {
       setRowErrors(prev => ({
         ...prev,
-        [id]: e instanceof Error ? e.message : 'Unapprove failed',
+        [id]: e instanceof Error ? e.message : 'No se pudo revertir la aprobación',
       }))
     }
   }
@@ -133,7 +133,7 @@ export function ActivitiesView() {
     } catch (e: unknown) {
       setRowErrors(prev => ({
         ...prev,
-        [id]: e instanceof Error ? e.message : 'Delete failed',
+        [id]: e instanceof Error ? e.message : 'No se pudo eliminar la actividad',
       }))
     }
   }
@@ -144,7 +144,7 @@ export function ActivitiesView() {
     const errs: Record<number, string> = {}
     results.forEach((r, i) => {
       if (r.status === 'rejected') {
-        errs[ids[i]] = r.reason instanceof Error ? r.reason.message : 'Approval failed'
+        errs[ids[i]] = r.reason instanceof Error ? r.reason.message : 'No se pudo aprobar la actividad'
       }
     })
     setRowErrors(prev => ({ ...prev, ...errs }))
@@ -160,9 +160,9 @@ export function ActivitiesView() {
       setUploadResult(result)
       await fetchActivities(date)
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Upload failed'
+      const msg = e instanceof Error ? e.message : 'No se pudo subir a Azure'
       if (msg.includes('503') || msg.includes('Azure TimeLog token')) {
-        setUploadError('Azure TimeLog token is not configured')
+        setUploadError('El token de Azure TimeLog no está configurado')
       } else {
         setUploadError(msg)
       }
@@ -177,9 +177,9 @@ export function ActivitiesView() {
       const cfg = await saveAzureTimeLogConfig({ token: azureToken, auth_mode: azureAuthMode })
       setAzureConfig(cfg)
       setAzureToken('')
-      setAzureConfigMessage('Azure token saved. The token is hidden after saving.')
+      setAzureConfigMessage('Token de Azure guardado. El token queda oculto después de guardar.')
     } catch (e: unknown) {
-      setAzureConfigMessage(e instanceof Error ? e.message : 'Failed to save Azure configuration')
+      setAzureConfigMessage(e instanceof Error ? e.message : 'No se pudo guardar la configuración de Azure')
     }
   }
 
@@ -191,9 +191,9 @@ export function ActivitiesView() {
       setAzureToken('')
       setAzureAuthMode(cfg.auth_mode === 'basic' ? 'basic' : 'bearer')
       setDeviceAuth(null)
-      setAzureConfigMessage('Local Azure token cleared.')
+      setAzureConfigMessage('Token local de Azure borrado.')
     } catch (e: unknown) {
-      setAzureConfigMessage(e instanceof Error ? e.message : 'Failed to clear Azure configuration')
+      setAzureConfigMessage(e instanceof Error ? e.message : 'No se pudo borrar la configuración de Azure')
     }
   }
 
@@ -203,9 +203,9 @@ export function ActivitiesView() {
     try {
       const auth = await startAzureDeviceAuth()
       setDeviceAuth(auth)
-      setAzureConfigMessage('Device sign-in started. Open the verification URL and enter the code, then complete sign-in here.')
+      setAzureConfigMessage('Inicio de sesión con dispositivo iniciado. Abre la URL de verificación, ingresa el código y completa el inicio de sesión aquí.')
     } catch (e: unknown) {
-      setAzureConfigMessage(e instanceof Error ? e.message : 'Failed to start Microsoft sign-in')
+      setAzureConfigMessage(e instanceof Error ? e.message : 'No se pudo iniciar sesión con Microsoft')
     } finally {
       setDeviceAuthLoading(false)
     }
@@ -218,26 +218,26 @@ export function ActivitiesView() {
     try {
       const result = await completeAzureDeviceAuth(deviceAuth.device_code)
       if (result.status === 'pending') {
-        setAzureConfigMessage('Authorization is still pending. Finish the browser sign-in and try Complete again.')
+        setAzureConfigMessage('La autorización sigue pendiente. Termina el inicio de sesión en el navegador e intenta completar de nuevo.')
         return
       }
       if (result.status !== 'complete') {
-        setAzureConfigMessage(`Microsoft sign-in ${result.status}. Start again to get a new code.`)
+        setAzureConfigMessage(`Inicio de sesión con Microsoft: ${result.status}. Inicia de nuevo para obtener un código nuevo.`)
         return
       }
       const cfg = await getAzureTimeLogConfig()
       setAzureConfig(cfg)
       setDeviceAuth(null)
-      setAzureConfigMessage('Microsoft sign-in connected. Mintag will refresh access automatically.')
+      setAzureConfigMessage('Inicio de sesión con Microsoft conectado. Mintag renovará el acceso automáticamente.')
     } catch (e: unknown) {
-      setAzureConfigMessage(e instanceof Error ? e.message : 'Failed to complete Microsoft sign-in')
+      setAzureConfigMessage(e instanceof Error ? e.message : 'No se pudo completar el inicio de sesión con Microsoft')
     } finally {
       setDeviceAuthLoading(false)
     }
   }
 
   const [_y, _m, _d] = date.split('-').map(Number)
-  const displayDate = new Date(_y, _m - 1, _d).toLocaleDateString(undefined, {
+  const displayDate = new Date(_y, _m - 1, _d).toLocaleDateString('es-CO', {
     weekday: 'long',
     year: 'numeric',
     month: 'long',
@@ -251,7 +251,7 @@ export function ActivitiesView() {
         <button
           className="btn btn-ghost btn-sm"
           onClick={() => setDate(d => shiftDate(d, -1))}
-          aria-label="Previous day"
+          aria-label="Día anterior"
         >
           <ChevronLeft size={16} strokeWidth={1.75} />
         </button>
@@ -263,7 +263,7 @@ export function ActivitiesView() {
         <button
           className="btn btn-ghost btn-sm"
           onClick={() => setDate(d => shiftDate(d, 1))}
-          aria-label="Next day"
+          aria-label="Día siguiente"
         >
           <ChevronRight size={16} strokeWidth={1.75} />
         </button>
@@ -273,10 +273,10 @@ export function ActivitiesView() {
             <button
               className="btn btn-ghost btn-sm"
               onClick={handleApproveAll}
-              title="Approve all pending activities"
+              title="Aprobar todas las actividades pendientes"
             >
               <CheckCircle size={15} strokeWidth={1.75} />
-              Approve All
+              Aprobar todo
             </button>
           )}
           <button
@@ -291,8 +291,8 @@ export function ActivitiesView() {
           <button
             className="btn btn-ghost btn-sm"
             onClick={() => setShowCatalogModal(true)}
-            title="Manage catalog"
-            aria-label="Manage catalog"
+            title="Gestionar catálogo"
+            aria-label="Gestionar catálogo"
           >
             <Settings size={15} strokeWidth={1.75} />
           </button>
@@ -318,12 +318,12 @@ export function ActivitiesView() {
           marginBottom: 20,
         }}
       >
-        <SummaryItem label="Pending" value={pending.length} cls="chip-pending" />
-        <SummaryItem label="Approved" value={approved.length} cls="chip-prog" />
-        <SummaryItem label="Uploaded" value={uploaded.length} cls="chip-done" />
+        <SummaryItem label="Pendientes" value={pending.length} cls="chip-pending" />
+        <SummaryItem label="Aprobadas" value={approved.length} cls="chip-prog" />
+        <SummaryItem label="Subidas" value={uploaded.length} cls="chip-done" />
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ font: 'var(--text-label)', color: 'var(--fg3)', textTransform: 'uppercase', letterSpacing: 'var(--tracking-label)' }}>
-            Total Hours
+            Total de horas
           </span>
           <span style={{ font: 'var(--text-h3)', color: 'var(--fg1)' }}>
             {totalHours.toFixed(1)}
@@ -336,18 +336,18 @@ export function ActivitiesView() {
         {loading ? (
           <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--fg3)' }}>
             <RefreshCw size={24} strokeWidth={1.75} style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }} />
-            <div style={{ marginTop: 8, font: 'var(--text-body)' }}>Loading activities...</div>
+            <div style={{ marginTop: 8, font: 'var(--text-body)' }}>Cargando actividades...</div>
           </div>
         ) : fetchError ? (
           <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--block-solid)' }}>
             <div style={{ font: 'var(--text-body)', marginBottom: 12 }}>{fetchError}</div>
             <button className="btn btn-secondary btn-sm" onClick={() => fetchActivities(date)}>
-              Retry
+              Reintentar
             </button>
           </div>
         ) : activities.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--fg3)', font: 'var(--text-body)' }}>
-            No activities for this day. Add one with "Nueva Actividad".
+            No hay actividades para este día. Agrega una con "Nueva Actividad".
           </div>
         ) : (
           <table className="mt-table">
@@ -396,8 +396,8 @@ export function ActivitiesView() {
                           <button
                             className="btn btn-ghost btn-sm"
                             onClick={() => setEditingActivity(a)}
-                            title="Edit"
-                            aria-label="Edit activity"
+                            title="Editar"
+                            aria-label="Editar actividad"
                           >
                             <Pencil size={15} strokeWidth={1.75} />
                           </button>
@@ -407,16 +407,16 @@ export function ActivitiesView() {
                             <button
                               className="btn btn-ghost btn-sm"
                               onClick={() => handleApprove(a.id)}
-                              title="Approve"
-                              aria-label="Approve activity"
+                              title="Aprobar"
+                              aria-label="Aprobar actividad"
                             >
                               <CheckCircle size={15} strokeWidth={1.75} />
                             </button>
                             <button
                               className="btn btn-ghost btn-sm"
                               onClick={() => handleDelete(a.id)}
-                              title="Delete"
-                              aria-label="Delete activity"
+                              title="Eliminar"
+                              aria-label="Eliminar actividad"
                             >
                               <Trash2 size={15} strokeWidth={1.75} />
                             </button>
@@ -427,16 +427,16 @@ export function ActivitiesView() {
                             <button
                               className="btn btn-ghost btn-sm"
                               onClick={() => handleUnapprove(a.id)}
-                              title="Unapprove"
-                              aria-label="Unapprove activity"
+                              title="Revertir aprobación"
+                              aria-label="Revertir aprobación de la actividad"
                             >
                               <RotateCcw size={15} strokeWidth={1.75} />
                             </button>
                             <button
                               className="btn btn-ghost btn-sm"
                               onClick={() => handleDelete(a.id)}
-                              title="Delete"
-                              aria-label="Delete activity"
+                              title="Eliminar"
+                              aria-label="Eliminar actividad"
                             >
                               <Trash2 size={15} strokeWidth={1.75} />
                             </button>
@@ -482,10 +482,10 @@ export function ActivitiesView() {
             ) : (
               <Upload size={16} strokeWidth={1.75} />
             )}
-            {uploading ? 'Uploading...' : 'Subir a Azure'}
+            {uploading ? 'Subiendo...' : 'Subir a Azure'}
           </button>
           <span style={{ font: 'var(--text-caption)', color: 'var(--fg3)' }}>
-            {approved.length} approved {approved.length === 1 ? 'entry' : 'entries'} ready to upload
+            {approved.length} {approved.length === 1 ? 'registro aprobado listo' : 'registros aprobados listos'} para subir
           </span>
         </div>
 
@@ -499,10 +499,10 @@ export function ActivitiesView() {
               font: 'var(--text-sm)',
             }}
           >
-            <span>{uploadResult.uploaded_count} {uploadResult.uploaded_count === 1 ? 'activity' : 'activities'} uploaded</span>
+            <span>{uploadResult.uploaded_count} {uploadResult.uploaded_count === 1 ? 'actividad subida' : 'actividades subidas'}</span>
             {uploadResult.failed_ids.length > 0 && (
               <div style={{ marginTop: 4 }}>
-                Failed IDs: {uploadResult.failed_ids.join(', ')} — {uploadResult.errors.join(', ')}
+                IDs con error: {uploadResult.failed_ids.join(', ')} — {uploadResult.errors.join(', ')}
               </div>
             )}
           </div>
@@ -525,37 +525,37 @@ export function ActivitiesView() {
         <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <span style={{ font: 'var(--text-label)', color: 'var(--fg3)', textTransform: 'uppercase', letterSpacing: 'var(--tracking-label)' }}>
-              Azure auth
+              Autenticación de Azure
             </span>
             <span className={`chip ${azureConfig?.configured ? 'chip-done' : 'chip-pending'}`}>
-              {azureConfig?.configured ? `Configured (${azureConfig.auth_mode})` : 'Not configured'}
+              {azureConfig?.configured ? `Configurada (${azureConfig.auth_mode})` : 'No configurada'}
             </span>
             {azureConfig?.oauth_connected && (
-              <span className="chip chip-done">Microsoft connected</span>
+              <span className="chip chip-done">Microsoft conectado</span>
             )}
             {azureConfig?.source && azureConfig.source !== 'none' && (
-              <span style={{ font: 'var(--text-caption)', color: 'var(--fg3)' }}>Source: {azureConfig.source}</span>
+              <span style={{ font: 'var(--text-caption)', color: 'var(--fg3)' }}>Origen: {azureConfig.source}</span>
             )}
             {azureConfig?.oauth_access_token_expires_at && (
               <span style={{ font: 'var(--text-caption)', color: 'var(--fg3)' }}>
-                Access expires: {new Date(azureConfig.oauth_access_token_expires_at).toLocaleString()}
+                Acceso válido hasta: {new Date(azureConfig.oauth_access_token_expires_at).toLocaleString()}
               </span>
             )}
           </div>
           <div style={{ padding: '12px', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <strong style={{ font: 'var(--text-body)', color: 'var(--fg1)' }}>Connect with Microsoft</strong>
+              <strong style={{ font: 'var(--text-body)', color: 'var(--fg1)' }}>Conectar con Microsoft</strong>
               <button className="btn btn-secondary btn-sm" onClick={handleStartDeviceAuth} disabled={deviceAuthLoading}>
-                {deviceAuthLoading ? 'Working...' : 'Start Device Sign-In'}
+                {deviceAuthLoading ? 'Procesando...' : 'Iniciar sesión con dispositivo'}
               </button>
               {deviceAuth && (
                 <button className="btn btn-primary btn-sm" onClick={handleCompleteDeviceAuth} disabled={deviceAuthLoading}>
-                  Complete Sign-In
+                  Completar inicio de sesión
                 </button>
               )}
             </div>
             <div style={{ font: 'var(--text-caption)', color: 'var(--fg3)' }}>
-              Recommended for Mintag. It stores refresh credentials locally and does not display tokens.
+              Recomendado para Mintag. Guarda las credenciales de renovación localmente y no muestra tokens.
             </div>
             {deviceAuth && (
               <div style={{ padding: '10px 12px', background: 'var(--bg2)', borderRadius: 'var(--radius-md)', display: 'grid', gap: 6 }}>
@@ -563,15 +563,15 @@ export function ActivitiesView() {
                 <div style={{ font: 'var(--text-body)', color: 'var(--fg1)' }}>
                   URL: <a href={deviceAuth.verification_uri} target="_blank" rel="noreferrer">{deviceAuth.verification_uri}</a>
                 </div>
-                <div style={{ font: 'var(--text-h3)', color: 'var(--fg1)' }}>Code: {deviceAuth.user_code}</div>
+                <div style={{ font: 'var(--text-h3)', color: 'var(--fg1)' }}>Código: {deviceAuth.user_code}</div>
                 <div style={{ font: 'var(--text-caption)', color: 'var(--fg3)' }}>
-                  Expires in {Math.round(deviceAuth.expires_in / 60)} minutes. Poll interval: {deviceAuth.interval}s.
+                  Expira en {Math.round(deviceAuth.expires_in / 60)} minutos. Intervalo de consulta: {deviceAuth.interval}s.
                 </div>
               </div>
             )}
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <span style={{ font: 'var(--text-caption)', color: 'var(--fg3)', width: '100%' }}>Manual token fallback</span>
+            <span style={{ font: 'var(--text-caption)', color: 'var(--fg3)', width: '100%' }}>Respaldo con token manual</span>
             <select
               className="input"
               value={azureAuthMode}
@@ -579,26 +579,26 @@ export function ActivitiesView() {
               style={{ width: 120 }}
             >
               <option value="bearer">Bearer</option>
-              <option value="basic">Basic PAT</option>
+              <option value="basic">PAT básico</option>
             </select>
             <input
               className="input"
               type="password"
-              placeholder="Paste new token"
+              placeholder="Pega un token nuevo"
               value={azureToken}
               onChange={e => setAzureToken(e.target.value)}
               style={{ minWidth: 280 }}
             />
             <button className="btn btn-secondary btn-sm" onClick={handleSaveAzureConfig} disabled={azureToken.trim() === ''}>
-              Save Token
+              Guardar token
             </button>
             <button className="btn btn-ghost btn-sm" onClick={handleClearAzureConfig}>
-              Clear Local Token
+              Borrar token local
             </button>
           </div>
           {azureAuthMode === 'bearer' && (
             <div style={{ font: 'var(--text-caption)', color: 'var(--amber-700)' }}>
-              Bearer access tokens expire. If Azure returns a sign-in response, replace this token with a fresh one.
+              Los tokens Bearer expiran. Si Azure solicita iniciar sesión, reemplaza este token por uno vigente.
             </div>
           )}
           {azureConfigMessage && (

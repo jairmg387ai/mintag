@@ -151,7 +151,7 @@ export function ActivityDetailModal({ activity, open, onClose, azureActivities }
             </DetailField>
           </div>
 
-          <DetailField label="Azure Activity">
+          <DetailField label="Actividad de Azure">
             <div style={valueStyle}>
               {resolveAzureActivityLabel(activity.azure_activity_id, azureActivities)}
             </div>

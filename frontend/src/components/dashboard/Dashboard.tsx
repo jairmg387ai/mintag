@@ -15,7 +15,7 @@ import type { Status, ViewName } from '../../types'
 function fmt(dt: string) {
   if (!dt) return '—'
   try {
-    return new Date(dt).toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })
+    return new Date(dt).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })
   } catch {
     return dt
   }
@@ -56,7 +56,7 @@ export function Dashboard() {
           iconBg="var(--indigo-50)"
           iconFg="var(--indigo-700)"
           value={stats?.total_tasks ?? 0}
-          label="Total Tasks"
+          label="Total de tareas"
           onClick={() => navTo('tasks')}
         />
         <StatCard
@@ -64,7 +64,7 @@ export function Dashboard() {
           iconBg="var(--amber-50)"
           iconFg="var(--amber-700)"
           value={stats?.in_progress_tasks ?? 0}
-          label="In Progress"
+          label="En progreso"
           onClick={() => navTo('tasks')}
         />
         <StatCard
@@ -72,7 +72,7 @@ export function Dashboard() {
           iconBg="var(--rose-50)"
           iconFg="var(--rose-700)"
           value={stats?.blocked_tasks ?? 0}
-          label="Blocked"
+          label="Bloqueadas"
           emphasize={!!stats?.blocked_tasks}
           onClick={() => navTo('tasks')}
         />
@@ -81,7 +81,7 @@ export function Dashboard() {
           iconBg="var(--emerald-50)"
           iconFg="var(--emerald-700)"
           value={stats?.total_meetings ?? 0}
-          label="Meetings"
+          label="Reuniones"
           onClick={() => navTo('meetings')}
         />
       </div>
@@ -95,7 +95,7 @@ export function Dashboard() {
           alignItems: 'start',
         }}
       >
-        {/* Blocked / In Progress */}
+        {/* Bloqueadas / En progreso */}
         <section className="card" style={{ padding: 0 }}>
           <header
             style={{
@@ -107,7 +107,7 @@ export function Dashboard() {
             }}
           >
             <CircleAlert size={17} color="var(--block-fg)" />
-            <h3 style={{ font: 'var(--text-h3)', margin: 0 }}>Blocked / In Progress</h3>
+            <h3 style={{ font: 'var(--text-h3)', margin: 0 }}>Bloqueadas / En progreso</h3>
             <span className="chip chip-block" style={{ marginLeft: 4 }}>
               {activeTasks.length}
             </span>
@@ -116,7 +116,7 @@ export function Dashboard() {
               style={{ marginLeft: 'auto' }}
               onClick={() => navTo('tasks')}
             >
-              View all
+              Ver todo
             </button>
           </header>
 
@@ -129,7 +129,7 @@ export function Dashboard() {
                 color: 'var(--fg3)',
               }}
             >
-              No active tasks. You're all clear.
+              No hay tareas activas. Todo está al día.
             </div>
           ) : (
             <div>
@@ -191,7 +191,7 @@ export function Dashboard() {
           )}
         </section>
 
-        {/* Recent Meetings */}
+        {/* Reuniones recientes */}
         <section className="card" style={{ padding: 0 }}>
           <header
             style={{
@@ -203,13 +203,13 @@ export function Dashboard() {
             }}
           >
             <Users size={17} color="var(--indigo-700)" />
-            <h3 style={{ font: 'var(--text-h3)', margin: 0 }}>Recent Meetings</h3>
+            <h3 style={{ font: 'var(--text-h3)', margin: 0 }}>Reuniones recientes</h3>
             <button
               className="btn btn-ghost btn-sm"
               style={{ marginLeft: 'auto' }}
               onClick={() => navTo('meetings')}
             >
-              All meetings
+              Todas las reuniones
             </button>
           </header>
 
@@ -222,7 +222,7 @@ export function Dashboard() {
                 color: 'var(--fg3)',
               }}
             >
-              No meetings yet.
+              Aún no hay reuniones.
             </div>
           ) : (
             <div>
@@ -269,7 +269,7 @@ export function Dashboard() {
                     {m.title}
                   </span>
                   <span className="chip chip-todo" style={{ fontSize: 11 }}>
-                    {m.task_count ?? 0} tasks
+                    {m.task_count ?? 0} tareas
                   </span>
                 </button>
               ))}
