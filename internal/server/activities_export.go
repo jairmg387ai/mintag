@@ -67,7 +67,7 @@ func (srv *Server) handleExportActivities(w http.ResponseWriter, r *http.Request
 // comment above and azureLabelByID's doc comment in activities.go).
 func buildActivitiesWorkbook(a []*store.DailyActivity, az []*store.AzureActivity) ([]byte, error) {
 	labels := azureLabelByID(az)
-	defaultLabel, hasDefault := defaultAzureActivityLabel(az)
+	defaultLabel, hasDefault := defaultAzureActivityLabel(az, labels)
 
 	f := excelize.NewFile()
 	defer func() { _ = f.Close() }()
@@ -122,7 +122,7 @@ func buildActivitiesWorkbook(a []*store.DailyActivity, az []*store.AzureActivity
 func resolveExportAzureLabel(id *int64, labels map[int64]string, defaultLabel string, hasDefault bool) string {
 	if id == nil {
 		if hasDefault {
-			return fmt.Sprintf("%s (default)", defaultLabel)
+			return defaultLabel
 		}
 		return "Default"
 	}
@@ -132,12 +132,14 @@ func resolveExportAzureLabel(id *int64, labels map[int64]string, defaultLabel st
 	return fmt.Sprintf("#%d", *id)
 }
 
-// defaultAzureActivityLabel finds the current default's label within an
-// already-fetched Azure activity slice, without a second store query.
-func defaultAzureActivityLabel(az []*store.AzureActivity) (label string, ok bool) {
+// defaultAzureActivityLabel finds the current default's formatted label
+// (via the shared labels map, so it includes the work item id like every
+// other cell) within an already-fetched Azure activity slice, without a
+// second store query.
+func defaultAzureActivityLabel(az []*store.AzureActivity, labels map[int64]string) (label string, ok bool) {
 	for _, item := range az {
 		if item.IsDefault {
-			return item.Label, true
+			return labels[item.ID], true
 		}
 	}
 	return "", false

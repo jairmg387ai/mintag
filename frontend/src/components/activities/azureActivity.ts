@@ -8,6 +8,12 @@ export function findDefaultAzureActivity(azureActivities: AzureActivity[]): Azur
   return azureActivities.find(a => a.is_default)
 }
 
+// Shared formatting so every combo/display shows the same "label (#work
+// item id)" shape — the label alone doesn't identify the Azure work item.
+export function formatAzureActivityLabel(a: AzureActivity): string {
+  return `${a.label} (#${a.work_item_id})`
+}
+
 // Resolves the display label for a daily activity's assigned Azure work
 // item. A null/undefined azure_activity_id means the activity uploads to
 // whichever azure_activities row is currently the default at upload time.
@@ -17,10 +23,10 @@ export function resolveAzureActivityLabel(
 ): string {
   if (azureActivityId == null) {
     const def = findDefaultAzureActivity(azureActivities)
-    return def ? `${def.label} (default)` : 'Default'
+    return def ? formatAzureActivityLabel(def) : 'Default'
   }
   const match = azureActivities.find(a => a.id === azureActivityId)
-  return match ? match.label : `#${azureActivityId}`
+  return match ? formatAzureActivityLabel(match) : `#${azureActivityId}`
 }
 
 // Most azure_activities store-layer errors are already user-appropriate

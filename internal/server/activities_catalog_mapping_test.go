@@ -134,7 +134,7 @@ func TestCatalogGET_DecoratesStaleMappingWithAzureActivityLabel(t *testing.T) {
 			if c.AzureActivityID == nil || *c.AzureActivityID != az.ID {
 				t.Fatalf("expected stale azure_activity_id=%d to remain, got %#v", az.ID, c.AzureActivityID)
 			}
-			if c.AzureActivityLabel == nil || *c.AzureActivityLabel != "Stale Mapping Target" {
+			if c.AzureActivityLabel == nil || *c.AzureActivityLabel != "Stale Mapping Target (#778)" {
 				t.Fatalf("expected azure_activity_label to resolve the inactive activity's label, got %#v", c.AzureActivityLabel)
 			}
 		}
