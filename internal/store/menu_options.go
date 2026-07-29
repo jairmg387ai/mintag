@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 )
 
 // ErrMenuOptionNotFound is returned by SetMenuOptionEnabled when id is not
@@ -104,12 +105,14 @@ func settingsTx(ctx context.Context, q queryerContext, prefix string) (map[strin
 }
 
 // setSettingTx upserts a single app_settings row using ex (a *sql.DB or an
-// in-flight *sql.Tx).
+// in-flight *sql.Tx). updated_at is formatted the same way setSetting (in
+// azure_config.go) formats it, so every app_settings row shares one
+// timestamp format regardless of which helper wrote it.
 func setSettingTx(ctx context.Context, ex execerContext, key, value string) error {
 	_, err := ex.ExecContext(ctx,
-		`INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+		`INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)
 		 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-		key, value,
+		key, value, time.Now().UTC().Format(time.RFC3339),
 	)
 	return err
 }
@@ -209,15 +212,30 @@ func (s *Store) SetMenuOptionEnabled(ctx context.Context, id string, enabled boo
 }
 
 // hasPreExistingData reports whether this database already has any project,
-// task, or meeting rows — used by migrateMenuOptions to distinguish a
-// genuinely fresh install from an upgrade of an existing one.
+// task, meeting, daily activity, azure activity catalog, deployment window,
+// or graph node rows — used by migrateMenuOptions to distinguish a genuinely
+// fresh install from an upgrade of an existing one. All of projects, tasks,
+// meetings, daily_activities, deployment_windows, and graph_nodes are
+// independently reachable via MCP without ever touching projects/tasks/
+// meetings, so each must count toward "pre-existing".
+//
+// azure_activities is special-cased: migrateActivities (which runs before
+// migrateMenuOptions in migrate()) unconditionally seeds one "Default" row
+// into azure_activities the first time the table is empty, so every
+// database — fresh or not — always has at least 1 row there by the time
+// this runs. Only rows beyond that always-present seed indicate the catalog
+// was actually used.
 func (s *Store) hasPreExistingData() (bool, error) {
 	var count int
 	err := s.db.QueryRow(`
 		SELECT
 			(SELECT COUNT(*) FROM projects) +
 			(SELECT COUNT(*) FROM tasks) +
-			(SELECT COUNT(*) FROM meetings)
+			(SELECT COUNT(*) FROM meetings) +
+			(SELECT COUNT(*) FROM daily_activities) +
+			(SELECT CASE WHEN COUNT(*) > 1 THEN COUNT(*) - 1 ELSE 0 END FROM azure_activities) +
+			(SELECT COUNT(*) FROM deployment_windows) +
+			(SELECT COUNT(*) FROM graph_nodes)
 	`).Scan(&count)
 	if err != nil {
 		return false, err
