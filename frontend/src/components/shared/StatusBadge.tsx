@@ -9,12 +9,12 @@ interface StatusMeta {
 }
 
 export const STATUS_META: Record<Status, StatusMeta> = {
-  todo:        { label: 'To Do',       cls: 'chip-todo',  icon: Circle },
-  in_progress: { label: 'In Progress', cls: 'chip-prog',  icon: CircleDot },
-  blocked:     { label: 'Blocked',     cls: 'chip-block', icon: CircleAlert },
-  in_testing:  { label: 'In Testing',  cls: 'chip-test',  icon: FlaskConical },
-  done:        { label: 'Done',        cls: 'chip-done',  icon: CircleCheck },
-  cancelled:   { label: 'Cancelled',   cls: 'chip-todo',  icon: Ban },
+  todo:        { label: 'Por hacer',   cls: 'chip-todo',  icon: Circle },
+  in_progress: { label: 'En progreso', cls: 'chip-prog',  icon: CircleDot },
+  blocked:     { label: 'Bloqueada',   cls: 'chip-block', icon: CircleAlert },
+  in_testing:  { label: 'En pruebas',  cls: 'chip-test',  icon: FlaskConical },
+  done:        { label: 'Hecha',       cls: 'chip-done',  icon: CircleCheck },
+  cancelled:   { label: 'Cancelada',   cls: 'chip-todo',  icon: Ban },
 }
 
 export function StatusBadge({ status }: { status: Status }) {

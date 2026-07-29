@@ -116,16 +116,16 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
   function validate(): boolean {
     const errs: Record<string, string> = {}
     const h = parseFloat(hours)
-    if (!hours || isNaN(h) || h <= 0) errs.hours = 'Hours must be greater than 0'
-    if (!project.trim()) errs.project = 'Project is required'
-    if (!category.trim()) errs.category = 'Category is required'
+    if (!hours || isNaN(h) || h <= 0) errs.hours = 'Las horas deben ser mayores que 0'
+    if (!project.trim()) errs.project = 'El proyecto es obligatorio'
+    if (!category.trim()) errs.category = 'La categoría es obligatoria'
 
     // The actual description part is what comes after "{project}/{category}/"
     const prefix = `${project}/${category}/`
     const descPart = description.startsWith(prefix)
       ? description.slice(prefix.length).trim()
       : description.trim()
-    if (!descPart) errs.description = 'Description is required'
+    if (!descPart) errs.description = 'La descripción es obligatoria'
 
     setErrors(errs)
     return Object.keys(errs).length === 0
@@ -156,7 +156,7 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
       onCreated()
       onClose()
     } catch (e: unknown) {
-      setSubmitError(e instanceof Error ? e.message : 'Error creating activity')
+      setSubmitError(e instanceof Error ? e.message : 'Error al crear la actividad')
     } finally {
       setSubmitting(false)
     }
@@ -218,7 +218,7 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
               padding: 4,
               borderRadius: 'var(--radius-md)',
             }}
-            aria-label="Close"
+            aria-label="Cerrar"
           >
             <X size={18} strokeWidth={1.75} />
           </button>
@@ -237,12 +237,12 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
                 marginBottom: 14,
               }}
             >
-              No projects or categories available
+              No hay proyectos ni categorías disponibles
             </div>
           )}
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <Field label="Date *" error={errors.date}>
+            <Field label="Fecha *" error={errors.date}>
               <input
                 type="date"
                 value={date}
@@ -250,7 +250,7 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
                 style={selectStyle}
               />
             </Field>
-            <Field label="Hours *" error={errors.hours}>
+            <Field label="Horas *" error={errors.hours}>
               <input
                 type="number"
                 step="0.25"
@@ -263,7 +263,7 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
             </Field>
           </div>
 
-          <Field label="Project *" error={errors.project}>
+          <Field label="Proyecto *" error={errors.project}>
             {catalog !== null ? (
               <select
                 style={selectStyle}
@@ -272,7 +272,7 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
                 disabled={emptyCatalog}
               >
                 {catalog.projects.length === 0 ? (
-                  <option value="">— no projects —</option>
+                  <option value="">— sin proyectos —</option>
                 ) : (
                   catalog.projects.map(p => (
                     <option key={p} value={p}>{p}</option>
@@ -284,13 +284,13 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
                 type="text"
                 value={project}
                 onChange={e => setProject(e.target.value)}
-                placeholder="Project name"
+                placeholder="Nombre del proyecto"
                 style={selectStyle}
               />
             )}
           </Field>
 
-          <Field label="Category *" error={errors.category}>
+          <Field label="Categoría *" error={errors.category}>
             {catalog !== null ? (
               <select
                 style={selectStyle}
@@ -299,7 +299,7 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
                 disabled={emptyCatalog}
               >
                 {catalog.categories.length === 0 ? (
-                  <option value="">— no categories —</option>
+                  <option value="">— sin categorías —</option>
                 ) : (
                   catalog.categories.map(c => (
                     <option key={c.id} value={c.name}>{c.name}</option>
@@ -311,13 +311,13 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
                 type="text"
                 value={category}
                 onChange={e => setCategory(e.target.value)}
-                placeholder="Category"
+                placeholder="Categoría"
                 style={selectStyle}
               />
             )}
           </Field>
 
-          <Field label="Description *" error={errors.description}>
+          <Field label="Descripción *" error={errors.description}>
             <textarea
               style={textareaStyle}
               value={description}
@@ -325,22 +325,22 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
                 setDescription(e.target.value)
                 setDescriptionTouched(true)
               }}
-              placeholder={`${project || 'project'}/${category || 'category'}/description...`}
+              placeholder={`${project || 'proyecto'}/${category || 'categoría'}/descripción...`}
             />
           </Field>
 
-          <Field label="Azure Activity">
+          <Field label="Actividad de Azure">
             <select
               style={selectStyle}
               value={azureActivityId}
               onChange={e => setAzureActivityId(e.target.value)}
             >
               <option value="">
-                Use default{defaultAzureActivity ? ` (${defaultAzureActivity.label})` : ''}
+                Usar predeterminada{defaultAzureActivity ? ` (${defaultAzureActivity.label})` : ''}
               </option>
               {azureActivities.map(a => (
                 <option key={a.id} value={a.id}>
-                  {a.label}{a.is_default ? ' (default)' : ''}
+                  {a.label}{a.is_default ? ' (predeterminada)' : ''}
                 </option>
               ))}
             </select>
@@ -377,14 +377,14 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
             className="btn btn-ghost"
             disabled={submitting}
           >
-            Cancel
+            Cancelar
           </button>
           <button
             onClick={handleSubmit}
             className="btn btn-primary"
             disabled={submitting || emptyCatalog}
           >
-            {submitting ? 'Creating...' : 'Create Activity'}
+            {submitting ? 'Creando...' : 'Crear actividad'}
           </button>
         </div>
       </div>
