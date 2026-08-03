@@ -85,6 +85,34 @@ func TestBuildActivitiesWorkbook_ColumnOrder(t *testing.T) {
 	}
 }
 
+func TestBuildActivitiesWorkbook_CategoryUsesLeafForExport(t *testing.T) {
+	tests := []struct {
+		name     string
+		category string
+		want     string
+	}{
+		{name: "plain category is preserved", category: "Daily", want: "Daily"},
+		{name: "hierarchical category exports leaf", category: "Blindaje/Reuniones/Daily", want: "Daily"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			activities := []*store.DailyActivity{
+				{ID: 1, Date: "2026-06-15", Hours: 1, Project: "P", Category: tc.category, RegistroDiario: "R", Status: "pending"},
+			}
+			data, err := buildActivitiesWorkbook(activities, nil)
+			mustNoErr(t, err)
+			rows := mustRows(t, openWorkbook(t, data))
+			if len(rows) != 2 {
+				t.Fatalf("expected 2 rows, got %d: %#v", len(rows), rows)
+			}
+			if rows[1][2] != tc.want {
+				t.Errorf("expected categoria=%q, got %q", tc.want, rows[1][2])
+			}
+		})
+	}
+}
+
 // TestBuildActivitiesWorkbook_D7LabelCases verifies all 4 label-resolution
 // cases from the design's D7 table for the idActividadAzure column.
 func TestBuildActivitiesWorkbook_D7LabelCases(t *testing.T) {

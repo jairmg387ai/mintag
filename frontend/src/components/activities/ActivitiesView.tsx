@@ -38,6 +38,13 @@ function shiftDate(ymd: string, days: number): string {
   return toYMD(date)
 }
 
+const REGISTRO_DIARIO_PREVIEW_LIMIT = 150
+
+function truncateRegistroDiario(value: string): string {
+  if (value.length <= REGISTRO_DIARIO_PREVIEW_LIMIT) return value
+  return `${value.slice(0, REGISTRO_DIARIO_PREVIEW_LIMIT).trimEnd()}…`
+}
+
 export function ActivitiesView() {
   const { setAzureConfig: setGlobalAzureConfig } = useAppActions()
   const [date, setDate] = useState<string>(() => toYMD(new Date()))
@@ -377,8 +384,8 @@ export function ActivitiesView() {
                     <td style={{ font: 'var(--text-mono)', color: 'var(--fg1)' }}>{a.hours.toFixed(2)}</td>
                     <td style={{ color: 'var(--fg2)' }}>{a.category}</td>
                     <td style={{ color: 'var(--fg2)', maxWidth: 320 }}>
-                      <span style={{ display: 'block', whiteSpace: 'normal', wordBreak: 'break-word' }}>
-                        {a.registro_diario}
+                      <span title={a.registro_diario} style={{ display: 'block', whiteSpace: 'normal', wordBreak: 'break-word' }}>
+                        {truncateRegistroDiario(a.registro_diario)}
                       </span>
                     </td>
                     <td><ActivitySourceBadge source={a.source} /></td>

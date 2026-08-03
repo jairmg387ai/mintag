@@ -428,10 +428,22 @@ function AzureActivitySection({
   const [importOrg, setImportOrg] = useState('')
   const [importItems, setImportItems] = useState<AssignedAzureWorkItem[] | null>(null)
   const [importingId, setImportingId] = useState<number | null>(null)
+  const [importTypeFilter, setImportTypeFilter] = useState<'all' | 'Bug' | 'Task'>('all')
+  const [importSearch, setImportSearch] = useState('')
 
   const existingWorkItemKeys = new Set(
     activities.map(a => `${a.org.trim().toLowerCase()}#${a.work_item_id}`),
   )
+  const normalizedImportSearch = importSearch.trim().toLowerCase()
+  const filteredImportItems = importItems?.filter(item => {
+    const matchesType = importTypeFilter === 'all' || item.type === importTypeFilter
+    if (!matchesType) return false
+    if (!normalizedImportSearch) return true
+    return [item.id, item.title, item.type, item.state]
+      .join(' ')
+      .toLowerCase()
+      .includes(normalizedImportSearch)
+  }) ?? null
 
   async function handleToggleImport() {
     if (importOpen) {
@@ -441,6 +453,8 @@ function AzureActivitySection({
     setImportOpen(true)
     setImportLoading(true)
     setImportError('')
+    setImportTypeFilter('all')
+    setImportSearch('')
     try {
       const { org: fetchedOrg, items } = await listAssignedAzureWorkItems()
       setImportOrg(fetchedOrg)
@@ -576,7 +590,39 @@ function AzureActivitySection({
                 No tienes work items abiertos asignados
               </div>
             )}
-            {!importLoading && importItems?.map(item => {
+            {!importLoading && !importError && importItems && importItems.length > 0 && (
+              <>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
+                  <select
+                    aria-label="Filtrar work items por tipo"
+                    value={importTypeFilter}
+                    onChange={e => setImportTypeFilter(e.target.value as 'all' | 'Bug' | 'Task')}
+                    style={{ ...inputStyle, flex: '0 1 120px', fontSize: '0.85em', padding: '6px 8px' }}
+                  >
+                    <option value="all">Todos</option>
+                    <option value="Bug">Bug</option>
+                    <option value="Task">Task</option>
+                  </select>
+                  <input
+                    type="search"
+                    value={importSearch}
+                    onChange={e => setImportSearch(e.target.value)}
+                    placeholder="Buscar por ID, título o estado..."
+                    aria-label="Buscar work items asignados"
+                    style={{ ...inputStyle, flex: '1 1 180px', fontSize: '0.85em', padding: '6px 8px' }}
+                  />
+                </div>
+                <div style={{ font: 'var(--text-caption)', color: 'var(--fg3)', padding: '0 0 4px' }}>
+                  Mostrando {filteredImportItems?.length ?? 0} de {importItems.length}
+                </div>
+              </>
+            )}
+            {!importLoading && !importError && importItems && importItems.length > 0 && filteredImportItems?.length === 0 && (
+              <div style={{ font: 'var(--text-caption)', color: 'var(--fg3)', padding: '8px 0' }}>
+                No hay work items que coincidan con los filtros
+              </div>
+            )}
+            {!importLoading && !importError && filteredImportItems?.map(item => {
               const alreadyAdded = existingWorkItemKeys.has(`${importOrg.trim().toLowerCase()}#${item.id}`)
               return (
                 <div
