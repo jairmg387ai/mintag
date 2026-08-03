@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback } from 'react'
-import type { Project, Meeting, Task, Stats, ViewName, TaskViewName, ModalName, Toast, Status, MenuOptionStatus } from '../types'
+import type { Project, Meeting, Task, Stats, ViewName, TaskViewName, ModalName, Toast, Status, MenuOptionStatus, AzureTimeLogConfigStatus } from '../types'
 import * as api from '../api/client'
 
 interface AppState {
@@ -8,6 +8,7 @@ interface AppState {
   tasks: Task[]
   stats: Stats | null
   menuOptions: MenuOptionStatus[]
+  azureConfig: AzureTimeLogConfigStatus | null
   currentView: ViewName
   taskView: TaskViewName
   filterStatus: string
@@ -31,6 +32,7 @@ interface AppActions {
   pushToast: (message: string, isError?: boolean) => void
   updateTaskStatus: (id: number, status: Status) => Promise<void>
   toggleMenuOption: (id: string, enabled: boolean) => Promise<void>
+  setAzureConfig: (cfg: AzureTimeLogConfigStatus | null) => void
 }
 
 const defaultState: AppState = {
@@ -39,6 +41,7 @@ const defaultState: AppState = {
   tasks: [],
   stats: null,
   menuOptions: [],
+  azureConfig: null,
   currentView: 'dashboard',
   taskView: 'list',
   filterStatus: 'all',
@@ -58,14 +61,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AppState>(defaultState)
 
   const loadAll = useCallback(async () => {
-    const [projects, meetings, tasks, stats, menuOptions] = await Promise.all([
+    const [projects, meetings, tasks, stats, menuOptions, azureConfig] = await Promise.all([
       api.listProjects().catch(() => [] as Project[]),
       api.listMeetings().catch(() => [] as Meeting[]),
       api.listTasks().catch(() => [] as Task[]),
       api.getStats().catch(() => null),
       api.listMenuOptions().catch(() => [] as MenuOptionStatus[]),
+      api.getAzureTimeLogConfig().catch(() => null),
     ])
-    setState(prev => ({ ...prev, projects, meetings, tasks, stats, menuOptions }))
+    setState(prev => ({ ...prev, projects, meetings, tasks, stats, menuOptions, azureConfig }))
   }, [])
 
   const setView = useCallback((view: ViewName) => {
@@ -166,6 +170,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, [pushToast])
 
+  const setAzureConfig = useCallback((cfg: AzureTimeLogConfigStatus | null) => {
+    setState(prev => ({ ...prev, azureConfig: cfg }))
+  }, [])
+
   const actions: AppActions = {
     loadAll,
     setView,
@@ -179,6 +187,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     pushToast,
     updateTaskStatus,
     toggleMenuOption,
+    setAzureConfig,
   }
 
   return (

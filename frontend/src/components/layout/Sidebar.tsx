@@ -4,7 +4,7 @@ import { Avatar } from '../shared/Avatar'
 import { NAV_ITEMS } from './navItems'
 
 export function Sidebar() {
-  const { currentView, projects, activeProject, menuOptions } = useAppState()
+  const { currentView, projects, activeProject, menuOptions, azureConfig } = useAppState()
   const { setView, setActiveProject, openModal } = useAppActions()
 
   // Fail open: an empty menuOptions list (fetch hasn't resolved yet, or the
@@ -12,6 +12,15 @@ export function Sidebar() {
   // every nav item until the resolved catalog says otherwise.
   const enabledIds = new Set(menuOptions.filter(m => m.enabled).map(m => m.id))
   const visibleItems = enabledIds.size === 0 ? NAV_ITEMS : NAV_ITEMS.filter(n => enabledIds.has(n.id))
+
+  // Shorten "Jair Reinel Muñoz Gomez" to "Jair Muñoz" — first given name +
+  // first surname — so it fits the sidebar footer without wrapping.
+  const shortName = (full: string) => {
+    const parts = full.trim().split(/\s+/)
+    if (parts.length <= 2) return full
+    return `${parts[0]} ${parts[Math.ceil(parts.length / 2)]}`
+  }
+  const workspaceName = azureConfig?.user_display_name ? shortName(azureConfig.user_display_name) : 'Espacio local'
 
   return (
     <nav className="sidebar">
@@ -61,9 +70,9 @@ export function Sidebar() {
 
       {/* Footer */}
       <div className="sb-foot">
-        <Avatar name="Espacio local" size={32} />
+        <Avatar name={workspaceName} size={32} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="who">Espacio local</div>
+          <div className="who">{workspaceName}</div>
           <div className="role">Personal</div>
         </div>
         <button

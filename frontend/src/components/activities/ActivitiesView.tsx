@@ -22,6 +22,7 @@ import { EditActivityModal } from './EditActivityModal'
 import { CatalogManagementModal } from './CatalogManagementModal'
 import { ActivityDetailModal } from './ActivityDetailModal'
 import { ExportActivitiesModal } from './ExportActivitiesModal'
+import { useAppActions } from '../../store/AppContext'
 
 function toYMD(d: Date): string {
   const y = d.getFullYear()
@@ -38,6 +39,7 @@ function shiftDate(ymd: string, days: number): string {
 }
 
 export function ActivitiesView() {
+  const { setAzureConfig: setGlobalAzureConfig } = useAppActions()
   const [date, setDate] = useState<string>(() => toYMD(new Date()))
   const [activities, setActivities] = useState<DailyActivity[]>([])
   const [catalog, setCatalog] = useState<ActivityCatalog | null>(null)
@@ -82,10 +84,11 @@ export function ActivitiesView() {
     getActivityCatalog().then(setCatalog).catch(() => setCatalog(null))
     getAzureTimeLogConfig().then(cfg => {
       setAzureConfig(cfg)
+      setGlobalAzureConfig(cfg)
       setAzureAuthMode(cfg.auth_mode === 'basic' ? 'basic' : 'bearer')
     }).catch(() => setAzureConfig(null))
     refreshAzureActivities()
-  }, [refreshAzureActivities])
+  }, [refreshAzureActivities, setGlobalAzureConfig])
 
   // Re-fetch on date change (also covers initial load)
   useEffect(() => {
@@ -176,6 +179,7 @@ export function ActivitiesView() {
     try {
       const cfg = await saveAzureTimeLogConfig({ token: azureToken, auth_mode: azureAuthMode })
       setAzureConfig(cfg)
+      setGlobalAzureConfig(cfg)
       setAzureToken('')
       setAzureConfigMessage('Token de Azure guardado. El token queda oculto después de guardar.')
     } catch (e: unknown) {
@@ -188,6 +192,7 @@ export function ActivitiesView() {
     try {
       const cfg = await clearAzureTimeLogConfig()
       setAzureConfig(cfg)
+      setGlobalAzureConfig(cfg)
       setAzureToken('')
       setAzureAuthMode(cfg.auth_mode === 'basic' ? 'basic' : 'bearer')
       setDeviceAuth(null)
@@ -227,6 +232,7 @@ export function ActivitiesView() {
       }
       const cfg = await getAzureTimeLogConfig()
       setAzureConfig(cfg)
+      setGlobalAzureConfig(cfg)
       setDeviceAuth(null)
       setAzureConfigMessage('Inicio de sesión con Microsoft conectado. Mintag renovará el acceso automáticamente.')
     } catch (e: unknown) {

@@ -1,6 +1,6 @@
 import { useState, useRef, type CSSProperties } from 'react'
-import { X, Trash2, Plus, Star, Pencil, Check } from 'lucide-react'
-import type { ActivityCatalog, AzureActivity, TimelogCategory } from '../../types'
+import { X, Trash2, Plus, Star, Pencil, Check, Download } from 'lucide-react'
+import type { ActivityCatalog, AssignedAzureWorkItem, AzureActivity, TimelogCategory } from '../../types'
 import {
   addCatalogProject,
   removeCatalogProject,
@@ -12,6 +12,7 @@ import {
   updateAzureActivity,
   deactivateAzureActivity,
   setDefaultAzureActivity,
+  listAssignedAzureWorkItems,
 } from '../../api/client'
 import { friendlyCatalogErrorMessage, formatAzureActivityLabel } from './azureActivity'
 
@@ -92,21 +93,7 @@ function CatalogSection({
   }
 
   return (
-    <div style={{ flex: 1, minWidth: 0 }}>
-      <div
-        style={{
-          font: 'var(--text-h4)',
-          fontWeight: 600,
-          marginBottom: 12,
-          textTransform: 'uppercase',
-          letterSpacing: 'var(--tracking-label)',
-          fontSize: '0.75em',
-          color: 'var(--fg3)',
-        } as CSSProperties}
-      >
-        {title}
-      </div>
-
+    <div>
       {/* Add row */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
         <input
@@ -135,7 +122,7 @@ function CatalogSection({
       )}
 
       {/* Item list */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 300, overflowY: 'auto' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 360, overflowY: 'auto' }}>
         {items.length === 0 ? (
           <div style={{ font: 'var(--text-caption)', color: 'var(--fg3)', padding: '8px 0' }}>
             Sin registros
@@ -285,21 +272,7 @@ function CategorySection({
   }
 
   return (
-    <div style={{ flex: 1, minWidth: 0 }}>
-      <div
-        style={{
-          font: 'var(--text-h4)',
-          fontWeight: 600,
-          marginBottom: 12,
-          textTransform: 'uppercase',
-          letterSpacing: 'var(--tracking-label)',
-          fontSize: '0.75em',
-          color: 'var(--fg3)',
-        } as CSSProperties}
-      >
-        Categorías
-      </div>
-
+    <div>
       {/* Add row */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
         <input
@@ -337,7 +310,7 @@ function CategorySection({
       )}
 
       {/* Item list */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 300, overflowY: 'auto' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 360, overflowY: 'auto' }}>
         {categories.length === 0 ? (
           <div style={{ font: 'var(--text-caption)', color: 'var(--fg3)', padding: '8px 0' }}>
             Sin registros
@@ -449,6 +422,49 @@ function AzureActivitySection({
   const [editLabel, setEditLabel] = useState('')
   const [busyId, setBusyId] = useState<number | null>(null)
 
+  const [importOpen, setImportOpen] = useState(false)
+  const [importLoading, setImportLoading] = useState(false)
+  const [importError, setImportError] = useState('')
+  const [importOrg, setImportOrg] = useState('')
+  const [importItems, setImportItems] = useState<AssignedAzureWorkItem[] | null>(null)
+  const [importingId, setImportingId] = useState<number | null>(null)
+
+  const existingWorkItemKeys = new Set(
+    activities.map(a => `${a.org.trim().toLowerCase()}#${a.work_item_id}`),
+  )
+
+  async function handleToggleImport() {
+    if (importOpen) {
+      setImportOpen(false)
+      return
+    }
+    setImportOpen(true)
+    setImportLoading(true)
+    setImportError('')
+    try {
+      const { org: fetchedOrg, items } = await listAssignedAzureWorkItems()
+      setImportOrg(fetchedOrg)
+      setImportItems(items)
+    } catch (e: unknown) {
+      setImportError(friendlyCatalogErrorMessage(e, 'No se pudieron obtener los work items asignados'))
+    } finally {
+      setImportLoading(false)
+    }
+  }
+
+  async function handleImportItem(item: AssignedAzureWorkItem) {
+    setImportingId(item.id)
+    setImportError('')
+    try {
+      await addAzureActivity({ org: importOrg, work_item_id: item.id, label: item.title })
+      onChanged()
+    } catch (e: unknown) {
+      setImportError(friendlyCatalogErrorMessage(e, 'No se pudo importar el work item'))
+    } finally {
+      setImportingId(null)
+    }
+  }
+
   async function handleAdd() {
     const wid = parseInt(workItemId, 10)
     if (!org.trim() || !label.trim() || !workItemId.trim() || isNaN(wid)) {
@@ -522,19 +538,84 @@ function AzureActivitySection({
   }
 
   return (
-    <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--border)' }}>
-      <div
-        style={{
-          font: 'var(--text-h4)',
-          fontWeight: 600,
-          marginBottom: 12,
-          textTransform: 'uppercase',
-          letterSpacing: 'var(--tracking-label)',
-          fontSize: '0.75em',
-          color: 'var(--fg3)',
-        } as CSSProperties}
-      >
-        Work items de Azure
+    <div>
+      {/* Import from Azure */}
+      <div style={{ marginBottom: 10 }}>
+        <button
+          className="btn btn-ghost btn-sm"
+          onClick={handleToggleImport}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+        >
+          <Download size={14} strokeWidth={1.75} />
+          {importOpen ? 'Ocultar work items asignados' : 'Importar mis work items de Azure'}
+        </button>
+
+        {importOpen && (
+          <div
+            style={{
+              marginTop: 8,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+              maxHeight: 260,
+              overflowY: 'auto',
+            }}
+          >
+            {importLoading && (
+              <div style={{ font: 'var(--text-caption)', color: 'var(--fg3)', padding: '8px 0' }}>
+                Consultando Azure…
+              </div>
+            )}
+            {!importLoading && importError && (
+              <div style={{ font: 'var(--text-caption)', color: 'var(--block-solid)', padding: '4px 0' }}>
+                {importError}
+              </div>
+            )}
+            {!importLoading && !importError && importItems?.length === 0 && (
+              <div style={{ font: 'var(--text-caption)', color: 'var(--fg3)', padding: '8px 0' }}>
+                No tienes work items abiertos asignados
+              </div>
+            )}
+            {!importLoading && importItems?.map(item => {
+              const alreadyAdded = existingWorkItemKeys.has(`${importOrg.trim().toLowerCase()}#${item.id}`)
+              return (
+                <div
+                  key={item.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '6px 10px',
+                    background: 'var(--bg-sunken)',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border)',
+                  }}
+                >
+                  <span style={{ flex: 1, font: 'var(--text-body)', color: 'var(--fg1)', fontSize: '0.9em' }}>
+                    {item.title}{' '}
+                    <span style={{ color: 'var(--fg3)' }}>
+                      — {item.type} #{item.id} · {item.state}
+                    </span>
+                  </span>
+                  {alreadyAdded ? (
+                    <span className="chip chip-done" style={{ fontSize: '0.75em' }}>En catálogo</span>
+                  ) : (
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => handleImportItem(item)}
+                      disabled={importingId === item.id}
+                      title="Agregar al catálogo"
+                      aria-label={`Agregar ${item.title} al catálogo`}
+                      style={{ padding: '2px 4px' }}
+                    >
+                      <Plus size={13} strokeWidth={1.75} />
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {/* Add row */}
@@ -580,7 +661,7 @@ function AzureActivitySection({
       )}
 
       {/* Item list */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 260, overflowY: 'auto' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 360, overflowY: 'auto' }}>
         {activities.length === 0 ? (
           <div style={{ font: 'var(--text-caption)', color: 'var(--fg3)', padding: '8px 0' }}>
             Sin registros
@@ -675,8 +756,17 @@ function AzureActivitySection({
   )
 }
 
+type CatalogTab = 'projects' | 'categories' | 'azure'
+
+const TABS: { id: CatalogTab; label: string }[] = [
+  { id: 'projects', label: 'Proyectos' },
+  { id: 'categories', label: 'Categorías' },
+  { id: 'azure', label: 'Work items de Azure' },
+]
+
 export function CatalogManagementModal({ open, onClose, catalog, onCatalogChanged, azureActivities, onAzureActivitiesChanged }: CatalogManagementModalProps) {
   const pressedOnOverlay = useRef(false)
+  const [activeTab, setActiveTab] = useState<CatalogTab>('projects')
 
   if (!open) return null
 
@@ -762,16 +852,47 @@ export function CatalogManagementModal({ open, onClose, catalog, onCatalogChange
           </button>
         </div>
 
+        {/* Tabs */}
+        <div
+          style={{
+            display: 'flex',
+            gap: 4,
+            padding: '0 22px',
+            borderBottom: '1px solid var(--border)',
+          }}
+        >
+          {TABS.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                background: 'none',
+                border: 'none',
+                borderBottom: `2px solid ${activeTab === tab.id ? 'var(--accent)' : 'transparent'}`,
+                color: activeTab === tab.id ? 'var(--fg1)' : 'var(--fg3)',
+                font: 'var(--text-body)',
+                fontWeight: activeTab === tab.id ? 600 : 400,
+                fontSize: '0.9em',
+                padding: '10px 8px',
+                cursor: 'pointer',
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
         {/* Body */}
         <div style={{ padding: '20px 22px', overflowY: 'auto', flex: 1 }}>
-          <div style={{ display: 'flex', gap: 24 }}>
+          {activeTab === 'projects' && (
             <CatalogSection
               title="Proyectos"
               items={catalog?.projects ?? []}
               onAdd={handleAddProject}
               onRemove={handleRemoveProject}
             />
-            <div style={{ width: 1, background: 'var(--border)', flexShrink: 0 }} />
+          )}
+          {activeTab === 'categories' && (
             <CategorySection
               categories={catalog?.categories ?? []}
               azureActivities={azureActivities}
@@ -779,9 +900,10 @@ export function CatalogManagementModal({ open, onClose, catalog, onCatalogChange
               onRemove={handleRemoveCategory}
               onMappingChanged={onCatalogChanged}
             />
-          </div>
-
-          <AzureActivitySection activities={azureActivities} onChanged={onAzureActivitiesChanged} />
+          )}
+          {activeTab === 'azure' && (
+            <AzureActivitySection activities={azureActivities} onChanged={onAzureActivitiesChanged} />
+          )}
         </div>
 
         {/* Footer */}

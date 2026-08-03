@@ -40,15 +40,47 @@ func TestSaveAzureTimeLogConfigClearsOAuthAndActivatesBasic(t *testing.T) {
 	}
 }
 
-func TestNewAzureTimeLogClientRefreshesOAuthToken(t *testing.T) {
+func TestSaveAzureOAuthTokensClearsPersistedIdentity(t *testing.T) {
 	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
 	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
+	t.Setenv("MINTAG_AZURE_USER", "")
+	t.Setenv("MINTAG_AZURE_USER_ID", "")
+
+	ctx := context.Background()
+	s := openTestDB(t)
+	mustNoErr(t, s.SaveAzureIdentity(ctx, "stale-user-id", "Stale User"))
+
+	mustNoErr(t, s.SaveAzureOAuthTokens(ctx, &azure.TokenResponse{
+		AccessToken:  "oauth-access-token",
+		RefreshToken: "oauth-refresh-token",
+		ExpiresAt:    time.Now().UTC().Add(time.Hour),
+	}, azure.OAuthConfig{Tenant: "tenant", ClientID: "client", Scope: "scope"}))
+
+	for _, key := range []string{settingAzureIdentityUserID, settingAzureIdentityDisplayName} {
+		if value, ok, err := s.setting(ctx, key); err != nil || ok {
+			t.Fatalf("expected %s cleared, value=%q ok=%v err=%v", key, value, ok, err)
+		}
+	}
+
+	cfg, source, err := s.AzureTimeLogConfig(ctx)
+	mustNoErr(t, err)
+	if source != "oauth" || cfg.UserID != "" || cfg.User != "" {
+		t.Fatalf("expected oauth config without persisted identity, source=%q userID=%q user=%q", source, cfg.UserID, cfg.User)
+	}
+}
+
+func TestNewAzureTimeLogClientRefreshesOAuthTokenAndPreservesIdentity(t *testing.T) {
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
+	t.Setenv("MINTAG_AZURE_USER", "")
+	t.Setenv("MINTAG_AZURE_USER_ID", "")
 
 	ctx := context.Background()
 	s := openTestDB(t)
 	mustNoErr(t, s.setSetting(ctx, settingAzureOAuthRefreshToken, "old-refresh-token"))
 	mustNoErr(t, s.setSetting(ctx, settingAzureOAuthAccessTokenExpiresAt, time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)))
 	mustNoErr(t, s.SaveAzureOAuthConfig(ctx, azure.OAuthConfig{Tenant: "tenant", ClientID: "client", Scope: "scope offline_access"}))
+	mustNoErr(t, s.SaveAzureIdentity(ctx, "user-id", "Current User"))
 
 	var gotRefresh string
 	oauthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -83,6 +115,11 @@ func TestNewAzureTimeLogClientRefreshesOAuthToken(t *testing.T) {
 	if expiresAt, _, err := s.setting(ctx, settingAzureOAuthAccessTokenExpiresAt); err != nil || !tokenExpiresSoon(expiresAt, 3*time.Hour) {
 		t.Fatalf("expected refreshed expiry to be saved near 2h from now, got %q err=%v", expiresAt, err)
 	}
+	cfg, source, err := s.AzureTimeLogConfig(ctx)
+	mustNoErr(t, err)
+	if source != "oauth" || cfg.UserID != "user-id" || cfg.User != "Current User" {
+		t.Fatalf("expected refresh to preserve persisted identity, source=%q userID=%q user=%q", source, cfg.UserID, cfg.User)
+	}
 }
 
 func TestAzureClientUsesBasicAuthorizationForManualPAT(t *testing.T) {
@@ -93,6 +130,7 @@ func TestAzureClientUsesBasicAuthorizationForManualPAT(t *testing.T) {
 	s := openTestDB(t)
 	_, err := s.SaveAzureTimeLogConfig(ctx, "manual-pat", azure.AuthModeBasic)
 	mustNoErr(t, err)
+	mustNoErr(t, s.SaveAzureIdentity(ctx, "uid-1", "Test User"))
 
 	client, err := s.NewAzureTimeLogClient(ctx)
 	mustNoErr(t, err)

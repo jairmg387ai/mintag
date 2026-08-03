@@ -229,6 +229,18 @@ export interface AzureActivity {
   is_default: boolean
 }
 
+export interface AssignedAzureWorkItem {
+  id: number
+  title: string
+  type: string
+  state: string
+}
+
+export interface AssignedAzureWorkItemsResponse {
+  org: string
+  items: AssignedAzureWorkItem[]
+}
+
 export interface UploadResult {
   uploaded_count: number
   failed_ids: number[]
@@ -244,6 +256,7 @@ export interface AzureTimeLogConfigStatus {
   oauth_access_token_expires_at?: string
   oauth_tenant?: string
   oauth_client_id?: string
+  user_display_name?: string
 }
 
 export interface AzureDeviceCodeStartResponse {

@@ -83,6 +83,10 @@ func TestActivityUploadRouteUsesStoreBackedAzureConfig(t *testing.T) {
 		gotAuthMu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
+		if strings.Contains(r.URL.Path, "connectiondata") {
+			_, _ = w.Write([]byte(`{"authenticatedUser":{"id":"route-user-id","providerDisplayName":"Route User"}}`))
+			return
+		}
 		_, _ = w.Write([]byte(`{"id":"route-doc-123"}`))
 	}))
 	defer azureServer.Close()
@@ -303,6 +307,7 @@ func TestActivityUploadRouteRefreshesOAuthTokenBeforeUpload(t *testing.T) {
 		RefreshToken: "old-refresh-token",
 		ExpiresAt:    time.Now().UTC().Add(-time.Minute),
 	}, azure.OAuthConfig{Tenant: "tenant", ClientID: "client", Scope: "scope offline_access"}))
+	mustNoErr(t, st.SaveAzureIdentity(context.Background(), "oauth-user-id", "OAuth User"))
 	base := newTestServerWithStoreAzureRedirect(t, st, azureServer.URL, oauthServer.URL)
 
 	createResp := doJSON(t, http.MethodPost, base+"/api/activities", map[string]any{
@@ -413,6 +418,54 @@ func postJSONRaw(t *testing.T, url string, body []byte) *http.Response {
 	resp, err := http.Post(url, "application/json", bytes.NewReader(body))
 	mustNoErr(t, err)
 	return resp
+}
+
+func TestListAssignedAzureWorkItems(t *testing.T) {
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
+
+	azureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		switch {
+		case strings.Contains(r.URL.Path, "connectiondata"):
+			_, _ = w.Write([]byte(`{"authenticatedUser":{"id":"route-user-id","providerDisplayName":"Route User"}}`))
+		case strings.Contains(r.URL.Path, "/_apis/wit/wiql"):
+			_, _ = w.Write([]byte(`{"workItems":[{"id":555}]}`))
+		case strings.Contains(r.URL.Path, "/_apis/wit/workitems"):
+			_, _ = w.Write([]byte(`{"count":1,"value":[{"id":555,"fields":{"System.Title":"Fix crash on save","System.WorkItemType":"Bug","System.State":"Active"}}]}`))
+		default:
+			t.Fatalf("unexpected azure path: %s", r.URL.Path)
+		}
+	}))
+	defer azureServer.Close()
+
+	base, _ := newTestServerWithAzureRedirect(t, azureServer.URL)
+
+	unconfiguredResp, err := http.Get(base + "/api/activities/azure-work-items/assigned")
+	mustNoErr(t, err)
+	assertStatus(t, unconfiguredResp, http.StatusServiceUnavailable)
+
+	putResp := doJSON(t, http.MethodPut, base+"/api/activities/azure-config", map[string]any{"token": "db-token", "auth_mode": "bearer"})
+	assertStatus(t, putResp, http.StatusOK)
+
+	resp, err := http.Get(base + "/api/activities/azure-work-items/assigned")
+	mustNoErr(t, err)
+	assertStatus(t, resp, http.StatusOK)
+
+	var body struct {
+		Org   string `json:"org"`
+		Items []struct {
+			ID    int    `json:"id"`
+			Title string `json:"title"`
+			Type  string `json:"type"`
+			State string `json:"state"`
+		} `json:"items"`
+	}
+	mustNoErr(t, json.NewDecoder(resp.Body).Decode(&body))
+	if len(body.Items) != 1 || body.Items[0].ID != 555 || body.Items[0].Title != "Fix crash on save" {
+		t.Fatalf("unexpected response body: %+v", body)
+	}
 }
 
 func newTestServerWithAzureRedirect(t *testing.T, azureBaseURL string) (baseURL string, st *store.Store) {

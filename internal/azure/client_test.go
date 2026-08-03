@@ -34,11 +34,11 @@ func TestNewClientFromEnv_Defaults(t *testing.T) {
 	if c.cfg.WorkItemID != 156263 {
 		t.Errorf("expected WorkItemID=156263, got %d", c.cfg.WorkItemID)
 	}
-	if c.cfg.User != "Jair Reinel Muñoz Gomez" {
-		t.Errorf("expected default user, got %q", c.cfg.User)
+	if c.cfg.User != "" {
+		t.Errorf("expected no hardcoded default user, got %q", c.cfg.User)
 	}
-	if c.cfg.UserID != "781ef5a8-e9fc-63f2-9c64-ea9193bcbd6d" {
-		t.Errorf("expected default userID, got %q", c.cfg.UserID)
+	if c.cfg.UserID != "" {
+		t.Errorf("expected no hardcoded default userID, got %q", c.cfg.UserID)
 	}
 	if c.cfg.EntryType != "Desarrollo de Software (Codificación)" {
 		t.Errorf("expected default entryType, got %q", c.cfg.EntryType)
@@ -363,6 +363,183 @@ func TestPostTimeEntry_TwoXXHTMLResponseFailsWithAuthHint(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "invalid character") || strings.Contains(err.Error(), "sign in") || strings.Contains(err.Error(), "html") {
 		t.Fatalf("expected sanitized error without raw decode/body details, got %v", err)
+	}
+}
+
+func TestFetchAssignedWorkItems_Success(t *testing.T) {
+	var wiqlBody []byte
+	var workitemsQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/_apis/wit/wiql"):
+			body, _ := io.ReadAll(r.Body)
+			wiqlBody = body
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"workItems":[{"id":101},{"id":202}]}`)) //nolint:errcheck
+		case strings.Contains(r.URL.Path, "/_apis/wit/workitems"):
+			workitemsQuery = r.URL.RawQuery
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"count":2,"value":[
+				{"id":101,"fields":{"System.Title":"Fix login bug","System.WorkItemType":"Bug","System.State":"Active"}},
+				{"id":202,"fields":{"System.Title":"Add export button","System.WorkItemType":"Task","System.State":"New"}}
+			]}`)) //nolint:errcheck
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+
+	items, err := c.FetchAssignedWorkItems(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var wiqlPayload map[string]string
+	if err := json.Unmarshal(wiqlBody, &wiqlPayload); err != nil {
+		t.Fatalf("unmarshal wiql body: %v", err)
+	}
+	wiqlQuery := wiqlPayload["query"]
+	for _, tt := range []struct {
+		name   string
+		clause string
+	}{
+		{name: "assigned to current user", clause: "[System.AssignedTo] = @Me"},
+		{name: "excludes closed", clause: "[System.State] <> 'Closed'"},
+		{name: "excludes removed", clause: "[System.State] <> 'Removed'"},
+		{name: "excludes cerrado", clause: "[System.State] <> 'Cerrado'"},
+		{name: "only tasks and bugs", clause: "[System.WorkItemType] IN ('Task', 'Bug')"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if !strings.Contains(wiqlQuery, tt.clause) {
+				t.Errorf("expected wiql query to contain %q, got %s", tt.clause, wiqlQuery)
+			}
+		})
+	}
+	if !strings.Contains(workitemsQuery, "ids=101,202") {
+		t.Errorf("expected workitems query to batch both ids, got %s", workitemsQuery)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+	if items[0] != (AssignedWorkItem{ID: 101, Title: "Fix login bug", Type: "Bug", State: "Active"}) {
+		t.Errorf("unexpected first item: %+v", items[0])
+	}
+	if items[1] != (AssignedWorkItem{ID: 202, Title: "Add export button", Type: "Task", State: "New"}) {
+		t.Errorf("unexpected second item: %+v", items[1])
+	}
+}
+
+func TestFetchAssignedWorkItems_ChunksDetailFetchesAtAzureLimit(t *testing.T) {
+	var detailBatches []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/_apis/wit/wiql"):
+			workItems := make([]map[string]int, 201)
+			for i := range workItems {
+				workItems[i] = map[string]int{"id": i + 1}
+			}
+			w.WriteHeader(http.StatusOK)
+			if err := json.NewEncoder(w).Encode(map[string]any{"workItems": workItems}); err != nil {
+				t.Fatalf("encode wiql response: %v", err)
+			}
+		case strings.Contains(r.URL.Path, "/_apis/wit/workitems"):
+			detailBatches = append(detailBatches, r.URL.Query().Get("ids"))
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"count":0,"value":[]}`)) //nolint:errcheck
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+
+	if _, err := c.FetchAssignedWorkItems(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(detailBatches) != 2 {
+		t.Fatalf("expected 2 detail fetches, got %d (%v)", len(detailBatches), detailBatches)
+	}
+	if got := len(strings.Split(detailBatches[0], ",")); got != 200 {
+		t.Errorf("expected first detail batch to contain 200 ids, got %d", got)
+	}
+	if got := len(strings.Split(detailBatches[1], ",")); got != 1 {
+		t.Errorf("expected second detail batch to contain 1 id, got %d", got)
+	}
+}
+
+func TestFetchAssignedWorkItems_EmptyResultSkipsDetailFetch(t *testing.T) {
+	detailFetchCalled := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/_apis/wit/workitems") {
+			detailFetchCalled = true
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"workItems":[]}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+
+	items, err := c.FetchAssignedWorkItems(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(items) != 0 {
+		t.Errorf("expected empty result, got %v", items)
+	}
+	if detailFetchCalled {
+		t.Error("workitems detail endpoint should not be called for an empty id list")
+	}
+}
+
+func TestFetchAssignedWorkItems_NoTokenNoHTTPCall(t *testing.T) {
+	callMade := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callMade = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := &Client{cfg: Config{Token: ""}, http: &http.Client{Transport: redirectToServer(srv.URL)}}
+
+	_, err := c.FetchAssignedWorkItems(context.Background())
+	if err == nil {
+		t.Error("expected error when token is empty")
+	}
+	if callMade {
+		t.Error("HTTP call should not be made when token is empty")
+	}
+}
+
+func TestFetchAssignedWorkItems_WiqlErrorStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"message":"token expired"}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+
+	_, err := c.FetchAssignedWorkItems(context.Background())
+	if err == nil {
+		t.Fatal("expected error for 401 wiql response")
+	}
+	if !strings.Contains(err.Error(), "unexpected wiql status 401: token expired") {
+		t.Errorf("unexpected error message: %v", err)
 	}
 }
 

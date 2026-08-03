@@ -35,6 +35,7 @@ var reActivityDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 //	DELETE /api/activities/azure-config
 //	POST   /api/activities/azure-auth/device/start
 //	POST   /api/activities/azure-auth/device/complete
+//	GET    /api/activities/azure-work-items/assigned
 //	GET    /api/activities/catalog
 //	POST   /api/activities/catalog/projects
 //	DELETE /api/activities/catalog/projects/{name}
@@ -59,6 +60,7 @@ func registerActivityRoutes(r chi.Router, srv *Server) {
 	r.With(requireLocalRequest).Delete("/activities/azure-config", srv.handleClearAzureTimeLogConfig)
 	r.With(requireLocalRequest).Post("/activities/azure-auth/device/start", srv.handleStartAzureDeviceAuth)
 	r.With(requireLocalRequest).Post("/activities/azure-auth/device/complete", srv.handleCompleteAzureDeviceAuth)
+	r.With(requireLocalRequest).Get("/activities/azure-work-items/assigned", srv.handleListAssignedAzureWorkItems)
 	r.Get("/activities/catalog", srv.handleActivityCatalog)
 	r.Post("/activities/catalog/projects", srv.handleAddCatalogProject)
 	r.Delete("/activities/catalog/projects/{name}", srv.handleRemoveCatalogProject)
@@ -314,7 +316,32 @@ func (srv *Server) handleSaveAzureTimeLogConfig(w http.ResponseWriter, r *http.R
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
 	}
+	status = srv.resolveAzureIdentity(r.Context(), status)
 	writeJSON(w, status, nil)
+}
+
+// resolveAzureIdentity fetches the Azure identity behind the currently
+// configured token and persists it, so uploads stop attributing to whatever
+// hardcoded/env fallback identity happened to be set. Best-effort: a failure
+// here (e.g. token valid for TimeLog but the org denies connectiondata) must
+// not fail the credential save — it just leaves uploads blocked until
+// FetchIdentity succeeds, which PostTimeEntry already enforces.
+func (srv *Server) resolveAzureIdentity(ctx context.Context, status *store.AzureTimeLogConfigStatus) *store.AzureTimeLogConfigStatus {
+	client, err := srv.newAzureTimeLogClient(ctx)
+	if err != nil {
+		return status
+	}
+	userID, displayName, err := client.FetchIdentity(ctx)
+	if err != nil {
+		return status
+	}
+	if err := srv.st.SaveAzureIdentity(ctx, userID, displayName); err != nil {
+		return status
+	}
+	if refreshed, err := srv.st.AzureTimeLogConfigStatus(ctx); err == nil {
+		return refreshed
+	}
+	return status
 }
 
 // DELETE /api/activities/azure-config
@@ -395,7 +422,32 @@ func (srv *Server) handleCompleteAzureDeviceAuth(w http.ResponseWriter, r *http.
 		writeJSON(w, nil, err)
 		return
 	}
+	srv.resolveAzureIdentity(r.Context(), nil)
 	writeJSON(w, map[string]string{"status": azure.DeviceAuthStatusComplete}, nil)
+}
+
+// GET /api/activities/azure-work-items/assigned
+// Lists open work items assigned to the identity behind the configured
+// Azure credential, so they can be picked into the Azure activity catalog
+// instead of typed in by hand.
+func (srv *Server) handleListAssignedAzureWorkItems(w http.ResponseWriter, r *http.Request) {
+	az, err := srv.newAzureTimeLogClient(r.Context())
+	if err != nil {
+		writeJSON(w, nil, err)
+		return
+	}
+	if az == nil || !az.Enabled() {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Azure TimeLog token is not configured"})
+		return
+	}
+	items, err := az.FetchAssignedWorkItems(r.Context())
+	if err != nil {
+		http.Error(w, sanitizePublicError(err), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, map[string]any{"org": az.Config().Org, "items": items}, nil)
 }
 
 func sanitizePublicError(err error) string {

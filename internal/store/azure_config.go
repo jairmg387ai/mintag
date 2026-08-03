@@ -19,6 +19,8 @@ const (
 	settingAzureOAuthTenant               = "azure.oauth.tenant"
 	settingAzureOAuthClientID             = "azure.oauth.client_id"
 	settingAzureOAuthScope                = "azure.oauth.scope"
+	settingAzureIdentityUserID            = "azure.identity.user_id"
+	settingAzureIdentityDisplayName       = "azure.identity.display_name"
 )
 
 // AzureTimeLogConfigStatus is safe to return through APIs because it never
@@ -31,6 +33,7 @@ type AzureTimeLogConfigStatus struct {
 	OAuthAccessTokenExpiresAt string `json:"oauth_access_token_expires_at,omitempty"`
 	OAuthTenant               string `json:"oauth_tenant,omitempty"`
 	OAuthClientID             string `json:"oauth_client_id,omitempty"`
+	UserDisplayName           string `json:"user_display_name,omitempty"`
 }
 
 // AzureTimeLogConfig returns the effective upload config. Local DB settings win
@@ -56,7 +59,7 @@ func (s *Store) AzureTimeLogConfig(ctx context.Context) (azure.Config, string, e
 	}
 	if cfg.Token != "" {
 		cfg.AuthMode = normalizeAzureAuthMode(cfg.AuthMode)
-		return cfg, source, nil
+		return s.withResolvedAzureIdentity(ctx, cfg, source)
 	}
 
 	if refreshToken, ok, err := s.setting(ctx, settingAzureOAuthRefreshToken); err != nil {
@@ -75,7 +78,43 @@ func (s *Store) AzureTimeLogConfig(ctx context.Context) (azure.Config, string, e
 		source = "none"
 	}
 	cfg.AuthMode = normalizeAzureAuthMode(cfg.AuthMode)
+	return s.withResolvedAzureIdentity(ctx, cfg, source)
+}
+
+// withResolvedAzureIdentity overrides cfg.User/UserID with the identity
+// persisted by SaveAzureIdentity, if any. That identity is resolved (via
+// Client.FetchIdentity) from whichever token is actually configured, so it
+// always wins over the env var — a value someone else may have left in the
+// shell no longer determines who uploads are attributed to.
+func (s *Store) withResolvedAzureIdentity(ctx context.Context, cfg azure.Config, source string) (azure.Config, string, error) {
+	if userID, ok, err := s.setting(ctx, settingAzureIdentityUserID); err != nil {
+		return cfg, source, err
+	} else if ok && userID != "" {
+		cfg.UserID = userID
+	}
+	if displayName, ok, err := s.setting(ctx, settingAzureIdentityDisplayName); err != nil {
+		return cfg, source, err
+	} else if ok && displayName != "" {
+		cfg.User = displayName
+	}
 	return cfg, source, nil
+}
+
+// SaveAzureIdentity persists the Azure DevOps identity (id + display name)
+// resolved from the currently configured token via Client.FetchIdentity. It
+// is what AzureTimeLogConfig injects into every future upload's Config, so
+// uploads are attributed to whoever's token is actually configured instead of
+// a stale or missing value.
+func (s *Store) SaveAzureIdentity(ctx context.Context, userID, displayName string) error {
+	userID = strings.TrimSpace(userID)
+	displayName = strings.TrimSpace(displayName)
+	if userID == "" || displayName == "" {
+		return fmt.Errorf("userID and displayName are required")
+	}
+	if err := s.setSetting(ctx, settingAzureIdentityUserID, userID); err != nil {
+		return err
+	}
+	return s.setSetting(ctx, settingAzureIdentityDisplayName, displayName)
 }
 
 func (s *Store) AzureTimeLogConfigStatus(ctx context.Context) (*AzureTimeLogConfigStatus, error) {
@@ -100,6 +139,7 @@ func (s *Store) AzureTimeLogConfigStatus(ctx context.Context) (*AzureTimeLogConf
 		OAuthAccessTokenExpiresAt: expiresAt,
 		OAuthTenant:               oauthCfg.Tenant,
 		OAuthClientID:             oauthCfg.ClientID,
+		UserDisplayName:           cfg.User,
 	}, nil
 }
 
@@ -118,6 +158,8 @@ func (s *Store) SaveAzureTimeLogConfig(ctx context.Context, token, authMode stri
 		settingAzureOAuthRefreshToken,
 		settingAzureOAuthAccessToken,
 		settingAzureOAuthAccessTokenExpiresAt,
+		settingAzureIdentityUserID,
+		settingAzureIdentityDisplayName,
 	); err != nil {
 		return nil, err
 	}
@@ -125,7 +167,7 @@ func (s *Store) SaveAzureTimeLogConfig(ctx context.Context, token, authMode stri
 }
 
 func (s *Store) ClearAzureTimeLogConfig(ctx context.Context) (*AzureTimeLogConfigStatus, error) {
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM app_settings WHERE key IN (?, ?, ?, ?, ?, ?, ?, ?)`,
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM app_settings WHERE key IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		settingAzureTimeLogToken,
 		settingAzureTimeLogAuthMode,
 		settingAzureOAuthRefreshToken,
@@ -134,6 +176,8 @@ func (s *Store) ClearAzureTimeLogConfig(ctx context.Context) (*AzureTimeLogConfi
 		settingAzureOAuthTenant,
 		settingAzureOAuthClientID,
 		settingAzureOAuthScope,
+		settingAzureIdentityUserID,
+		settingAzureIdentityDisplayName,
 	); err != nil {
 		return nil, err
 	}
@@ -166,7 +210,7 @@ func (s *Store) NewAzureTimeLogClient(ctx context.Context) (*azure.Client, error
 			if err != nil {
 				return nil, err
 			}
-			if err := s.SaveAzureOAuthTokens(ctx, tok, oauth.Config()); err != nil {
+			if err := s.saveAzureOAuthTokens(ctx, tok, oauth.Config(), false); err != nil {
 				return nil, err
 			}
 			accessToken = tok.AccessToken
@@ -215,10 +259,18 @@ func (s *Store) SaveAzureOAuthConfig(ctx context.Context, cfg azure.OAuthConfig)
 }
 
 func (s *Store) SaveAzureOAuthTokens(ctx context.Context, token *azure.TokenResponse, cfg azure.OAuthConfig) error {
+	return s.saveAzureOAuthTokens(ctx, token, cfg, true)
+}
+
+func (s *Store) saveAzureOAuthTokens(ctx context.Context, token *azure.TokenResponse, cfg azure.OAuthConfig, clearIdentity bool) error {
 	if token == nil || strings.TrimSpace(token.AccessToken) == "" {
 		return fmt.Errorf("oauth access token is required")
 	}
-	if err := s.deleteSettings(ctx, settingAzureTimeLogToken); err != nil {
+	keys := []string{settingAzureTimeLogToken}
+	if clearIdentity {
+		keys = append(keys, settingAzureIdentityUserID, settingAzureIdentityDisplayName)
+	}
+	if err := s.deleteSettings(ctx, keys...); err != nil {
 		return err
 	}
 	if err := s.SaveAzureOAuthConfig(ctx, cfg); err != nil {

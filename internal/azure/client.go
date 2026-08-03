@@ -23,8 +23,8 @@ type Config struct {
 	AuthMode   string // "bearer" or "basic"; PAT fallback defaults to "basic"
 	Org        string // default: "RUNT2PSW"
 	WorkItemID int    // default: 156263
-	User       string // default: "Jair Reinel Muñoz Gomez"
-	UserID     string // default: "781ef5a8-e9fc-63f2-9c64-ea9193bcbd6d"
+	User       string // no default — must be resolved per-identity (see FetchIdentity) or set via MINTAG_AZURE_USER
+	UserID     string // no default — must be resolved per-identity (see FetchIdentity) or set via MINTAG_AZURE_USER_ID
 	EntryType  string // default: "Desarrollo de Software (Codificación)"
 }
 
@@ -67,8 +67,8 @@ func NewClientFromEnv() *Client {
 		AuthMode:   authMode,
 		Org:        envOrDefault("MINTAG_AZURE_ORG", "RUNT2PSW"),
 		WorkItemID: 156263,
-		User:       envOrDefault("MINTAG_AZURE_USER", "Jair Reinel Muñoz Gomez"),
-		UserID:     envOrDefault("MINTAG_AZURE_USER_ID", "781ef5a8-e9fc-63f2-9c64-ea9193bcbd6d"),
+		User:       os.Getenv("MINTAG_AZURE_USER"),
+		UserID:     os.Getenv("MINTAG_AZURE_USER_ID"),
 		EntryType:  envOrDefault("MINTAG_AZURE_ENTRY_TYPE", "Desarrollo de Software (Codificación)"),
 	}
 	return NewClient(cfg)
@@ -91,6 +91,9 @@ func (c *Client) SetHTTPClient(hc *http.Client) { c.http = hc }
 func (c *Client) PostTimeEntry(ctx context.Context, e TimeEntry) (string, error) {
 	if !c.Enabled() {
 		return "", fmt.Errorf("Azure TimeLog token is not configured")
+	}
+	if strings.TrimSpace(c.cfg.UserID) == "" || strings.TrimSpace(c.cfg.User) == "" {
+		return "", fmt.Errorf("azure: identity not resolved — reconnect the Azure token (FetchIdentity) before uploading, so entries are attributed to the right person")
 	}
 
 	minutes := int(math.Round(e.Hours * 60))
@@ -134,13 +137,7 @@ func (c *Client) PostTimeEntry(ctx context.Context, e TimeEntry) (string, error)
 		return "", fmt.Errorf("azure: build request: %w", err)
 	}
 
-	if c.cfg.AuthMode == AuthModeBasic {
-		// Basic auth: base64(":{PAT}") — the credential must not appear in logs.
-		token := base64.StdEncoding.EncodeToString([]byte(":" + c.cfg.Token))
-		req.Header.Set("Authorization", "Basic "+token)
-	} else {
-		req.Header.Set("Authorization", "Bearer "+c.cfg.Token)
-	}
+	c.setAuthHeader(req)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json;api-version=3.1-preview.1;excludeUrls=true")
 	req.Header.Set("X-TFS-FedAuthRedirect", "Suppress")
@@ -171,6 +168,221 @@ func (c *Client) PostTimeEntry(ctx context.Context, e TimeEntry) (string, error)
 		return "", fmt.Errorf("azure: success response missing document id")
 	}
 	return created.ID, nil
+}
+
+// setAuthHeader applies the client's configured credential (PAT via Basic, or
+// OAuth via Bearer) to an outgoing request. Shared by PostTimeEntry and
+// FetchIdentity so both hit Azure with identical auth.
+func (c *Client) setAuthHeader(req *http.Request) {
+	if c.cfg.AuthMode == AuthModeBasic {
+		// Basic auth: base64(":{PAT}") — the credential must not appear in logs.
+		token := base64.StdEncoding.EncodeToString([]byte(":" + c.cfg.Token))
+		req.Header.Set("Authorization", "Basic "+token)
+	} else {
+		req.Header.Set("Authorization", "Bearer "+c.cfg.Token)
+	}
+}
+
+// FetchIdentity resolves the Azure DevOps identity (id + display name) behind
+// the client's configured credential, via the connectiondata endpoint. This is
+// the same id ADO extensions read as their web-context user id — NOT the same
+// id returned by the VSSPS profile API (app.vssps.visualstudio.com/_apis/profile),
+// which is a different identifier system and must not be used here.
+func (c *Client) FetchIdentity(ctx context.Context) (userID, displayName string, err error) {
+	if strings.TrimSpace(c.cfg.Token) == "" {
+		return "", "", fmt.Errorf("azure: token is not configured")
+	}
+
+	url := fmt.Sprintf("https://dev.azure.com/%s/_apis/connectiondata?api-version=6.0-preview.1", c.cfg.Org)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", "", fmt.Errorf("azure: build identity request: %w", err)
+	}
+	c.setAuthHeader(req)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("azure: identity http request: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", "", fmt.Errorf("azure: unexpected identity status %d%s", resp.StatusCode, sanitizedResponseMessage(respBody))
+	}
+	if isHTMLResponse(resp.Header.Get("Content-Type"), respBody) {
+		return "", "", fmt.Errorf("azure: Azure returned HTML/sign-in response; token may be expired or auth mode invalid")
+	}
+
+	var parsed struct {
+		AuthenticatedUser struct {
+			ID                  string `json:"id"`
+			ProviderDisplayName string `json:"providerDisplayName"`
+		} `json:"authenticatedUser"`
+	}
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return "", "", fmt.Errorf("azure: decode identity response: %w", err)
+	}
+	userID = strings.TrimSpace(parsed.AuthenticatedUser.ID)
+	displayName = strings.TrimSpace(parsed.AuthenticatedUser.ProviderDisplayName)
+	if userID == "" || displayName == "" {
+		return "", "", fmt.Errorf("azure: identity response missing id or display name")
+	}
+	return userID, displayName, nil
+}
+
+// AssignedWorkItem is a work item (bug/task/etc.) currently assigned to the
+// caller in Azure Boards, as returned by FetchAssignedWorkItems.
+type AssignedWorkItem struct {
+	ID    int    `json:"id"`
+	Title string `json:"title"`
+	Type  string `json:"type"`  // System.WorkItemType, e.g. "Bug", "Task"
+	State string `json:"state"` // System.State, e.g. "Active", "New"
+}
+
+// FetchAssignedWorkItems returns the work items currently assigned to the
+// caller (identified by the configured credential) in Azure Boards, across
+// all types and open states. Uses the same credential as PostTimeEntry /
+// FetchIdentity, but hits the Work Item Tracking REST API instead of the
+// TimeLog extension endpoint — no extra OAuth scope is needed since the
+// configured token already grants full user_impersonation.
+func (c *Client) FetchAssignedWorkItems(ctx context.Context) ([]AssignedWorkItem, error) {
+	if strings.TrimSpace(c.cfg.Token) == "" {
+		return nil, fmt.Errorf("azure: token is not configured")
+	}
+
+	ids, err := c.queryAssignedWorkItemIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return []AssignedWorkItem{}, nil
+	}
+	return c.fetchWorkItemDetails(ctx, ids)
+}
+
+// queryAssignedWorkItemIDs runs a WIQL query for work items assigned to the
+// current identity (@Me is resolved by Azure server-side from the
+// credential) that are not in a closed/removed state, most recently changed
+// first.
+func (c *Client) queryAssignedWorkItemIDs(ctx context.Context) ([]int, error) {
+	query := map[string]string{
+		"query": "SELECT [System.Id] FROM WorkItems WHERE [System.AssignedTo] = @Me " +
+			"AND [System.State] <> 'Closed' AND [System.State] <> 'Removed' AND [System.State] <> 'Cerrado' " +
+			"AND [System.WorkItemType] IN ('Task', 'Bug') " +
+			"ORDER BY [System.ChangedDate] DESC",
+	}
+	body, err := json.Marshal(query)
+	if err != nil {
+		return nil, fmt.Errorf("azure: marshal wiql query: %w", err)
+	}
+
+	url := fmt.Sprintf("https://dev.azure.com/%s/_apis/wit/wiql?api-version=7.1", c.cfg.Org)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("azure: build wiql request: %w", err)
+	}
+	c.setAuthHeader(req)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("azure: wiql http request: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("azure: unexpected wiql status %d%s", resp.StatusCode, sanitizedResponseMessage(respBody))
+	}
+	if isHTMLResponse(resp.Header.Get("Content-Type"), respBody) {
+		return nil, fmt.Errorf("azure: Azure returned HTML/sign-in response; token may be expired or auth mode invalid")
+	}
+
+	var parsed struct {
+		WorkItems []struct {
+			ID int `json:"id"`
+		} `json:"workItems"`
+	}
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return nil, fmt.Errorf("azure: decode wiql response: %w", err)
+	}
+	ids := make([]int, len(parsed.WorkItems))
+	for i, wi := range parsed.WorkItems {
+		ids[i] = wi.ID
+	}
+	return ids, nil
+}
+
+// fetchWorkItemDetails resolves title/type/state for a batch of work item
+// ids, splitting requests at Azure's 200-item limit. ids must be non-empty —
+// the Azure endpoint rejects an empty ids list.
+func (c *Client) fetchWorkItemDetails(ctx context.Context, ids []int) ([]AssignedWorkItem, error) {
+	const maxWorkItemsPerRequest = 200
+
+	out := make([]AssignedWorkItem, 0, len(ids))
+	for start := 0; start < len(ids); start += maxWorkItemsPerRequest {
+		end := start + maxWorkItemsPerRequest
+		if end > len(ids) {
+			end = len(ids)
+		}
+
+		idStrs := make([]string, end-start)
+		for i, id := range ids[start:end] {
+			idStrs[i] = fmt.Sprintf("%d", id)
+		}
+
+		url := fmt.Sprintf(
+			"https://dev.azure.com/%s/_apis/wit/workitems?ids=%s&fields=System.Id,System.Title,System.WorkItemType,System.State&api-version=7.1",
+			c.cfg.Org, strings.Join(idStrs, ","),
+		)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("azure: build workitems request: %w", err)
+		}
+		c.setAuthHeader(req)
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := c.http.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("azure: workitems http request: %w", err)
+		}
+		respBody, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, fmt.Errorf("azure: unexpected workitems status %d%s", resp.StatusCode, sanitizedResponseMessage(respBody))
+		}
+		if isHTMLResponse(resp.Header.Get("Content-Type"), respBody) {
+			return nil, fmt.Errorf("azure: Azure returned HTML/sign-in response; token may be expired or auth mode invalid")
+		}
+
+		var parsed struct {
+			Value []struct {
+				ID     int `json:"id"`
+				Fields struct {
+					Title string `json:"System.Title"`
+					Type  string `json:"System.WorkItemType"`
+					State string `json:"System.State"`
+				} `json:"fields"`
+			} `json:"value"`
+		}
+		if err := json.Unmarshal(respBody, &parsed); err != nil {
+			return nil, fmt.Errorf("azure: decode workitems response: %w", err)
+		}
+
+		for _, v := range parsed.Value {
+			out = append(out, AssignedWorkItem{
+				ID:    v.ID,
+				Title: v.Fields.Title,
+				Type:  v.Fields.Type,
+				State: v.Fields.State,
+			})
+		}
+	}
+	return out, nil
 }
 
 func isHTMLResponse(contentType string, body []byte) bool {

@@ -16,6 +16,7 @@ import type {
   ActivityCatalog,
   TimelogCategory,
   AzureActivity,
+  AssignedAzureWorkItemsResponse,
   AzureTimeLogConfigStatus,
   AzureDeviceCodeStartResponse,
   AzureDeviceCodeCompleteResponse,
@@ -296,6 +297,13 @@ export async function deactivateAzureActivity(id: number): Promise<void> {
 
 export function setDefaultAzureActivity(id: number): Promise<AzureActivity> {
   return request<AzureActivity>(`/api/activities/azure-catalog/${id}/default`, { method: 'POST' })
+}
+
+// listAssignedAzureWorkItems fetches open work items assigned to the
+// identity behind the configured Azure credential, so they can be imported
+// into the catalog instead of typed in by hand.
+export function listAssignedAzureWorkItems(): Promise<AssignedAzureWorkItemsResponse> {
+  return request<AssignedAzureWorkItemsResponse>('/api/activities/azure-work-items/assigned')
 }
 
 // exportActivities downloads the .xlsx export for [from, to] (inclusive) and
