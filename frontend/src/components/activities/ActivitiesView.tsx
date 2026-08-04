@@ -16,7 +16,7 @@ import {
   listAzureActivities,
 } from '../../api/client'
 import { ActivityStatusBadge, ActivitySourceBadge } from './ActivityStatusBadge'
-import { resolveAzureActivityLabel } from './azureActivity'
+import { AzureActivityReference } from './AzureActivityLink'
 import { NewActivityModal } from './NewActivityModal'
 import { EditActivityModal } from './EditActivityModal'
 import { CatalogManagementModal } from './CatalogManagementModal'
@@ -396,9 +396,11 @@ export function ActivitiesView() {
                     </td>
                     <td><ActivitySourceBadge source={a.source} /></td>
                     <td>
-                      <span style={{ font: 'var(--text-caption)', color: 'var(--fg3)' }}>
-                        {resolveAzureActivityLabel(a.azure_activity_id, azureActivities)}
-                      </span>
+                      <AzureActivityReference
+                        azureActivityId={a.azure_activity_id}
+                        azureActivities={azureActivities}
+                        style={{ font: 'var(--text-caption)', color: 'var(--fg3)' }}
+                      />
                     </td>
                     <td><ActivityStatusBadge status={a.status} /></td>
                     <td>

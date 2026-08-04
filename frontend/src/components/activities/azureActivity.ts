@@ -8,10 +8,27 @@ export function findDefaultAzureActivity(azureActivities: AzureActivity[]): Azur
   return azureActivities.find(a => a.is_default)
 }
 
+export function azureWorkItemUrl(a: Pick<AzureActivity, 'org' | 'work_item_id'>): string {
+  const orgPath = a.org
+    .trim()
+    .split('/')
+    .map(segment => encodeURIComponent(segment))
+    .join('/')
+  return `https://dev.azure.com/${orgPath}/_workitems/edit/${a.work_item_id}`
+}
+
 // Shared formatting so every combo/display shows the same "label (#work
 // item id)" shape — the label alone doesn't identify the Azure work item.
 export function formatAzureActivityLabel(a: AzureActivity): string {
   return `${a.label} (#${a.work_item_id})`
+}
+
+export function resolveAzureActivity(
+  azureActivityId: number | null | undefined,
+  azureActivities: AzureActivity[],
+): AzureActivity | undefined {
+  if (azureActivityId == null) return findDefaultAzureActivity(azureActivities)
+  return azureActivities.find(a => a.id === azureActivityId)
 }
 
 // Resolves the display label for a daily activity's assigned Azure work
@@ -21,12 +38,9 @@ export function resolveAzureActivityLabel(
   azureActivityId: number | null | undefined,
   azureActivities: AzureActivity[],
 ): string {
-  if (azureActivityId == null) {
-    const def = findDefaultAzureActivity(azureActivities)
-    return def ? formatAzureActivityLabel(def) : 'Predeterminada'
-  }
-  const match = azureActivities.find(a => a.id === azureActivityId)
-  return match ? formatAzureActivityLabel(match) : `#${azureActivityId}`
+  const match = resolveAzureActivity(azureActivityId, azureActivities)
+  if (match) return formatAzureActivityLabel(match)
+  return azureActivityId == null ? 'Predeterminada' : `#${azureActivityId}`
 }
 
 // Most azure_activities store-layer errors are already user-appropriate

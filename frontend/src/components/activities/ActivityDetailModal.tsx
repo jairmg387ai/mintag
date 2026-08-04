@@ -2,7 +2,7 @@ import { useRef, type CSSProperties } from 'react'
 import { X } from 'lucide-react'
 import type { DailyActivity, AzureActivity } from '../../types'
 import { ActivityStatusBadge, ActivitySourceBadge } from './ActivityStatusBadge'
-import { resolveAzureActivityLabel } from './azureActivity'
+import { AzureActivityReference } from './AzureActivityLink'
 
 interface ActivityDetailModalProps {
   activity: DailyActivity | null
@@ -153,7 +153,10 @@ export function ActivityDetailModal({ activity, open, onClose, azureActivities }
 
           <DetailField label="Actividad de Azure">
             <div style={valueStyle}>
-              {resolveAzureActivityLabel(activity.azure_activity_id, azureActivities)}
+              <AzureActivityReference
+                azureActivityId={activity.azure_activity_id}
+                azureActivities={azureActivities}
+              />
             </div>
           </DetailField>
 

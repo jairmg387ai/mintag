@@ -15,6 +15,7 @@ import {
   listAssignedAzureWorkItems,
 } from '../../api/client'
 import { friendlyCatalogErrorMessage, formatAzureActivityLabel } from './azureActivity'
+import { AzureWorkItemLink } from './AzureActivityLink'
 
 // friendlyMappingErrorMessage maps the two known store-layer validation
 // failures for SetCategoryAzureActivity (unknown or inactive azure activity
@@ -756,7 +757,10 @@ function AzureActivitySection({
               ) : (
                 <>
                   <span style={{ flex: 1, font: 'var(--text-body)', color: 'var(--fg1)', fontSize: '0.9em' }}>
-                    {a.label} <span style={{ color: 'var(--fg3)' }}>— {a.org} / #{a.work_item_id}</span>
+                    {a.label}{' '}
+                    <span style={{ color: 'var(--fg3)' }}>
+                      — {a.org} / <AzureWorkItemLink activity={a}>#{a.work_item_id}</AzureWorkItemLink>
+                    </span>
                   </span>
                   {a.is_default ? (
                     <span className="chip chip-done" style={{ fontSize: '0.75em' }}>Predeterminada</span>
