@@ -3,7 +3,6 @@ package server
 import (
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/xuri/excelize/v2"
 
@@ -91,7 +90,7 @@ func buildActivitiesWorkbook(a []*store.DailyActivity, az []*store.AzureActivity
 		values := []any{
 			resolveExportAzureLabel(act.AzureActivityID, labels, defaultLabel, hasDefault),
 			act.Project,
-			exportCategoryLabel(act.Category),
+			act.Category,
 			act.RegistroDiario,
 			act.Date,
 			act.Hours,
@@ -112,14 +111,6 @@ func buildActivitiesWorkbook(a []*store.DailyActivity, az []*store.AzureActivity
 		return nil, err
 	}
 	return buf.Bytes(), nil
-}
-
-func exportCategoryLabel(category string) string {
-	idx := strings.LastIndex(category, "/")
-	if idx >= 0 && idx < len(category)-1 {
-		return category[idx+1:]
-	}
-	return category
 }
 
 // resolveExportAzureLabel implements the design's D7 table for the

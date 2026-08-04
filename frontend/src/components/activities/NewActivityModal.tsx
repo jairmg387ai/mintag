@@ -63,7 +63,6 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
   const [project, setProject] = useState('')
   const [category, setCategory] = useState('')
   const [description, setDescription] = useState('')
-  const [descriptionTouched, setDescriptionTouched] = useState(false)
   const [azureActivityId, setAzureActivityId] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
@@ -77,19 +76,11 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
       setProject(catalog?.projects[0] ?? '')
       setCategory(catalog?.categories[0]?.name ?? '')
       setDescription('')
-      setDescriptionTouched(false)
       setAzureActivityId('')
       setErrors({})
       setSubmitError('')
     }
   }, [open, defaultDate, catalog])
-
-  // Auto-prefill description while pristine
-  useEffect(() => {
-    if (!descriptionTouched && project && category) {
-      setDescription(`${project}/${category}/`)
-    }
-  }, [project, category, descriptionTouched])
 
   if (!open) return null
 
@@ -119,13 +110,7 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
     if (!hours || isNaN(h) || h <= 0) errs.hours = 'Las horas deben ser mayores que 0'
     if (!project.trim()) errs.project = 'El proyecto es obligatorio'
     if (!category.trim()) errs.category = 'La categoría es obligatoria'
-
-    // The actual description part is what comes after "{project}/{category}/"
-    const prefix = `${project}/${category}/`
-    const descPart = description.startsWith(prefix)
-      ? description.slice(prefix.length).trim()
-      : description.trim()
-    if (!descPart) errs.description = 'La descripción es obligatoria'
+    if (!description.trim()) errs.description = 'La descripción es obligatoria'
 
     setErrors(errs)
     return Object.keys(errs).length === 0
@@ -137,11 +122,7 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
     setSubmitError('')
 
     const h = parseFloat(hours)
-    const prefix = `${project}/${category}/`
-    const descPart = (description.startsWith(prefix)
-      ? description.slice(prefix.length)
-      : description).trim()
-    const registro_diario = `${project}/${category}/${descPart}`
+    const registro_diario = description.trim()
 
     try {
       await createActivity({
@@ -321,11 +302,8 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
             <textarea
               style={textareaStyle}
               value={description}
-              onChange={e => {
-                setDescription(e.target.value)
-                setDescriptionTouched(true)
-              }}
-              placeholder={`${project || 'proyecto'}/${category || 'categoría'}/descripción...`}
+              onChange={e => setDescription(e.target.value)}
+              placeholder="Descripción de la actividad..."
             />
           </Field>
 
