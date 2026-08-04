@@ -366,6 +366,106 @@ func TestPostTimeEntry_TwoXXHTMLResponseFailsWithAuthHint(t *testing.T) {
 	}
 }
 
+func TestDeleteTimeEntry_RequestShapeAndSuccessStatuses(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+	}{
+		{name: "ok", status: http.StatusOK},
+		{name: "no content", status: http.StatusNoContent},
+		{name: "not found is idempotent", status: http.StatusNotFound},
+		{name: "gone is idempotent", status: http.StatusGone},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var method, requestURI, auth, accept, fedAuthRedirect, origin, referer string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				method = r.Method
+				requestURI = r.RequestURI
+				auth = r.Header.Get("Authorization")
+				accept = r.Header.Get("Accept")
+				fedAuthRedirect = r.Header.Get("X-TFS-FedAuthRedirect")
+				origin = r.Header.Get("Origin")
+				referer = r.Header.Get("Referer")
+				w.WriteHeader(tt.status)
+			}))
+			defer srv.Close()
+
+			c := &Client{
+				cfg:  Config{Token: "secret-token", AuthMode: AuthModeBearer, Org: "ORG"},
+				http: &http.Client{Transport: redirectToServer(srv.URL)},
+			}
+
+			if err := c.DeleteTimeEntry(context.Background(), "doc/with space"); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if method != http.MethodDelete {
+				t.Fatalf("expected DELETE, got %s", method)
+			}
+			if !strings.Contains(requestURI, "/TimeLogData/Documents/doc%2Fwith%20space") {
+				t.Fatalf("expected escaped document id in URL, got %s", requestURI)
+			}
+			if auth != "Bearer secret-token" {
+				t.Fatalf("expected bearer auth header, got %q", auth)
+			}
+			if !strings.Contains(accept, "api-version=3.1-preview.1") || !strings.Contains(accept, "excludeUrls=true") {
+				t.Fatalf("expected Azure TimeLog Accept header, got %q", accept)
+			}
+			if fedAuthRedirect != "Suppress" || origin != "https://dev.azure.com" || referer != "https://dev.azure.com/" {
+				t.Fatalf("missing Azure headers: fed=%q origin=%q referer=%q", fedAuthRedirect, origin, referer)
+			}
+		})
+	}
+}
+
+func TestDeleteTimeEntry_Failures(t *testing.T) {
+	t.Run("empty document id", func(t *testing.T) {
+		c := NewClient(Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG"})
+		if err := c.DeleteTimeEntry(context.Background(), "   "); err == nil || !strings.Contains(err.Error(), "document id is required") {
+			t.Fatalf("expected document id error, got %v", err)
+		}
+	})
+
+	t.Run("server error is sanitized", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"message":"backend down","token":"must-not-leak"}`)) //nolint:errcheck
+		}))
+		defer srv.Close()
+
+		c := &Client{
+			cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG"},
+			http: &http.Client{Transport: redirectToServer(srv.URL)},
+		}
+		err := c.DeleteTimeEntry(context.Background(), "doc-123")
+		if err == nil || !strings.Contains(err.Error(), "unexpected delete status 500: backend down") {
+			t.Fatalf("expected sanitized 500 error, got %v", err)
+		}
+		if strings.Contains(err.Error(), "must-not-leak") || strings.Contains(err.Error(), "token") {
+			t.Fatalf("error leaked raw response body: %v", err)
+		}
+	})
+
+	t.Run("html sign in response", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`<!doctype html><html><body>sign in</body></html>`)) //nolint:errcheck
+		}))
+		defer srv.Close()
+
+		c := &Client{
+			cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG"},
+			http: &http.Client{Transport: redirectToServer(srv.URL)},
+		}
+		err := c.DeleteTimeEntry(context.Background(), "doc-123")
+		if err == nil || !strings.Contains(err.Error(), "Azure returned HTML/sign-in response") {
+			t.Fatalf("expected HTML auth error, got %v", err)
+		}
+	})
+}
+
 func TestFetchAssignedWorkItems_Success(t *testing.T) {
 	var wiqlBody []byte
 	var workitemsQuery string

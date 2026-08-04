@@ -11,6 +11,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -170,9 +171,56 @@ func (c *Client) PostTimeEntry(ctx context.Context, e TimeEntry) (string, error)
 	return created.ID, nil
 }
 
+// DeleteTimeEntry deletes one Azure TimeLog document. Missing remote documents
+// are treated as already deleted so retrying after a partial local failure is safe.
+func (c *Client) DeleteTimeEntry(ctx context.Context, documentID string) error {
+	documentID = strings.TrimSpace(documentID)
+	if documentID == "" {
+		return fmt.Errorf("azure: document id is required")
+	}
+	if !c.Enabled() {
+		return fmt.Errorf("Azure TimeLog token is not configured")
+	}
+
+	endpoint := fmt.Sprintf(
+		"https://extmgmt.dev.azure.com/%s/_apis/ExtensionManagement/InstalledExtensions/TimeLog/time-logging-extension/Data/Scopes/Default/Current/Collections/TimeLogData/Documents/%s",
+		c.cfg.Org,
+		url.PathEscape(documentID),
+	)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, endpoint, nil)
+	if err != nil {
+		return fmt.Errorf("azure: build delete request: %w", err)
+	}
+
+	c.setAuthHeader(req)
+	req.Header.Set("Accept", "application/json;api-version=3.1-preview.1;excludeUrls=true")
+	req.Header.Set("X-TFS-FedAuthRedirect", "Suppress")
+	req.Header.Set("Origin", "https://dev.azure.com")
+	req.Header.Set("Referer", "https://dev.azure.com/")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("azure: http delete request: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if isHTMLResponse(resp.Header.Get("Content-Type"), respBody) {
+		return fmt.Errorf("azure: Azure returned HTML/sign-in response; token may be expired or auth mode invalid")
+	}
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
+		return nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("azure: unexpected delete status %d%s", resp.StatusCode, sanitizedResponseMessage(respBody))
+	}
+	return nil
+}
+
 // setAuthHeader applies the client's configured credential (PAT via Basic, or
-// OAuth via Bearer) to an outgoing request. Shared by PostTimeEntry and
-// FetchIdentity so both hit Azure with identical auth.
+// OAuth via Bearer) to an outgoing request. Shared by TimeLog and identity
+// requests so all Azure calls use identical auth.
 func (c *Client) setAuthHeader(req *http.Request) {
 	if c.cfg.AuthMode == AuthModeBasic {
 		// Basic auth: base64(":{PAT}") — the credential must not appear in logs.

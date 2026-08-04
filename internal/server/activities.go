@@ -81,7 +81,7 @@ func registerActivityRoutes(r chi.Router, srv *Server) {
 	r.With(requireLocalRequest).Post("/activities/azure-catalog/{id}/default", srv.handleSetDefaultAzureActivity)
 	r.With(requireLocalRequest).Post("/activities/upload", srv.handleUploadActivities)
 	r.Patch("/activities/{id}", srv.handlePatchActivity)
-	r.Delete("/activities/{id}", srv.handleDeleteActivity)
+	r.With(requireLocalRequest).Delete("/activities/{id}", srv.handleDeleteActivity)
 }
 
 // GET /api/activities?date=YYYY-MM-DD&status=
@@ -610,7 +610,9 @@ func (srv *Server) handleDeleteActivity(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := srv.st.DeleteActivity(r.Context(), id); err != nil {
+	if err := srv.st.DeleteActivityWithAzure(r.Context(), id, func(ctx context.Context) (store.TimeEntryDeleter, error) {
+		return srv.newAzureTimeLogClient(ctx)
+	}); err != nil {
 		status := http.StatusUnprocessableEntity
 		if isNotFound(err) {
 			status = http.StatusNotFound
