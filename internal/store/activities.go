@@ -235,7 +235,19 @@ func (s *Store) UpdateActivity(ctx context.Context, id int64, hours float64, pro
 	return s.GetActivity(ctx, id)
 }
 
-// DeleteActivity removes a pending or approved activity. Uploaded activities cannot be deleted.
+// TimeEntryDeleter is the Azure-side boundary needed to delete uploaded
+// activities. It keeps store deletion orchestration testable without HTTP code.
+type TimeEntryDeleter interface {
+	DeleteTimeEntry(ctx context.Context, documentID string) error
+}
+
+// NewTimeEntryDeleter creates the Azure-side delete client lazily. Delete flows
+// pass a factory so pending/approved rows never require Azure configuration.
+type NewTimeEntryDeleter func(context.Context) (TimeEntryDeleter, error)
+
+// DeleteActivity removes a pending or approved activity. Uploaded activities must
+// be deleted through DeleteActivityWithAzure so the remote document is removed
+// before the local row.
 func (s *Store) DeleteActivity(ctx context.Context, id int64) error {
 	a, err := s.GetActivity(ctx, id)
 	if err != nil {
@@ -244,7 +256,41 @@ func (s *Store) DeleteActivity(ctx context.Context, id int64) error {
 	if a.Status == "uploaded" {
 		return fmt.Errorf("activity %d cannot be deleted: already uploaded", id)
 	}
-	_, err = s.db.ExecContext(ctx, `DELETE FROM daily_activities WHERE id = ?`, id)
+	return s.deleteActivityRow(ctx, id)
+}
+
+// DeleteActivityWithAzure deletes an activity safely. Pending/approved rows are
+// local-only; uploaded rows are deleted from Azure first and the local row is
+// preserved unless that remote delete succeeds or is already gone.
+func (s *Store) DeleteActivityWithAzure(ctx context.Context, id int64, newDeleter NewTimeEntryDeleter) error {
+	a, err := s.GetActivity(ctx, id)
+	if err != nil {
+		return err
+	}
+	if a.Status != "uploaded" {
+		return s.deleteActivityRow(ctx, id)
+	}
+	if a.AzureDocumentID == nil || strings.TrimSpace(*a.AzureDocumentID) == "" {
+		return fmt.Errorf("activity %d cannot be deleted: azure document id is required", id)
+	}
+	if newDeleter == nil {
+		return fmt.Errorf("Azure TimeLog token is not configured")
+	}
+	deleter, err := newDeleter(ctx)
+	if err != nil {
+		return err
+	}
+	if deleter == nil {
+		return fmt.Errorf("Azure TimeLog token is not configured")
+	}
+	if err := deleter.DeleteTimeEntry(ctx, *a.AzureDocumentID); err != nil {
+		return fmt.Errorf("delete uploaded activity %d from Azure: %w", id, err)
+	}
+	return s.deleteActivityRow(ctx, id)
+}
+
+func (s *Store) deleteActivityRow(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM daily_activities WHERE id = ?`, id)
 	return err
 }
 

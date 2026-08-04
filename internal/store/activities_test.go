@@ -458,3 +458,131 @@ func TestMarkUploaded_WhitespaceDocumentIDRejected(t *testing.T) {
 		t.Fatalf("expected activity to remain approved, got %q", updated.Status)
 	}
 }
+
+func TestDeleteActivityWithAzure_PendingDeletesLocallyWithoutAzure(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	a, err := s.CreateActivity(ctx, "2026-06-12", 1, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo", "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.DeleteActivityWithAzure(ctx, a.ID, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := s.GetActivity(ctx, a.ID); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected local row to be deleted, got %v", err)
+	}
+}
+
+func TestDeleteActivityWithAzure_UploadedSuccessDeletesRemoteBeforeLocal(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	a := createUploadedActivity(t, s, ctx, "azure-doc-123")
+	deleter := &fakeTimeEntryDeleter{}
+
+	if err := s.DeleteActivityWithAzure(ctx, a.ID, func(context.Context) (TimeEntryDeleter, error) {
+		return deleter, nil
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if deleter.documentID != "azure-doc-123" {
+		t.Fatalf("expected remote delete for azure-doc-123, got %q", deleter.documentID)
+	}
+	if _, err := s.GetActivity(ctx, a.ID); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected local row to be deleted, got %v", err)
+	}
+}
+
+func TestDeleteActivityWithAzure_UploadedRemoteFailurePreservesLocalRow(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	a := createUploadedActivity(t, s, ctx, "azure-doc-123")
+	deleter := &fakeTimeEntryDeleter{err: context.DeadlineExceeded}
+
+	if err := s.DeleteActivityWithAzure(ctx, a.ID, func(context.Context) (TimeEntryDeleter, error) {
+		return deleter, nil
+	}); err == nil || !strings.Contains(err.Error(), "delete uploaded activity") {
+		t.Fatalf("expected remote delete error, got %v", err)
+	}
+	updated, err := s.GetActivity(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != "uploaded" {
+		t.Fatalf("expected local row to remain uploaded, got %q", updated.Status)
+	}
+}
+
+func TestDeleteActivityWithAzure_UploadedMissingDocumentIDFailsAndPreservesLocalRow(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	a, err := s.CreateActivity(ctx, "2026-06-12", 1, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo", "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApproveActivities(ctx, []int64{a.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE daily_activities SET status = 'uploaded' WHERE id = ?`, a.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.DeleteActivityWithAzure(ctx, a.ID, func(context.Context) (TimeEntryDeleter, error) {
+		return &fakeTimeEntryDeleter{}, nil
+	}); err == nil || !strings.Contains(err.Error(), "azure document id is required") {
+		t.Fatalf("expected missing document id error, got %v", err)
+	}
+	updated, err := s.GetActivity(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != "uploaded" {
+		t.Fatalf("expected local row to remain uploaded, got %q", updated.Status)
+	}
+}
+
+type fakeTimeEntryDeleter struct {
+	documentID string
+	err        error
+}
+
+func (f *fakeTimeEntryDeleter) DeleteTimeEntry(_ context.Context, documentID string) error {
+	f.documentID = documentID
+	return f.err
+}
+
+func createUploadedActivity(t *testing.T, s *Store, ctx context.Context, documentID string) *DailyActivity {
+	t.Helper()
+	a, err := s.CreateActivity(ctx, "2026-06-12", 1, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo", "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApproveActivities(ctx, []int64{a.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkUploaded(ctx, a.ID, documentID); err != nil {
+		t.Fatal(err)
+	}
+	return a
+}
