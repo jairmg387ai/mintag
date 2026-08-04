@@ -128,7 +128,13 @@ export function ActivitiesView() {
     }
   }
 
-  async function handleDelete(id: number) {
+  async function handleDelete(activity: DailyActivity) {
+    const message = activity.status === 'uploaded'
+      ? 'Esta actividad ya fue subida. Se eliminará de Azure TimeLog y también de Mintag. ¿Continuar?'
+      : 'Se eliminará esta actividad de Mintag. ¿Continuar?'
+    if (!window.confirm(message)) return
+
+    const id = activity.id
     setRowErrors(prev => { const n = { ...prev }; delete n[id]; return n })
     try {
       await deleteActivity(id)
@@ -418,14 +424,6 @@ export function ActivitiesView() {
                             >
                               <CheckCircle size={15} strokeWidth={1.75} />
                             </button>
-                            <button
-                              className="btn btn-ghost btn-sm"
-                              onClick={() => handleDelete(a.id)}
-                              title="Eliminar"
-                              aria-label="Eliminar actividad"
-                            >
-                              <Trash2 size={15} strokeWidth={1.75} />
-                            </button>
                           </>
                         )}
                         {a.status === 'approved' && (
@@ -438,16 +436,16 @@ export function ActivitiesView() {
                             >
                               <RotateCcw size={15} strokeWidth={1.75} />
                             </button>
-                            <button
-                              className="btn btn-ghost btn-sm"
-                              onClick={() => handleDelete(a.id)}
-                              title="Eliminar"
-                              aria-label="Eliminar actividad"
-                            >
-                              <Trash2 size={15} strokeWidth={1.75} />
-                            </button>
                           </>
                         )}
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => handleDelete(a)}
+                          title={a.status === 'uploaded' ? 'Eliminar en Azure y Mintag' : 'Eliminar'}
+                          aria-label={a.status === 'uploaded' ? 'Eliminar actividad en Azure y Mintag' : 'Eliminar actividad'}
+                        >
+                          <Trash2 size={15} strokeWidth={1.75} />
+                        </button>
                       </div>
                     </td>
                   </tr>

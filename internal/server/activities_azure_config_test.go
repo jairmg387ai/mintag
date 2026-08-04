@@ -150,6 +150,73 @@ func TestActivityUploadRouteUsesStoreBackedAzureConfig(t *testing.T) {
 	}
 }
 
+func TestActivityDeleteRouteDeletesUploadedActivityFromAzureFirst(t *testing.T) {
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
+
+	var gotMethod, gotPath, gotAuth string
+	azureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.RequestURI
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer azureServer.Close()
+
+	base, st := newTestServerWithAzureRedirect(t, azureServer.URL)
+	ctx := context.Background()
+	_, err := st.SaveAzureTimeLogConfig(ctx, "db-token", azure.AuthModeBearer)
+	mustNoErr(t, err)
+	activity := createUploadedServerActivity(t, st, ctx, "route-doc-123")
+
+	deleteResp := doJSON(t, http.MethodDelete, base+"/api/activities/"+strconv.FormatInt(activity.ID, 10), nil)
+	assertStatus(t, deleteResp, http.StatusNoContent)
+	_, _ = io.Copy(io.Discard, deleteResp.Body)
+	mustNoErr(t, deleteResp.Body.Close())
+
+	if gotMethod != http.MethodDelete {
+		t.Fatalf("expected Azure DELETE, got %s", gotMethod)
+	}
+	if !strings.Contains(gotPath, "/TimeLogData/Documents/route-doc-123") {
+		t.Fatalf("expected Azure document delete path, got %s", gotPath)
+	}
+	if gotAuth != "Bearer db-token" {
+		t.Fatalf("expected route delete to use DB-backed bearer token, got %q", gotAuth)
+	}
+	if _, err := st.GetActivity(ctx, activity.ID); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected local row to be deleted after Azure success, got %v", err)
+	}
+}
+
+func TestActivityDeleteRoutePreservesUploadedActivityWhenAzureFails(t *testing.T) {
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
+
+	azureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"message":"temporary Azure failure"}`))
+	}))
+	defer azureServer.Close()
+
+	base, st := newTestServerWithAzureRedirect(t, azureServer.URL)
+	ctx := context.Background()
+	_, err := st.SaveAzureTimeLogConfig(ctx, "db-token", azure.AuthModeBearer)
+	mustNoErr(t, err)
+	activity := createUploadedServerActivity(t, st, ctx, "route-doc-123")
+
+	deleteResp := doJSON(t, http.MethodDelete, base+"/api/activities/"+strconv.FormatInt(activity.ID, 10), nil)
+	assertStatus(t, deleteResp, http.StatusUnprocessableEntity)
+	body := assertBodyDoesNotContain(t, deleteResp, "db-token")
+	if !strings.Contains(string(body), "delete uploaded activity") {
+		t.Fatalf("expected remote delete error, got %s", string(body))
+	}
+	updated, err := st.GetActivity(ctx, activity.ID)
+	mustNoErr(t, err)
+	if updated.Status != "uploaded" {
+		t.Fatalf("expected local row to remain uploaded, got %q", updated.Status)
+	}
+}
+
 func TestAzureDeviceAuthRoutesStartAndCompleteWithoutLeakingTokens(t *testing.T) {
 	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
 	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
@@ -484,6 +551,16 @@ func newTestServerWithAzureRedirect(t *testing.T, azureBaseURL string) (baseURL 
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(func() { ts.Close(); st.Close() })
 	return ts.URL, st
+}
+
+func createUploadedServerActivity(t *testing.T, st *store.Store, ctx context.Context, documentID string) *store.DailyActivity {
+	t.Helper()
+	activity, err := st.CreateActivity(ctx, "2026-06-12", 1, "RNCEA", "Actividades de arquitectura, diseño y código", "Route delete test", "manual")
+	mustNoErr(t, err)
+	_, err = st.ApproveActivities(ctx, []int64{activity.ID})
+	mustNoErr(t, err)
+	mustNoErr(t, st.MarkUploaded(ctx, activity.ID, documentID))
+	return activity
 }
 
 func newTestServerWithStoreAzureRedirect(t *testing.T, st *store.Store, azureBaseURL, oauthBaseURL string) string {

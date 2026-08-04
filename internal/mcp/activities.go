@@ -170,7 +170,7 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 
 	// --- activity_delete ---
 	s.AddTool(mcp.NewTool("activity_delete",
-		mcp.WithDescription("Delete a pending or approved activity by ID. Uploaded activities cannot be deleted."),
+		mcp.WithDescription("Delete an activity by ID. Uploaded activities are deleted from Azure TimeLog before the local Mintag row is removed."),
 		mcp.WithString("id", mcp.Required(), mcp.Description("Activity ID to delete")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		idStr, err := req.RequireString("id")
@@ -181,7 +181,9 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 		if err != nil {
 			return errResult(fmt.Errorf("id must be an integer, got %q", idStr))
 		}
-		if err := st.DeleteActivity(ctx, id); err != nil {
+		if err := st.DeleteActivityWithAzure(ctx, id, func(ctx context.Context) (store.TimeEntryDeleter, error) {
+			return st.NewAzureTimeLogClient(ctx)
+		}); err != nil {
 			return errResult(err)
 		}
 		return jsonResult(map[string]any{"deleted": id}, nil)
