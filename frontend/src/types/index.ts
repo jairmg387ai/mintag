@@ -218,6 +218,7 @@ export interface DailyActivity {
   uploaded_at?: string
   azure_document_id?: string
   azure_activity_id?: number | null
+  reference_id?: string | null
 }
 
 export interface AzureActivity {

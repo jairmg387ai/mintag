@@ -60,6 +60,8 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
   // unrelated FK) apart from "the user picked something different"
   // (send the new value, including an explicit null to clear it).
   const [initialAzureActivityId, setInitialAzureActivityId] = useState('')
+  const [referenceId, setReferenceId] = useState('')
+  const [initialReferenceId, setInitialReferenceId] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
@@ -73,6 +75,9 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
       const loadedAzureActivityId = activity.azure_activity_id != null ? String(activity.azure_activity_id) : ''
       setAzureActivityId(loadedAzureActivityId)
       setInitialAzureActivityId(loadedAzureActivityId)
+      const loadedReferenceId = activity.reference_id ?? ''
+      setReferenceId(loadedReferenceId)
+      setInitialReferenceId(loadedReferenceId)
       setErrors({})
       setSubmitError('')
     }
@@ -121,6 +126,9 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
         // unrelated, possibly since-deactivated Azure activity assignment.
         ...(azureActivityId !== initialAzureActivityId
           ? { azure_activity_id: azureActivityId ? Number(azureActivityId) : null }
+          : {}),
+        ...(referenceId !== initialReferenceId
+          ? { reference_id: referenceId.trim() ? referenceId.trim() : null }
           : {}),
       })
       onSaved()
@@ -264,6 +272,16 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
               value={registroDiario}
               onChange={e => setRegistroDiario(e.target.value)}
               placeholder="proyecto/categoría/descripción..."
+            />
+          </Field>
+
+          <Field label="ID Azure / Mantis / LuxFlow">
+            <input
+              type="text"
+              value={referenceId}
+              onChange={e => setReferenceId(e.target.value)}
+              placeholder="Ej: 156789, MANTIS-1234, LF-2026-045"
+              style={inputStyle}
             />
           </Field>
 

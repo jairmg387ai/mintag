@@ -562,6 +562,124 @@ func TestDeleteActivityWithAzure_UploadedMissingDocumentIDFailsAndPreservesLocal
 	}
 }
 
+// TestSetActivityReferenceID_SetsValue verifies a non-blank reference is
+// trimmed and persisted, and round-trips through both GetActivity and
+// ListActivities.
+func TestSetActivityReferenceID_SetsValue(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	a, err := s.CreateActivity(ctx, "2026-06-12", 1, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo", "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ref := "  156789  "
+	if err := s.SetActivityReferenceID(ctx, a.ID, &ref); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.GetActivity(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ReferenceID == nil || *got.ReferenceID != "156789" {
+		t.Fatalf("expected trimmed reference_id=%q, got %#v", "156789", got.ReferenceID)
+	}
+
+	listed, err := s.ListActivities(ctx, "2026-06-12", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || listed[0].ReferenceID == nil || *listed[0].ReferenceID != "156789" {
+		t.Fatalf("expected ListActivities to round-trip reference_id=156789, got %#v", listed)
+	}
+}
+
+// TestSetActivityReferenceID_ClearsViaNil verifies a nil pointer clears the
+// column back to SQL NULL.
+func TestSetActivityReferenceID_ClearsViaNil(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	a, err := s.CreateActivity(ctx, "2026-06-12", 1, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo", "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := "MANTIS-1234"
+	if err := s.SetActivityReferenceID(ctx, a.ID, &ref); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.SetActivityReferenceID(ctx, a.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetActivity(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ReferenceID != nil {
+		t.Fatalf("expected reference_id cleared to nil, got %#v", *got.ReferenceID)
+	}
+}
+
+// TestSetActivityReferenceID_ClearsViaBlankString verifies a
+// whitespace-only string clears the column the same way nil does.
+func TestSetActivityReferenceID_ClearsViaBlankString(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	a, err := s.CreateActivity(ctx, "2026-06-12", 1, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo", "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := "LF-2026-045"
+	if err := s.SetActivityReferenceID(ctx, a.ID, &ref); err != nil {
+		t.Fatal(err)
+	}
+
+	blank := "   "
+	if err := s.SetActivityReferenceID(ctx, a.ID, &blank); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetActivity(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ReferenceID != nil {
+		t.Fatalf("expected reference_id cleared to nil for blank input, got %#v", *got.ReferenceID)
+	}
+}
+
+// TestSetActivityReferenceID_NotFound verifies the not-found error path
+// mirrors SetActivityAzureActivity's.
+func TestSetActivityReferenceID_NotFound(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	ref := "156789"
+	err = s.SetActivityReferenceID(ctx, 999999, &ref)
+	if err == nil || !strings.Contains(err.Error(), "activity not found") {
+		t.Fatalf("expected 'activity not found' error, got %v", err)
+	}
+}
+
 type fakeTimeEntryDeleter struct {
 	documentID string
 	err        error

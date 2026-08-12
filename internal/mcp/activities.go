@@ -29,6 +29,7 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 		mcp.WithString("category", mcp.Required(), mcp.Description("Activity category from the catalog")),
 		mcp.WithString("registro_diario", mcp.Required(), mcp.Description("Work log description (sent as Azure comment)")),
 		mcp.WithString("source", mcp.Description("Entry source: 'manual' or 'llm_auto' (default: 'llm_auto')")),
+		mcp.WithString("reference_id", mcp.Description("External bug reference: Azure work item ID, Mantis ticket ID, or LuxFlow number")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		date := req.GetString("date", "")
 		if date == "" {
@@ -59,7 +60,19 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 		source := req.GetString("source", "llm_auto")
 
 		a, err := st.CreateActivity(ctx, date, hours, project, category, registroDiario, source)
-		return jsonResult(a, err)
+		if err != nil {
+			return errResult(err)
+		}
+		if referenceID := req.GetString("reference_id", ""); referenceID != "" {
+			if err := st.SetActivityReferenceID(ctx, a.ID, &referenceID); err != nil {
+				return errResult(err)
+			}
+			a, err = st.GetActivity(ctx, a.ID)
+			if err != nil {
+				return errResult(err)
+			}
+		}
+		return jsonResult(a, nil)
 	})
 
 	// --- activity_list ---
@@ -120,6 +133,7 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 		mcp.WithString("project", mcp.Description("New project name")),
 		mcp.WithString("category", mcp.Description("New activity category")),
 		mcp.WithString("registro_diario", mcp.Description("New work log description")),
+		mcp.WithString("reference_id", mcp.Description("External bug reference: Azure work item ID, Mantis ticket ID, or LuxFlow number. Leave unchanged if omitted.")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		idStr, err := req.RequireString("id")
 		if err != nil {
@@ -143,7 +157,22 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 		registroDiario := req.GetString("registro_diario", "")
 
 		a, err := st.UpdateActivity(ctx, id, hours, project, category, registroDiario)
-		return jsonResult(a, err)
+		if err != nil {
+			return errResult(err)
+		}
+		// Empty means "leave unchanged", consistent with project/category/
+		// registro_diario above — this tool doesn't need the REST PATCH's
+		// explicit-clear-via-null semantics.
+		if referenceID := req.GetString("reference_id", ""); referenceID != "" {
+			if err := st.SetActivityReferenceID(ctx, a.ID, &referenceID); err != nil {
+				return errResult(err)
+			}
+			a, err = st.GetActivity(ctx, a.ID)
+			if err != nil {
+				return errResult(err)
+			}
+		}
+		return jsonResult(a, nil)
 	})
 
 	// --- activity_upload ---

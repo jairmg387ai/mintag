@@ -362,6 +362,9 @@ func (s *Store) migrateActivities() error {
 	if err := s.addColumnIfMissing("daily_activities", "azure_activity_id", "azure_activity_id INTEGER"); err != nil {
 		return err
 	}
+	if err := s.addColumnIfMissing("daily_activities", "reference_id", "reference_id TEXT"); err != nil {
+		return err
+	}
 	if err := s.addColumnIfMissing("timelog_categories", "azure_activity_id", "azure_activity_id INTEGER"); err != nil {
 		return err
 	}

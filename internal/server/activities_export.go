@@ -3,6 +3,8 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/xuri/excelize/v2"
 
@@ -14,19 +16,33 @@ import (
 // consumers of the exported file — leave as-is (see design.md "Interfaces").
 const exportSheetName = "Actividades"
 
-// exportColumnHeaders are the exact, ordered headers the spec mandates.
-// idActividadAzure is a resolved LABEL (see buildActivitiesWorkbook), not a
-// raw id.
-var exportColumnHeaders = []string{"idActividadAzure", "proyecto", "categoria", "descripcion", "fecha", "tiempo"}
+// exportColumnHeaders are the exact, ordered headers the monthly external
+// report requires. EMPLEADO, DOCUMENTO, and CARGO are not tracked anywhere
+// in Mintag's data model and are always emitted empty. FECHA INICIO/FECHA
+// FIN both come from the single activity date (each Mintag activity is a
+// single-day entry, so start=end). ACTIVIDADES holds the activity's
+// category, while OBSERVACIONES holds its registro_diario description. ID
+// AZURE / MANTIS / LUXFLOW is primarily the freeform reference_id field;
+// when that's blank it falls back to the Azure work item ID behind the
+// activity's "Actividad de Azure" assignment (see resolveReportReferenceID).
+var exportColumnHeaders = []string{
+	"EMPLEADO",
+	"DOCUMENTO",
+	"CARGO",
+	"FECHA INICIO",
+	"FECHA FIN",
+	"CANTIDAD (HRS)",
+	"PROYECTO",
+	"ACTIVIDADES",
+	"ID AZURE / MANTIS / LUXFLOW",
+	"OBSERVACIONES",
+}
 
 // GET /api/activities/export?from=YYYY-MM-DD&to=YYYY-MM-DD
 //
 // Returns a downloadable .xlsx of every activity dated within [from, to]
-// inclusive, regardless of status. Always resolves idActividadAzure against
-// the FULL Azure activity catalog (including inactive rows) so a historical
-// row pointing at a since-deactivated activity still shows its real label —
-// this is a hard requirement (design D10) distinct from every <select> in
-// the app, which must only ever offer active options going forward.
+// inclusive, regardless of status, matching the exact 10-column layout of
+// the external monthly report.
 func (srv *Server) handleExportActivities(w http.ResponseWriter, r *http.Request) {
 	from := r.URL.Query().Get("from")
 	to := r.URL.Query().Get("to")
@@ -38,8 +54,9 @@ func (srv *Server) handleExportActivities(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// includeInactive=true: see the D10 doc comment above — never filter by
-	// is_active for the export.
+	// includeInactive=true: a historical row pointing at a since-deactivated
+	// Azure activity must still resolve to its real work item ID as the
+	// reference_id fallback (same reasoning as the old D10 requirement).
 	azureActivities, err := srv.st.ListAzureActivities(ctx, true)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -61,13 +78,10 @@ func (srv *Server) handleExportActivities(w http.ResponseWriter, r *http.Request
 
 // buildActivitiesWorkbook renders activities into an in-memory .xlsx with a
 // single "Actividades" sheet: a header row followed by one row per activity,
-// in the exact column order the spec mandates. az is used only to resolve
-// each row's idActividadAzure label (D7) — callers control whether inactive
-// rows are included by what they pass in (see handleExportActivities' D10
-// comment above and azureLabelByID's doc comment in activities.go).
+// in the exact 10-column order the external monthly report mandates.
 func buildActivitiesWorkbook(a []*store.DailyActivity, az []*store.AzureActivity) ([]byte, error) {
-	labels := azureLabelByID(az)
-	defaultLabel, hasDefault := defaultAzureActivityLabel(az, labels)
+	workItemIDs := workItemIDByAzureActivityID(az)
+	defaultWorkItemID, hasDefault := defaultAzureWorkItemID(az, workItemIDs)
 
 	f := excelize.NewFile()
 	defer func() { _ = f.Close() }()
@@ -88,12 +102,16 @@ func buildActivitiesWorkbook(a []*store.DailyActivity, az []*store.AzureActivity
 	for i, act := range a {
 		row := i + 2 // header occupies row 1
 		values := []any{
-			resolveExportAzureLabel(act.AzureActivityID, labels, defaultLabel, hasDefault),
-			act.Project,
-			act.Category,
-			act.RegistroDiario,
-			act.Date,
-			act.Hours,
+			"",           // EMPLEADO — not tracked
+			"",           // DOCUMENTO — not tracked
+			"",           // CARGO — not tracked
+			act.Date,     // FECHA INICIO
+			act.Date,     // FECHA FIN (single-day entries, so start=end)
+			act.Hours,    // CANTIDAD (HRS)
+			act.Project,  // PROYECTO
+			act.Category, // ACTIVIDADES
+			resolveReportReferenceID(act.ReferenceID, act.AzureActivityID, workItemIDs, defaultWorkItemID, hasDefault), // ID AZURE / MANTIS / LUXFLOW
+			act.RegistroDiario, // OBSERVACIONES
 		}
 		for col, v := range values {
 			cell, err := excelize.CoordinatesToCellName(col+1, row)
@@ -113,33 +131,46 @@ func buildActivitiesWorkbook(a []*store.DailyActivity, az []*store.AzureActivity
 	return buf.Bytes(), nil
 }
 
-// resolveExportAzureLabel implements the design's D7 table for the
-// idActividadAzure cell — a Go mirror of
-// frontend/src/components/activities/azureActivity.ts:resolveAzureActivityLabel,
-// except az/labels here MAY include inactive rows (see D10), so "found"
-// covers both active and inactive matches; only a truly dangling id (the
-// azure_activities row itself was deleted) falls through to "#<id>".
-func resolveExportAzureLabel(id *int64, labels map[int64]string, defaultLabel string, hasDefault bool) string {
-	if id == nil {
-		if hasDefault {
-			return defaultLabel
+// resolveReportReferenceID implements the ID AZURE / MANTIS / LUXFLOW
+// column's precedence: the freeform reference_id wins whenever it's set to
+// a non-blank value (it may hold a Mantis ticket, a LuxFlow number, or a
+// manually-entered Azure ID); otherwise it falls back to the Azure work
+// item ID behind the activity's azure_activity_id assignment — the explicit
+// assignment if one exists, or the catalog's current default when the
+// activity has none (mirroring how "Actividad de Azure" behaves everywhere
+// else: unset means "use the default").
+func resolveReportReferenceID(referenceID *string, azureActivityID *int64, workItemIDs map[int64]string, defaultWorkItemID string, hasDefault bool) string {
+	if referenceID != nil {
+		if trimmed := strings.TrimSpace(*referenceID); trimmed != "" {
+			return trimmed
 		}
-		return "Default"
 	}
-	if label, ok := labels[*id]; ok {
-		return label
+	if azureActivityID != nil {
+		return workItemIDs[*azureActivityID]
 	}
-	return fmt.Sprintf("#%d", *id)
+	if hasDefault {
+		return defaultWorkItemID
+	}
+	return ""
 }
 
-// defaultAzureActivityLabel finds the current default's formatted label
-// (via the shared labels map, so it includes the work item id like every
-// other cell) within an already-fetched Azure activity slice, without a
-// second store query.
-func defaultAzureActivityLabel(az []*store.AzureActivity, labels map[int64]string) (label string, ok bool) {
+// workItemIDByAzureActivityID indexes a list of Azure activities by id,
+// resolving each to its raw Azure work item ID (not the "Label (#id)"
+// display format — this feeds a plain identifier cell, not a UI label).
+func workItemIDByAzureActivityID(az []*store.AzureActivity) map[int64]string {
+	out := make(map[int64]string, len(az))
+	for _, a := range az {
+		out[a.ID] = strconv.Itoa(a.WorkItemID)
+	}
+	return out
+}
+
+// defaultAzureWorkItemID finds the current default Azure activity's work
+// item ID within an already-fetched slice, without a second store query.
+func defaultAzureWorkItemID(az []*store.AzureActivity, workItemIDs map[int64]string) (id string, ok bool) {
 	for _, item := range az {
 		if item.IsDefault {
-			return labels[item.ID], true
+			return workItemIDs[item.ID], true
 		}
 	}
 	return "", false

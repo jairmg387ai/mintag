@@ -268,3 +268,126 @@ func TestPatchActivityExplicitNullClearsAzureActivityID(t *testing.T) {
 		t.Fatalf("expected azure_activity_id to be cleared to nil, got %#v", *patched.AzureActivityID)
 	}
 }
+
+// TestCreateActivitySetsReferenceID verifies POST /activities accepts an
+// optional reference_id and persists it, mirroring
+// TestCreateActivityAssignsAzureActivityID above.
+func TestCreateActivitySetsReferenceID(t *testing.T) {
+	base, _ := newTestServer(t)
+
+	createResp := doJSON(t, http.MethodPost, base+"/api/activities", map[string]any{
+		"date": "2026-07-19", "hours": 1.0, "project": "RNCEA",
+		"category":        "Actividades de arquitectura, diseño y código",
+		"registro_diario": "reference id via create",
+		"source":          "manual",
+		"reference_id":    "156789",
+	})
+	assertStatus(t, createResp, http.StatusCreated)
+	var created struct {
+		ID          int64   `json:"id"`
+		ReferenceID *string `json:"reference_id"`
+	}
+	decodeJSON(t, createResp, &created)
+	if created.ReferenceID == nil || *created.ReferenceID != "156789" {
+		t.Fatalf("expected reference_id=156789, got %#v", created.ReferenceID)
+	}
+}
+
+// TestPatchActivitySetsReferenceID verifies PATCH /activities/{id} accepts
+// an optional reference_id and persists it.
+func TestPatchActivitySetsReferenceID(t *testing.T) {
+	base, _ := newTestServer(t)
+
+	createResp := doJSON(t, http.MethodPost, base+"/api/activities", map[string]any{
+		"date": "2026-07-19", "hours": 1.0, "project": "RNCEA",
+		"category":        "Actividades de arquitectura, diseño y código",
+		"registro_diario": "reference id via patch",
+		"source":          "manual",
+	})
+	assertStatus(t, createResp, http.StatusCreated)
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	decodeJSON(t, createResp, &created)
+
+	patchResp := doJSON(t, http.MethodPatch, base+"/api/activities/"+strconv.FormatInt(created.ID, 10), map[string]any{
+		"reference_id": "MANTIS-1234",
+	})
+	assertStatus(t, patchResp, http.StatusOK)
+	var patched struct {
+		ReferenceID *string `json:"reference_id"`
+	}
+	decodeJSON(t, patchResp, &patched)
+	if patched.ReferenceID == nil || *patched.ReferenceID != "MANTIS-1234" {
+		t.Fatalf("expected reference_id=MANTIS-1234, got %#v", patched.ReferenceID)
+	}
+}
+
+// TestPatchActivityOmittingReferenceIDLeavesItUntouched mirrors
+// TestPatchActivityOmittingAzureActivityIDLeavesFKUntouched: a PATCH that
+// only edits an unrelated field must not clear an already-set reference_id.
+func TestPatchActivityOmittingReferenceIDLeavesItUntouched(t *testing.T) {
+	base, _ := newTestServer(t)
+
+	createResp := doJSON(t, http.MethodPost, base+"/api/activities", map[string]any{
+		"date": "2026-07-19", "hours": 1.0, "project": "RNCEA",
+		"category":        "Actividades de arquitectura, diseño y código",
+		"registro_diario": "reference id must survive unrelated patch",
+		"source":          "manual",
+		"reference_id":    "LF-2026-045",
+	})
+	assertStatus(t, createResp, http.StatusCreated)
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	decodeJSON(t, createResp, &created)
+
+	patchResp := doJSON(t, http.MethodPatch, base+"/api/activities/"+strconv.FormatInt(created.ID, 10), map[string]any{
+		"hours": 3.5, "project": "RNCEA", "category": "Actividades de arquitectura, diseño y código",
+		"registro_diario": "hours updated, reference untouched",
+	})
+	assertStatus(t, patchResp, http.StatusOK)
+	var patched struct {
+		Hours       float64 `json:"hours"`
+		ReferenceID *string `json:"reference_id"`
+	}
+	decodeJSON(t, patchResp, &patched)
+	if patched.Hours != 3.5 {
+		t.Fatalf("expected hours=3.5, got %v", patched.Hours)
+	}
+	if patched.ReferenceID == nil || *patched.ReferenceID != "LF-2026-045" {
+		t.Fatalf("expected reference_id to remain untouched, got %#v", patched.ReferenceID)
+	}
+}
+
+// TestPatchActivityExplicitNullClearsReferenceID verifies sending
+// reference_id as an explicit JSON null clears it, mirroring
+// TestPatchActivityExplicitNullClearsAzureActivityID above.
+func TestPatchActivityExplicitNullClearsReferenceID(t *testing.T) {
+	base, _ := newTestServer(t)
+
+	createResp := doJSON(t, http.MethodPost, base+"/api/activities", map[string]any{
+		"date": "2026-07-19", "hours": 1.0, "project": "RNCEA",
+		"category":        "Actividades de arquitectura, diseño y código",
+		"registro_diario": "will be cleared",
+		"source":          "manual",
+		"reference_id":    "156789",
+	})
+	assertStatus(t, createResp, http.StatusCreated)
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	decodeJSON(t, createResp, &created)
+
+	patchResp := doJSON(t, http.MethodPatch, base+"/api/activities/"+strconv.FormatInt(created.ID, 10), map[string]any{
+		"reference_id": nil,
+	})
+	assertStatus(t, patchResp, http.StatusOK)
+	var patched struct {
+		ReferenceID *string `json:"reference_id"`
+	}
+	decodeJSON(t, patchResp, &patched)
+	if patched.ReferenceID != nil {
+		t.Fatalf("expected reference_id to be cleared to nil, got %#v", *patched.ReferenceID)
+	}
+}

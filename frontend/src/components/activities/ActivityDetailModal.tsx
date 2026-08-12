@@ -160,6 +160,12 @@ export function ActivityDetailModal({ activity, open, onClose, azureActivities }
             </div>
           </DetailField>
 
+          {activity.reference_id && (
+            <DetailField label="ID Azure / Mantis / LuxFlow">
+              <div style={{ ...valueStyle, font: 'var(--text-mono)' }}>{activity.reference_id}</div>
+            </DetailField>
+          )}
+
           <DetailField label="Creado">
             <div style={valueStyle}>{new Date(activity.created_at).toLocaleString()}</div>
           </DetailField>

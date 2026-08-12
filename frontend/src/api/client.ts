@@ -184,7 +184,7 @@ export function updateActivity(
   // current default", undefined (i.e. omitted) leaves it untouched —
   // JSON.stringify drops undefined keys but keeps explicit null ones, and
   // the backend's PATCH handler distinguishes the two the same way.
-  body: { hours?: number; project?: string; category?: string; registro_diario?: string; azure_activity_id?: number | null },
+  body: { hours?: number; project?: string; category?: string; registro_diario?: string; azure_activity_id?: number | null; reference_id?: string | null },
 ): Promise<DailyActivity> {
   return request<DailyActivity>(`/api/activities/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
 }

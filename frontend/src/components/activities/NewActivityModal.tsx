@@ -64,6 +64,7 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
   const [category, setCategory] = useState('')
   const [description, setDescription] = useState('')
   const [azureActivityId, setAzureActivityId] = useState('')
+  const [referenceId, setReferenceId] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
@@ -77,6 +78,7 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
       setCategory(catalog?.categories[0]?.name ?? '')
       setDescription('')
       setAzureActivityId('')
+      setReferenceId('')
       setErrors({})
       setSubmitError('')
     }
@@ -133,6 +135,7 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
         registro_diario,
         source: 'manual',
         ...(azureActivityId ? { azure_activity_id: Number(azureActivityId) } : {}),
+        ...(referenceId.trim() ? { reference_id: referenceId.trim() } : {}),
       })
       onCreated()
       onClose()
@@ -304,6 +307,16 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
               value={description}
               onChange={e => setDescription(e.target.value)}
               placeholder="Descripción de la actividad..."
+            />
+          </Field>
+
+          <Field label="ID Azure / Mantis / LuxFlow">
+            <input
+              type="text"
+              value={referenceId}
+              onChange={e => setReferenceId(e.target.value)}
+              placeholder="Ej: 156789, MANTIS-1234, LF-2026-045"
+              style={selectStyle}
             />
           </Field>
 

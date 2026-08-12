@@ -26,6 +26,7 @@ type DailyActivity struct {
 	UploadedAt      *string `json:"uploaded_at,omitempty"`
 	AzureDocumentID *string `json:"azure_document_id,omitempty"`
 	AzureActivityID *int64  `json:"azure_activity_id,omitempty"`
+	ReferenceID     *string `json:"reference_id,omitempty"`
 }
 
 // UploadResult summarises the outcome of an UploadActivities call.
@@ -84,10 +85,10 @@ func (s *Store) CreateActivity(ctx context.Context, date string, hours float64, 
 func (s *Store) GetActivity(ctx context.Context, id int64) (*DailyActivity, error) {
 	a := &DailyActivity{}
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, date, hours, project, category, registro_diario, source, status, created_at, uploaded_at, azure_document_id, azure_activity_id
+		`SELECT id, date, hours, project, category, registro_diario, source, status, created_at, uploaded_at, azure_document_id, azure_activity_id, reference_id
 		 FROM daily_activities WHERE id = ?`, id,
 	).Scan(&a.ID, &a.Date, &a.Hours, &a.Project, &a.Category, &a.RegistroDiario,
-		&a.Source, &a.Status, &a.CreatedAt, &a.UploadedAt, &a.AzureDocumentID, &a.AzureActivityID)
+		&a.Source, &a.Status, &a.CreatedAt, &a.UploadedAt, &a.AzureDocumentID, &a.AzureActivityID, &a.ReferenceID)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("activity not found: %d", id)
 	}
@@ -96,7 +97,7 @@ func (s *Store) GetActivity(ctx context.Context, id int64) (*DailyActivity, erro
 
 // ListActivities returns activities matching the optional filters, ordered by created_at ASC.
 func (s *Store) ListActivities(ctx context.Context, date, status string) ([]*DailyActivity, error) {
-	query := `SELECT id, date, hours, project, category, registro_diario, source, status, created_at, uploaded_at, azure_document_id, azure_activity_id
+	query := `SELECT id, date, hours, project, category, registro_diario, source, status, created_at, uploaded_at, azure_document_id, azure_activity_id, reference_id
 	          FROM daily_activities WHERE 1=1`
 	args := []any{}
 	if date != "" {
@@ -130,7 +131,7 @@ func (s *Store) ListActivitiesRange(ctx context.Context, from, to, status string
 		return nil, fmt.Errorf("from (%q) must not be later than to (%q)", from, to)
 	}
 
-	query := `SELECT id, date, hours, project, category, registro_diario, source, status, created_at, uploaded_at, azure_document_id, azure_activity_id
+	query := `SELECT id, date, hours, project, category, registro_diario, source, status, created_at, uploaded_at, azure_document_id, azure_activity_id, reference_id
 	          FROM daily_activities WHERE date >= ? AND date <= ?`
 	args := []any{from, to}
 	if status != "" {
@@ -155,7 +156,7 @@ func (s *Store) queryActivities(ctx context.Context, query string, args ...any) 
 	for rows.Next() {
 		a := &DailyActivity{}
 		if err := rows.Scan(&a.ID, &a.Date, &a.Hours, &a.Project, &a.Category, &a.RegistroDiario,
-			&a.Source, &a.Status, &a.CreatedAt, &a.UploadedAt, &a.AzureDocumentID, &a.AzureActivityID); err != nil {
+			&a.Source, &a.Status, &a.CreatedAt, &a.UploadedAt, &a.AzureDocumentID, &a.AzureActivityID, &a.ReferenceID); err != nil {
 			return nil, err
 		}
 		out = append(out, a)
@@ -345,6 +346,40 @@ func (s *Store) SetActivityAzureActivity(ctx context.Context, id int64, azureAct
 
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE daily_activities SET azure_activity_id = ? WHERE id = ?`, azureActivityID, id,
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("activity not found: %d", id)
+	}
+	return nil
+}
+
+// SetActivityReferenceID assigns (or clears, when referenceID is nil or
+// blank) the reference_id column on a daily activity — a freeform external
+// bug reference (Azure work item ID, Mantis ticket ID, or LuxFlow number).
+// Kept separate from CreateActivity/UpdateActivity for the same reason as
+// SetActivityAzureActivity above: PATCH must distinguish "the field was
+// omitted from the request" (leave it as-is) from "the field was explicitly
+// cleared" (set it back to NULL), and a bare *string parameter on its own
+// can't carry that distinction — callers compute "provided" separately and
+// only call this method when the field was actually present in the request.
+//
+// Unlike SetActivityAzureActivity, there is no catalog to validate against:
+// reference_id is plain text (Azure work item IDs, Mantis ticket IDs, and
+// LuxFlow numbers all use different formats), so no format validation is
+// applied here.
+func (s *Store) SetActivityReferenceID(ctx context.Context, id int64, referenceID *string) error {
+	var value any
+	if referenceID != nil {
+		trimmed := strings.TrimSpace(*referenceID)
+		if trimmed != "" {
+			value = trimmed
+		}
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE daily_activities SET reference_id = ? WHERE id = ?`, value, id,
 	)
 	if err != nil {
 		return err

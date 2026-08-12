@@ -124,6 +124,7 @@ func (srv *Server) handleCreateActivity(w http.ResponseWriter, r *http.Request) 
 		RegistroDiario  string  `json:"registro_diario"`
 		Source          string  `json:"source"`
 		AzureActivityID *int64  `json:"azure_activity_id"`
+		ReferenceID     *string `json:"reference_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -149,6 +150,11 @@ func (srv *Server) handleCreateActivity(w http.ResponseWriter, r *http.Request) 
 	if a, err = srv.applyAzureActivityID(w, ctx, a, body.AzureActivityID, body.AzureActivityID != nil); err != nil {
 		return // response already written by applyAzureActivityID
 	}
+	// Same reasoning as applyAzureActivityID above: on create there's no
+	// prior state, so "field present in JSON" and "pointer non-nil" agree.
+	if a, err = srv.applyReferenceID(w, ctx, a, body.ReferenceID, body.ReferenceID != nil); err != nil {
+		return // response already written by applyReferenceID
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(a)
@@ -169,6 +175,33 @@ func (srv *Server) applyAzureActivityID(w http.ResponseWriter, ctx context.Conte
 		return a, nil
 	}
 	if err := srv.st.SetActivityAzureActivity(ctx, a.ID, azureActivityID); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return nil, err
+	}
+	a, err := srv.st.GetActivity(ctx, a.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return nil, err
+	}
+	return a, nil
+}
+
+// applyReferenceID sets or clears the activity's reference_id (an external
+// Azure work item / Mantis ticket / LuxFlow reference) and reloads the row,
+// mirroring applyAzureActivityID above. provided distinguishes "the caller
+// wants this field touched" from "leave it as-is" — see applyAzureActivityID's
+// doc comment for why a bare *string can't carry that distinction on its
+// own. Shared by handleCreateActivity and handlePatchActivity's default
+// case. On error, it writes the HTTP response itself (422 — though
+// SetActivityReferenceID has no FK/format validation to fail, so this path
+// is unlikely in practice; kept for consistency with applyAzureActivityID —
+// 500 for a reload failure) and returns a non-nil error so the caller can
+// short-circuit without writing a second response.
+func (srv *Server) applyReferenceID(w http.ResponseWriter, ctx context.Context, a *store.DailyActivity, referenceID *string, provided bool) (*store.DailyActivity, error) {
+	if !provided {
+		return a, nil
+	}
+	if err := srv.st.SetActivityReferenceID(ctx, a.ID, referenceID); err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return nil, err
 	}
@@ -206,6 +239,7 @@ func (srv *Server) handlePatchActivity(w http.ResponseWriter, r *http.Request) {
 		Category        string  `json:"category"`
 		RegistroDiario  string  `json:"registro_diario"`
 		AzureActivityID *int64  `json:"azure_activity_id"`
+		ReferenceID     *string `json:"reference_id"`
 	}
 	if err := json.Unmarshal(bodyBytes, &body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -220,6 +254,7 @@ func (srv *Server) handlePatchActivity(w http.ResponseWriter, r *http.Request) {
 	var rawFields map[string]json.RawMessage
 	_ = json.Unmarshal(bodyBytes, &rawFields) // already validated above; re-parse can't fail
 	_, azureActivityIDProvided := rawFields["azure_activity_id"]
+	_, referenceIDProvided := rawFields["reference_id"]
 
 	ctx := r.Context()
 	switch body.Action {
@@ -263,6 +298,9 @@ func (srv *Server) handlePatchActivity(w http.ResponseWriter, r *http.Request) {
 		}
 		if a, err = srv.applyAzureActivityID(w, ctx, a, body.AzureActivityID, azureActivityIDProvided); err != nil {
 			return // response already written by applyAzureActivityID
+		}
+		if a, err = srv.applyReferenceID(w, ctx, a, body.ReferenceID, referenceIDProvided); err != nil {
+			return // response already written by applyReferenceID
 		}
 		writeJSON(w, a, nil)
 	}

@@ -55,6 +55,9 @@ func TestOpenMigratesExistingActivitiesWithoutDataLoss(t *testing.T) {
 	if !columnExists(t, s.db, "daily_activities", "azure_document_id") {
 		t.Fatal("expected daily_activities.azure_document_id column to exist")
 	}
+	if !columnExists(t, s.db, "daily_activities", "reference_id") {
+		t.Fatal("expected daily_activities.reference_id column to exist")
+	}
 	var azureDocumentID sql.NullString
 	if err := s.db.QueryRow(`SELECT azure_document_id FROM daily_activities LIMIT 1`).Scan(&azureDocumentID); err != nil {
 		t.Fatal(err)
