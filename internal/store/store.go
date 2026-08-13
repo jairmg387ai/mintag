@@ -345,6 +345,7 @@ func (s *Store) migrateActivities() error {
 		org          TEXT NOT NULL,
 		work_item_id INTEGER NOT NULL,
 		label        TEXT NOT NULL,
+		work_item_type TEXT,
 		is_active    INTEGER NOT NULL DEFAULT 1,
 		is_default   INTEGER NOT NULL DEFAULT 0
 	);
@@ -369,6 +370,9 @@ func (s *Store) migrateActivities() error {
 		return err
 	}
 	if err := s.addColumnIfMissing("timelog_categories", "description", "description TEXT"); err != nil {
+		return err
+	}
+	if err := s.addColumnIfMissing("azure_activities", "work_item_type", "work_item_type TEXT"); err != nil {
 		return err
 	}
 	return s.seedDefaultAzureActivity()

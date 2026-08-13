@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // ErrNoDefaultAzureActivity is returned by GetDefaultAzureActivity when the
@@ -18,18 +19,19 @@ var ErrNoDefaultAzureActivity = errors.New("no default azure activity is configu
 // IsDefault=true at any point in time (enforced by uq_azure_activities_default
 // and the transactional clear-then-set in SetDefaultAzureActivity).
 type AzureActivity struct {
-	ID         int64  `json:"id"`
-	Org        string `json:"org"`
-	WorkItemID int    `json:"work_item_id"`
-	Label      string `json:"label"`
-	IsActive   bool   `json:"is_active"`
-	IsDefault  bool   `json:"is_default"`
+	ID           int64  `json:"id"`
+	Org          string `json:"org"`
+	WorkItemID   int    `json:"work_item_id"`
+	Label        string `json:"label"`
+	WorkItemType string `json:"work_item_type"`
+	IsActive     bool   `json:"is_active"`
+	IsDefault    bool   `json:"is_default"`
 }
 
 // ListAzureActivities returns catalog entries ordered by label. When
 // includeInactive is false, soft-deleted (is_active=0) rows are excluded.
 func (s *Store) ListAzureActivities(ctx context.Context, includeInactive bool) ([]*AzureActivity, error) {
-	query := `SELECT id, org, work_item_id, label, is_active, is_default FROM azure_activities`
+	query := `SELECT id, org, work_item_id, label, COALESCE(work_item_type, ''), is_active, is_default FROM azure_activities`
 	if !includeInactive {
 		query += ` WHERE is_active = 1`
 	}
@@ -43,7 +45,7 @@ func (s *Store) ListAzureActivities(ctx context.Context, includeInactive bool) (
 	out := make([]*AzureActivity, 0)
 	for rows.Next() {
 		a := &AzureActivity{}
-		if err := rows.Scan(&a.ID, &a.Org, &a.WorkItemID, &a.Label, &a.IsActive, &a.IsDefault); err != nil {
+		if err := rows.Scan(&a.ID, &a.Org, &a.WorkItemID, &a.Label, &a.WorkItemType, &a.IsActive, &a.IsDefault); err != nil {
 			return nil, err
 		}
 		out = append(out, a)
@@ -60,7 +62,7 @@ func (s *Store) ListAzureActivities(ctx context.Context, includeInactive bool) (
 // to become the default — the transactional lock serializes them, so the
 // second insert deterministically observes count==1 and never trips the
 // uq_azure_activities_default partial unique index.
-func (s *Store) AddAzureActivity(ctx context.Context, org string, workItemID int, label string) (*AzureActivity, error) {
+func (s *Store) AddAzureActivity(ctx context.Context, org string, workItemID int, label string, workItemType string) (*AzureActivity, error) {
 	if org == "" {
 		return nil, fmt.Errorf("org is required")
 	}
@@ -84,8 +86,8 @@ func (s *Store) AddAzureActivity(ctx context.Context, org string, workItemID int
 	isDefault := existing == 0
 
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO azure_activities (org, work_item_id, label, is_active, is_default) VALUES (?, ?, ?, 1, ?)`,
-		org, workItemID, label, isDefault,
+		`INSERT INTO azure_activities (org, work_item_id, label, work_item_type, is_active, is_default) VALUES (?, ?, ?, ?, 1, ?)`,
+		org, workItemID, label, strings.TrimSpace(workItemType), isDefault,
 	)
 	if err != nil {
 		return nil, err
@@ -99,7 +101,7 @@ func (s *Store) AddAzureActivity(ctx context.Context, org string, workItemID int
 
 // UpdateAzureActivity changes the org and label of an existing entry.
 // work_item_id, is_active, and is_default are left untouched.
-func (s *Store) UpdateAzureActivity(ctx context.Context, id int64, org, label string) (*AzureActivity, error) {
+func (s *Store) UpdateAzureActivity(ctx context.Context, id int64, org, label string, workItemType string) (*AzureActivity, error) {
 	if org == "" {
 		return nil, fmt.Errorf("org is required")
 	}
@@ -107,7 +109,7 @@ func (s *Store) UpdateAzureActivity(ctx context.Context, id int64, org, label st
 		return nil, fmt.Errorf("label is required")
 	}
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE azure_activities SET org = ?, label = ? WHERE id = ?`, org, label, id,
+		`UPDATE azure_activities SET org = ?, label = ?, work_item_type = ? WHERE id = ?`, org, label, strings.TrimSpace(workItemType), id,
 	)
 	if err != nil {
 		return nil, err
@@ -125,8 +127,8 @@ func (s *Store) UpdateAzureActivity(ctx context.Context, id int64, org, label st
 func (s *Store) GetDefaultAzureActivity(ctx context.Context) (*AzureActivity, error) {
 	a := &AzureActivity{}
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, org, work_item_id, label, is_active, is_default FROM azure_activities WHERE is_default = 1 AND is_active = 1`,
-	).Scan(&a.ID, &a.Org, &a.WorkItemID, &a.Label, &a.IsActive, &a.IsDefault)
+		`SELECT id, org, work_item_id, label, COALESCE(work_item_type, ''), is_active, is_default FROM azure_activities WHERE is_default = 1 AND is_active = 1`,
+	).Scan(&a.ID, &a.Org, &a.WorkItemID, &a.Label, &a.WorkItemType, &a.IsActive, &a.IsDefault)
 	if err == sql.ErrNoRows {
 		return nil, ErrNoDefaultAzureActivity
 	}
@@ -205,8 +207,8 @@ func (s *Store) DeactivateAzureActivity(ctx context.Context, id int64) error {
 func (s *Store) getAzureActivity(ctx context.Context, id int64) (*AzureActivity, error) {
 	a := &AzureActivity{}
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, org, work_item_id, label, is_active, is_default FROM azure_activities WHERE id = ?`, id,
-	).Scan(&a.ID, &a.Org, &a.WorkItemID, &a.Label, &a.IsActive, &a.IsDefault)
+		`SELECT id, org, work_item_id, label, COALESCE(work_item_type, ''), is_active, is_default FROM azure_activities WHERE id = ?`, id,
+	).Scan(&a.ID, &a.Org, &a.WorkItemID, &a.Label, &a.WorkItemType, &a.IsActive, &a.IsDefault)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("azure activity not found: %d", id)
 	}

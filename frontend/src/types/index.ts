@@ -226,6 +226,7 @@ export interface AzureActivity {
   org: string
   work_item_id: number
   label: string
+  work_item_type: string
   is_active: boolean
   is_default: boolean
 }

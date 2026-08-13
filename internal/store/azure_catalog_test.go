@@ -87,7 +87,7 @@ func TestAddAzureActivity_FirstRowIsAutoDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999001, "QA Activity")
+	a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999001, "QA Activity", "Bug")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -96,6 +96,9 @@ func TestAddAzureActivity_FirstRowIsAutoDefault(t *testing.T) {
 	}
 	if !a.IsActive {
 		t.Error("expected new activity to be active")
+	}
+	if a.WorkItemType != "Bug" {
+		t.Errorf("expected work_item_type=Bug, got %q", a.WorkItemType)
 	}
 }
 
@@ -108,7 +111,7 @@ func TestAddAzureActivity_SecondRowIsNotDefault(t *testing.T) {
 
 	ctx := context.Background()
 	// A default already exists from the migration seed.
-	a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999002, "Second Activity")
+	a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999002, "Second Activity", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -125,7 +128,7 @@ func TestListAzureActivities_ExcludesInactiveUnlessRequested(t *testing.T) {
 	defer s.Close()
 
 	ctx := context.Background()
-	extra, err := s.AddAzureActivity(ctx, "RUNT2QA", 999003, "To Deactivate")
+	extra, err := s.AddAzureActivity(ctx, "RUNT2QA", 999003, "To Deactivate", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,12 +169,12 @@ func TestUpdateAzureActivity_ChangesOrgAndLabelOnly(t *testing.T) {
 	defer s.Close()
 
 	ctx := context.Background()
-	a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999004, "Old Label")
+	a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999004, "Old Label", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	updated, err := s.UpdateAzureActivity(ctx, a.ID, "RUNT2QA-NEW", "New Label")
+	updated, err := s.UpdateAzureActivity(ctx, a.ID, "RUNT2QA-NEW", "New Label", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -221,7 +224,7 @@ func TestSetActivityAzureActivity_PersistsAndClearsFK(t *testing.T) {
 		t.Fatal("expected new activity to start with nil azure_activity_id")
 	}
 
-	azureActivity, err := s.AddAzureActivity(ctx, "RUNT2QA", 999005, "Assigned Activity")
+	azureActivity, err := s.AddAzureActivity(ctx, "RUNT2QA", 999005, "Assigned Activity", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +292,7 @@ func TestSetActivityAzureActivity_RejectsInactiveAzureActivityID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inactive, err := s.AddAzureActivity(ctx, "RUNT2QA", 999007, "Inactive Assignable")
+	inactive, err := s.AddAzureActivity(ctx, "RUNT2QA", 999007, "Inactive Assignable", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +325,7 @@ func TestListActivities_IncludesAzureActivityID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	azureActivity, err := s.AddAzureActivity(ctx, "RUNT2QA", 999006, "Listed Activity")
+	azureActivity, err := s.AddAzureActivity(ctx, "RUNT2QA", 999006, "Listed Activity", "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,7 +12,7 @@ func TestSetCategoryAzureActivity_PersistsAndClears(t *testing.T) {
 	ctx := context.Background()
 	mustNoErr(t, s.seedCatalogs())
 
-	az, err := s.AddAzureActivity(ctx, "RUNT2QA", 555, "QA Activity")
+	az, err := s.AddAzureActivity(ctx, "RUNT2QA", 555, "QA Activity", "")
 	mustNoErr(t, err)
 
 	cats, err := s.ListTimelogCategories()
@@ -79,7 +79,7 @@ func TestSetCategoryAzureActivity_RejectsInactiveAzureActivityID(t *testing.T) {
 	ctx := context.Background()
 	mustNoErr(t, s.seedCatalogs())
 
-	az, err := s.AddAzureActivity(ctx, "RUNT2QA", 555, "QA Activity")
+	az, err := s.AddAzureActivity(ctx, "RUNT2QA", 555, "QA Activity", "")
 	mustNoErr(t, err)
 	// az is the second row (the seeded row is the default), so it is safe
 	// to deactivate directly.
@@ -103,7 +103,7 @@ func TestSetCategoryAzureActivity_UnknownCategoryReturnsError(t *testing.T) {
 	ctx := context.Background()
 	mustNoErr(t, s.seedCatalogs())
 
-	az, err := s.AddAzureActivity(ctx, "RUNT2QA", 555, "QA Activity")
+	az, err := s.AddAzureActivity(ctx, "RUNT2QA", 555, "QA Activity", "")
 	mustNoErr(t, err)
 
 	if err := s.SetCategoryAzureActivity(ctx, 999999, &az.ID); err == nil {
@@ -120,7 +120,7 @@ func TestRemoveTimelogCategory_DropsMappingLeavesActivitiesIntact(t *testing.T) 
 	ctx := context.Background()
 	mustNoErr(t, s.seedCatalogs())
 
-	az, err := s.AddAzureActivity(ctx, "RUNT2QA", 555, "QA Activity")
+	az, err := s.AddAzureActivity(ctx, "RUNT2QA", 555, "QA Activity", "")
 	mustNoErr(t, err)
 
 	cats, err := s.ListTimelogCategories()

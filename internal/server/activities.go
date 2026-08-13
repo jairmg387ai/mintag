@@ -723,15 +723,16 @@ func (srv *Server) handleListAzureActivities(w http.ResponseWriter, r *http.Requ
 // POST /api/activities/azure-catalog
 func (srv *Server) handleAddAzureActivity(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Org        string `json:"org"`
-		WorkItemID int    `json:"work_item_id"`
-		Label      string `json:"label"`
+		Org          string `json:"org"`
+		WorkItemID   int    `json:"work_item_id"`
+		Label        string `json:"label"`
+		WorkItemType string `json:"work_item_type"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	a, err := srv.st.AddAzureActivity(r.Context(), body.Org, body.WorkItemID, body.Label)
+	a, err := srv.st.AddAzureActivity(r.Context(), body.Org, body.WorkItemID, body.Label, body.WorkItemType)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
@@ -752,14 +753,15 @@ func (srv *Server) handleUpdateAzureActivity(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var body struct {
-		Org   string `json:"org"`
-		Label string `json:"label"`
+		Org          string `json:"org"`
+		Label        string `json:"label"`
+		WorkItemType string `json:"work_item_type"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	a, err := srv.st.UpdateAzureActivity(r.Context(), id, body.Org, body.Label)
+	a, err := srv.st.UpdateAzureActivity(r.Context(), id, body.Org, body.Label, body.WorkItemType)
 	if err != nil {
 		status := http.StatusUnprocessableEntity
 		if isNotFound(err) {

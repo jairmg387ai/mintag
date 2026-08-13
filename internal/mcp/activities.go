@@ -286,6 +286,7 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 		mcp.WithString("org", mcp.Required(), mcp.Description("Azure DevOps organization/project key, e.g. 'RUNT2PSW'")),
 		mcp.WithString("work_item_id", mcp.Required(), mcp.Description("Azure DevOps work item ID, e.g. '156263'")),
 		mcp.WithString("label", mcp.Required(), mcp.Description("Human-readable label for this activity")),
+		mcp.WithString("work_item_type", mcp.Description("Optional Azure work item type, e.g. 'Bug' or 'Task'")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		org, err := req.RequireString("org")
 		if err != nil {
@@ -303,7 +304,8 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 		if err != nil {
 			return errResult(err)
 		}
-		a, err := st.AddAzureActivity(ctx, org, workItemID, label)
+		workItemType := req.GetString("work_item_type", "")
+		a, err := st.AddAzureActivity(ctx, org, workItemID, label, workItemType)
 		return jsonResult(a, err)
 	})
 

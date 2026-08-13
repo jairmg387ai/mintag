@@ -416,11 +416,13 @@ function AzureActivitySection({
   const [org, setOrg] = useState('')
   const [workItemId, setWorkItemId] = useState('')
   const [label, setLabel] = useState('')
+  const [workItemType, setWorkItemType] = useState('')
   const [adding, setAdding] = useState(false)
   const [error, setError] = useState('')
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editOrg, setEditOrg] = useState('')
   const [editLabel, setEditLabel] = useState('')
+  const [editWorkItemType, setEditWorkItemType] = useState('')
   const [busyId, setBusyId] = useState<number | null>(null)
 
   const [importOpen, setImportOpen] = useState(false)
@@ -471,7 +473,7 @@ function AzureActivitySection({
     setImportingId(item.id)
     setImportError('')
     try {
-      await addAzureActivity({ org: importOrg, work_item_id: item.id, label: item.title })
+      await addAzureActivity({ org: importOrg, work_item_id: item.id, label: item.title, work_item_type: item.type })
       onChanged()
     } catch (e: unknown) {
       setImportError(friendlyCatalogErrorMessage(e, 'No se pudo importar el work item'))
@@ -489,10 +491,11 @@ function AzureActivitySection({
     setAdding(true)
     setError('')
     try {
-      await addAzureActivity({ org: org.trim(), work_item_id: wid, label: label.trim() })
+      await addAzureActivity({ org: org.trim(), work_item_id: wid, label: label.trim(), work_item_type: workItemType || undefined })
       setOrg('')
       setWorkItemId('')
       setLabel('')
+      setWorkItemType('')
       onChanged()
     } catch (e: unknown) {
       setError(friendlyCatalogErrorMessage(e, 'No se pudo agregar la actividad'))
@@ -505,6 +508,7 @@ function AzureActivitySection({
     setEditingId(a.id)
     setEditOrg(a.org)
     setEditLabel(a.label)
+    setEditWorkItemType(a.work_item_type ?? '')
     setError('')
   }
 
@@ -516,7 +520,7 @@ function AzureActivitySection({
     setBusyId(id)
     setError('')
     try {
-      await updateAzureActivity(id, { org: editOrg.trim(), label: editLabel.trim() })
+      await updateAzureActivity(id, { org: editOrg.trim(), label: editLabel.trim(), work_item_type: editWorkItemType })
       setEditingId(null)
       onChanged()
     } catch (e: unknown) {
@@ -691,6 +695,17 @@ function AzureActivitySection({
           style={{ ...inputStyle, flex: '1 1 160px' }}
           disabled={adding}
         />
+        <select
+          aria-label="Tipo de work item"
+          value={workItemType}
+          onChange={e => setWorkItemType(e.target.value)}
+          style={{ ...inputStyle, flex: '0 1 120px' }}
+          disabled={adding}
+        >
+          <option value="">Sin tipo</option>
+          <option value="Bug">Bug</option>
+          <option value="Task">Task</option>
+        </select>
         <button
           className="btn btn-primary btn-sm"
           onClick={handleAdd}
@@ -743,6 +758,17 @@ function AzureActivitySection({
                     style={{ ...inputStyle, flex: '1 1 160px' }}
                     disabled={busyId === a.id}
                   />
+                  <select
+                    aria-label="Tipo de work item"
+                    value={editWorkItemType}
+                    onChange={e => setEditWorkItemType(e.target.value)}
+                    style={{ ...inputStyle, flex: '0 1 120px' }}
+                    disabled={busyId === a.id}
+                  >
+                    <option value="">Sin tipo</option>
+                    <option value="Bug">Bug</option>
+                    <option value="Task">Task</option>
+                  </select>
                   <button
                     className="btn btn-ghost btn-sm"
                     onClick={() => saveEdit(a.id)}
@@ -760,7 +786,10 @@ function AzureActivitySection({
                     {a.label}{' '}
                     <span style={{ color: 'var(--fg3)' }}>
                       — {a.org} / <AzureWorkItemLink activity={a}>#{a.work_item_id}</AzureWorkItemLink>
-                    </span>
+                    </span>{' '}
+                    {a.work_item_type && (
+                      <span className="chip" style={{ fontSize: '0.7em' }}>{a.work_item_type}</span>
+                    )}
                   </span>
                   {a.is_default ? (
                     <span className="chip chip-done" style={{ fontSize: '0.75em' }}>Predeterminada</span>
