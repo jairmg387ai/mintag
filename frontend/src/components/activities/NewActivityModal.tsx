@@ -3,6 +3,7 @@ import { X } from 'lucide-react'
 import type { ActivityCatalog, AzureActivity } from '../../types'
 import { createActivity } from '../../api/client'
 import { AzureActivityCombobox } from './AzureActivityCombobox'
+import { resolveAutofill } from './activityAutofill'
 
 interface NewActivityModalProps {
   open: boolean
@@ -65,6 +66,11 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
   const [description, setDescription] = useState('')
   const [azureActivityId, setAzureActivityId] = useState('')
   const [referenceId, setReferenceId] = useState('')
+  // Tracks whether the user has explicitly edited project/category by hand
+  // in this session, so a later Azure work-item selection knows which
+  // fields it's still allowed to autofill (see resolveAutofill).
+  const [projectTouched, setProjectTouched] = useState(false)
+  const [categoryTouched, setCategoryTouched] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
@@ -81,10 +87,27 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
       setReferenceId('')
       setErrors({})
       setSubmitError('')
+      setProjectTouched(false)
+      setCategoryTouched(false)
     }
   }, [open, defaultDate, catalog])
 
   if (!open) return null
+
+  // Fires only on an explicit, committed Azure work-item selection — never
+  // on mount/open. Fills only the project/category the selected work item
+  // actually has mapped, and only while that field hasn't been hand-edited.
+  function handleAzureActivityChange(activityId: string) {
+    setAzureActivityId(activityId)
+    const patch = resolveAutofill({
+      activity: azureActivities.find(a => String(a.id) === activityId),
+      catalog,
+      projectTouched,
+      categoryTouched,
+    })
+    if (patch.project !== undefined) setProject(patch.project)
+    if (patch.category !== undefined) setCategory(patch.category)
+  }
 
   const emptyCatalog =
     catalog !== null &&
@@ -237,7 +260,7 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
               <select
                 style={selectStyle}
                 value={project}
-                onChange={e => setProject(e.target.value)}
+                onChange={e => { setProject(e.target.value); setProjectTouched(true) }}
                 disabled={emptyCatalog}
               >
                 {catalog.projects.length === 0 ? (
@@ -252,7 +275,7 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
               <input
                 type="text"
                 value={project}
-                onChange={e => setProject(e.target.value)}
+                onChange={e => { setProject(e.target.value); setProjectTouched(true) }}
                 placeholder="Nombre del proyecto"
                 style={selectStyle}
               />
@@ -264,7 +287,7 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
               <select
                 style={selectStyle}
                 value={category}
-                onChange={e => setCategory(e.target.value)}
+                onChange={e => { setCategory(e.target.value); setCategoryTouched(true) }}
                 disabled={emptyCatalog}
               >
                 {catalog.categories.length === 0 ? (
@@ -279,7 +302,7 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
               <input
                 type="text"
                 value={category}
-                onChange={e => setCategory(e.target.value)}
+                onChange={e => { setCategory(e.target.value); setCategoryTouched(true) }}
                 placeholder="Categoría"
                 style={selectStyle}
               />
@@ -309,7 +332,7 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
             <AzureActivityCombobox
               azureActivities={azureActivities}
               value={azureActivityId}
-              onChange={setAzureActivityId}
+              onChange={handleAzureActivityChange}
               inputStyle={selectStyle}
             />
           </Field>
