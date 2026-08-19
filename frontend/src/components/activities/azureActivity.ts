@@ -23,6 +23,22 @@ export function formatAzureActivityLabel(a: AzureActivity): string {
   return `${a.label} (#${a.work_item_id})`
 }
 
+// Case-insensitive substring match against the same "label (#work item id)"
+// string the user sees (formatAzureActivityLabel), so one comparison covers
+// matching the title, the bare id ("4521"), and the "#4521" display form.
+// Inactive items are defensively excluded even though the server-side
+// catalog list already returns active-only rows.
+export function azureActivityMatches(a: AzureActivity, query: string): boolean {
+  if (a.is_active === false) return false
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  return formatAzureActivityLabel(a).toLowerCase().includes(q)
+}
+
+export function filterAzureActivities(list: AzureActivity[], query: string): AzureActivity[] {
+  return list.filter(a => azureActivityMatches(a, query))
+}
+
 export function resolveAzureActivity(
   azureActivityId: number | null | undefined,
   azureActivities: AzureActivity[],
