@@ -24,7 +24,14 @@ function buildActivity(overrides: Partial<AzureActivity> = {}): AzureActivity {
 
 const azureActivities: AzureActivity[] = [
   buildActivity({ id: 1, label: 'Fix login bug', work_item_id: 4521, is_default: true }),
-  buildActivity({ id: 2, label: 'Deploy pipeline', work_item_id: 9001, is_default: false }),
+  // Mapped to the same project/category as the loaded activity below: the
+  // loaded project/category count as untouched (same as a fresh form's
+  // seeded defaults) and are overwritable by a work-item selection, so
+  // without a matching mapping here, picking this item would blank both
+  // fields and fail required-field validation before updateActivity is
+  // ever called — unrelated to what this test actually verifies.
+  buildActivity({ id: 2, label: 'Deploy pipeline', work_item_id: 9001, is_default: false, project: 'Project A', category_id: 1 }),
+  buildActivity({ id: 3, label: 'Unmapped item', work_item_id: 5555, is_default: false }),
 ]
 
 const catalog: ActivityCatalog = {
@@ -89,5 +96,20 @@ describe('EditActivityModal Azure activity picker', () => {
 
     const call = vi.mocked(updateActivity).mock.calls[0][1]
     expect(call).toMatchObject({ azure_activity_id: 2 })
+  })
+
+  it('overwrites the loaded project/category when switching to an unmapped work item, since they were never hand-edited', async () => {
+    const user = userEvent.setup()
+    renderModal()
+
+    expect(screen.getByRole('combobox', { name: 'Proyecto *' })).toHaveValue('Project A')
+    expect(screen.getByRole('combobox', { name: 'Categoría *' })).toHaveValue('Development')
+
+    const input = screen.getByRole('combobox', { name: 'Actividad de Azure' })
+    await user.click(input)
+    await user.click(screen.getByRole('option', { name: /Unmapped item/ }))
+
+    expect(screen.getByRole('combobox', { name: 'Proyecto *' })).toHaveValue('')
+    expect(screen.getByRole('combobox', { name: 'Categoría *' })).toHaveValue('')
   })
 })

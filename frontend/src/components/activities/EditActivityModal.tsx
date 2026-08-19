@@ -224,13 +224,24 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
             />
           </Field>
 
+          <Field label="Actividad de Azure">
+            <AzureActivityCombobox
+              azureActivities={azureActivities}
+              value={azureActivityId}
+              onChange={handleAzureActivityChange}
+              inputStyle={inputStyle}
+            />
+          </Field>
+
           <Field label="Proyecto *" error={errors.project}>
             {catalog !== null ? (
               <select
+                aria-label="Proyecto *"
                 style={inputStyle}
                 value={project}
                 onChange={e => { setProject(e.target.value); setProjectTouched(true) }}
               >
+                <option value="">— Seleccionar proyecto —</option>
                 {catalog.projects.map(p => (
                   <option key={p} value={p}>{p}</option>
                 ))}
@@ -252,10 +263,12 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
           <Field label="Categoría *" error={errors.category}>
             {catalog !== null ? (
               <select
+                aria-label="Categoría *"
                 style={inputStyle}
                 value={category}
                 onChange={e => { setCategory(e.target.value); setCategoryTouched(true) }}
               >
+                <option value="">— Seleccionar categoría —</option>
                 {catalog.categories.map(c => (
                   <option key={c.id} value={c.name}>{c.name}</option>
                 ))}
@@ -290,15 +303,6 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
               onChange={e => setReferenceId(e.target.value)}
               placeholder="Ej: 156789, MANTIS-1234, LF-2026-045"
               style={inputStyle}
-            />
-          </Field>
-
-          <Field label="Actividad de Azure">
-            <AzureActivityCombobox
-              azureActivities={azureActivities}
-              value={azureActivityId}
-              onChange={handleAzureActivityChange}
-              inputStyle={inputStyle}
             />
           </Field>
 

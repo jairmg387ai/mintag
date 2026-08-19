@@ -80,8 +80,12 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
     if (open) {
       setDate(defaultDate)
       setHours('')
-      setProject(catalog?.projects[0] ?? '')
-      setCategory(catalog?.categories[0]?.name ?? '')
+      // Left blank (not pre-seeded to the catalog's first entry) so that an
+      // Azure work item without a mapped project/category leaves these
+      // fields empty and the required-field validation catches it, instead
+      // of silently submitting whatever happened to be first in the list.
+      setProject('')
+      setCategory('')
       setDescription('')
       setAzureActivityId('')
       setReferenceId('')
@@ -255,9 +259,19 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
             </Field>
           </div>
 
+          <Field label="Actividad de Azure">
+            <AzureActivityCombobox
+              azureActivities={azureActivities}
+              value={azureActivityId}
+              onChange={handleAzureActivityChange}
+              inputStyle={selectStyle}
+            />
+          </Field>
+
           <Field label="Proyecto *" error={errors.project}>
             {catalog !== null ? (
               <select
+                aria-label="Proyecto *"
                 style={selectStyle}
                 value={project}
                 onChange={e => { setProject(e.target.value); setProjectTouched(true) }}
@@ -266,9 +280,12 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
                 {catalog.projects.length === 0 ? (
                   <option value="">— sin proyectos —</option>
                 ) : (
-                  catalog.projects.map(p => (
-                    <option key={p} value={p}>{p}</option>
-                  ))
+                  <>
+                    <option value="">— Seleccionar proyecto —</option>
+                    {catalog.projects.map(p => (
+                      <option key={p} value={p}>{p}</option>
+                    ))}
+                  </>
                 )}
               </select>
             ) : (
@@ -285,6 +302,7 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
           <Field label="Categoría *" error={errors.category}>
             {catalog !== null ? (
               <select
+                aria-label="Categoría *"
                 style={selectStyle}
                 value={category}
                 onChange={e => { setCategory(e.target.value); setCategoryTouched(true) }}
@@ -293,9 +311,12 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
                 {catalog.categories.length === 0 ? (
                   <option value="">— sin categorías —</option>
                 ) : (
-                  catalog.categories.map(c => (
-                    <option key={c.id} value={c.name}>{c.name}</option>
-                  ))
+                  <>
+                    <option value="">— Seleccionar categoría —</option>
+                    {catalog.categories.map(c => (
+                      <option key={c.id} value={c.name}>{c.name}</option>
+                    ))}
+                  </>
                 )}
               </select>
             ) : (
@@ -325,15 +346,6 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
               onChange={e => setReferenceId(e.target.value)}
               placeholder="Ej: 156789, MANTIS-1234, LF-2026-045"
               style={selectStyle}
-            />
-          </Field>
-
-          <Field label="Actividad de Azure">
-            <AzureActivityCombobox
-              azureActivities={azureActivities}
-              value={azureActivityId}
-              onChange={handleAzureActivityChange}
-              inputStyle={selectStyle}
             />
           </Field>
 
