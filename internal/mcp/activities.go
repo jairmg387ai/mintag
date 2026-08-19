@@ -286,6 +286,8 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 		mcp.WithString("work_item_id", mcp.Required(), mcp.Description("Azure DevOps work item ID, e.g. '156263'")),
 		mcp.WithString("label", mcp.Required(), mcp.Description("Human-readable label for this activity")),
 		mcp.WithString("work_item_type", mcp.Description("Optional Azure work item type, e.g. 'Bug' or 'Task'")),
+		mcp.WithString("project", mcp.Description("Optional project name to autofill when this work item is selected during activity registration")),
+		mcp.WithString("category_id", mcp.Description("Optional timelog category id to autofill when this work item is selected during activity registration")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		org, err := req.RequireString("org")
 		if err != nil {
@@ -304,10 +306,15 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 			return errResult(err)
 		}
 		workItemType := req.GetString("work_item_type", "")
-		// project/category_id params land in the follow-up PR (Slice 2, T2.5);
-		// this call site only carries the mechanical AzureActivityMapping{}
-		// trailing arg required for this PR's store signature change to compile.
-		a, err := st.AddAzureActivity(ctx, org, workItemID, label, workItemType, store.AzureActivityMapping{})
+		categoryID, err := parsePtrID(req, "category_id")
+		if err != nil {
+			return errResult(fmt.Errorf("category_id must be an integer, got %q", req.GetString("category_id", "")))
+		}
+		mapping := store.AzureActivityMapping{CategoryID: categoryID}
+		if project := req.GetString("project", ""); project != "" {
+			mapping.Project = &project
+		}
+		a, err := st.AddAzureActivity(ctx, org, workItemID, label, workItemType, mapping)
 		return jsonResult(a, err)
 	})
 

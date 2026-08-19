@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"regexp"
@@ -496,24 +495,6 @@ func sanitizePublicError(err error) string {
 	return msg
 }
 
-// azureLabelByID indexes a list of Azure activities by id for O(1) label
-// lookups. The work item id is included alongside the label everywhere this
-// is displayed — the label alone doesn't identify the Azure work item.
-//
-// This is currently unused (its sole caller, the now-removed category->Azure
-// activity mapping decorator in handleActivityCatalog, was deleted when the
-// mapping direction inverted onto azure_activities — see design D2). Kept for
-// a future consumer (e.g. the xlsx export) rather than deleted, since it has
-// no dependency on the removed mapping and Go permits unused package-level
-// functions.
-func azureLabelByID(az []*store.AzureActivity) map[int64]string {
-	out := make(map[int64]string, len(az))
-	for _, a := range az {
-		out[a.ID] = fmt.Sprintf("%s (#%d)", a.Label, a.WorkItemID)
-	}
-	return out
-}
-
 // GET /api/activities/catalog
 func (srv *Server) handleActivityCatalog(w http.ResponseWriter, r *http.Request) {
 	projects, err := srv.st.ListTimelogProjects()
@@ -643,20 +624,19 @@ func (srv *Server) handleListAzureActivities(w http.ResponseWriter, r *http.Requ
 // POST /api/activities/azure-catalog
 func (srv *Server) handleAddAzureActivity(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Org          string `json:"org"`
-		WorkItemID   int    `json:"work_item_id"`
-		Label        string `json:"label"`
-		WorkItemType string `json:"work_item_type"`
+		Org          string  `json:"org"`
+		WorkItemID   int     `json:"work_item_id"`
+		Label        string  `json:"label"`
+		WorkItemType string  `json:"work_item_type"`
+		Project      *string `json:"project"`
+		CategoryID   *int64  `json:"category_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	// project/category_id threading through this handler's request body lands
-	// in the follow-up PR (Slice 2, T2.2); this call site only carries the
-	// mechanical AzureActivityMapping{} trailing arg required for this PR's
-	// store signature change to compile.
-	a, err := srv.st.AddAzureActivity(r.Context(), body.Org, body.WorkItemID, body.Label, body.WorkItemType, store.AzureActivityMapping{})
+	mapping := store.AzureActivityMapping{Project: body.Project, CategoryID: body.CategoryID}
+	a, err := srv.st.AddAzureActivity(r.Context(), body.Org, body.WorkItemID, body.Label, body.WorkItemType, mapping)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
@@ -669,7 +649,10 @@ func (srv *Server) handleAddAzureActivity(w http.ResponseWriter, r *http.Request
 // PATCH /api/activities/azure-catalog/{id}
 // Despite the verb, this is a full replace, not a partial update: org and
 // label are both required (see UpdateAzureActivity), so a caller renaming
-// only one field must still send the other's current value.
+// only one field must still send the other's current value. The same
+// full-replace contract applies to project/category_id: an omitted field
+// clears any previously-stored mapping value (see UpdateAzureActivity's doc
+// comment) — callers must resend current values to preserve them.
 func (srv *Server) handleUpdateAzureActivity(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r, "id")
 	if err != nil {
@@ -677,20 +660,27 @@ func (srv *Server) handleUpdateAzureActivity(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var body struct {
-		Org          string `json:"org"`
-		Label        string `json:"label"`
-		WorkItemType string `json:"work_item_type"`
+		Org          string  `json:"org"`
+		Label        string  `json:"label"`
+		WorkItemType string  `json:"work_item_type"`
+		Project      *string `json:"project"`
+		CategoryID   *int64  `json:"category_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	// See handleAddAzureActivity's comment: project/category_id threading is
-	// Slice 2's T2.2; this is the mechanical compile-only update.
-	a, err := srv.st.UpdateAzureActivity(r.Context(), id, body.Org, body.Label, body.WorkItemType, store.AzureActivityMapping{})
+	mapping := store.AzureActivityMapping{Project: body.Project, CategoryID: body.CategoryID}
+	a, err := srv.st.UpdateAzureActivity(r.Context(), id, body.Org, body.Label, body.WorkItemType, mapping)
 	if err != nil {
+		// "azure activity not found" (row missing) -> 404. Any other error,
+		// including validateMapping's "timelog category not found" (an
+		// invalid category_id, not a missing azure activity), maps to 422 —
+		// both messages contain "not found", so the generic isNotFound()
+		// substring check used elsewhere in this file cannot distinguish
+		// them and would otherwise mis-route a rejected mapping as a 404.
 		status := http.StatusUnprocessableEntity
-		if isNotFound(err) {
+		if strings.Contains(err.Error(), "azure activity not found") {
 			status = http.StatusNotFound
 		}
 		http.Error(w, err.Error(), status)

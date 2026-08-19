@@ -1,11 +1,15 @@
 package server
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/Gentleman-Programming/mintag/internal/store"
 )
 
 // TestAzureCatalogList_IncludesSeededDefault verifies the migration-seeded
@@ -101,6 +105,181 @@ func TestAzureCatalogDeactivateMissingReturns404(t *testing.T) {
 	resp := doJSON(t, http.MethodDelete, base+"/api/activities/azure-catalog/999999", nil)
 	assertStatus(t, resp, http.StatusNotFound)
 	resp.Body.Close()
+}
+
+// TestAzureCatalogAdd_WithProjectAndCategoryID verifies POST
+// /api/activities/azure-catalog carries and persists the optional
+// project/category_id autofill mapping.
+func TestAzureCatalogAdd_WithProjectAndCategoryID(t *testing.T) {
+	base, st := newTestServer(t)
+	categoryID := seedTimelogCategory(t, st, "Bug Triage")
+
+	addResp := doJSON(t, http.MethodPost, base+"/api/activities/azure-catalog", map[string]any{
+		"org": "RUNT2QA", "work_item_id": 777111, "label": "Mapped work item",
+		"project": "Alpha", "category_id": categoryID,
+	})
+	assertStatus(t, addResp, http.StatusCreated)
+	var added struct {
+		Project    *string `json:"project"`
+		CategoryID *int64  `json:"category_id"`
+	}
+	decodeJSON(t, addResp, &added)
+	if added.Project == nil || *added.Project != "Alpha" {
+		t.Fatalf("expected project=Alpha, got %#v", added.Project)
+	}
+	if added.CategoryID == nil || *added.CategoryID != categoryID {
+		t.Fatalf("expected category_id=%d, got %#v", categoryID, added.CategoryID)
+	}
+}
+
+// TestAzureCatalogAdd_UnknownCategoryIDReturns422 verifies an unknown
+// category_id is rejected with 422, not silently dropped.
+func TestAzureCatalogAdd_UnknownCategoryIDReturns422(t *testing.T) {
+	base, _ := newTestServer(t)
+
+	addResp := doJSON(t, http.MethodPost, base+"/api/activities/azure-catalog", map[string]any{
+		"org": "RUNT2QA", "work_item_id": 777222, "label": "Dangling category",
+		"category_id": 999999,
+	})
+	assertStatus(t, addResp, http.StatusUnprocessableEntity)
+	addResp.Body.Close()
+}
+
+// TestAzureCatalogUpdate_WithProjectAndCategoryID verifies PATCH
+// /api/activities/azure-catalog/{id} carries and persists the optional
+// project/category_id autofill mapping (full replace, per the handler's
+// documented contract).
+func TestAzureCatalogUpdate_WithProjectAndCategoryID(t *testing.T) {
+	base, st := newTestServer(t)
+	categoryID := seedTimelogCategory(t, st, "Ops")
+
+	addResp := doJSON(t, http.MethodPost, base+"/api/activities/azure-catalog", map[string]any{
+		"org": "RUNT2QA", "work_item_id": 777333, "label": "To be updated",
+	})
+	assertStatus(t, addResp, http.StatusCreated)
+	var added struct {
+		ID int64 `json:"id"`
+	}
+	decodeJSON(t, addResp, &added)
+
+	updateResp := doJSON(t, http.MethodPatch, base+"/api/activities/azure-catalog/"+strconv.FormatInt(added.ID, 10), map[string]any{
+		"org": "RUNT2QA", "label": "Updated with mapping",
+		"project": "Gamma", "category_id": categoryID,
+	})
+	assertStatus(t, updateResp, http.StatusOK)
+	var updated struct {
+		Project    *string `json:"project"`
+		CategoryID *int64  `json:"category_id"`
+	}
+	decodeJSON(t, updateResp, &updated)
+	if updated.Project == nil || *updated.Project != "Gamma" {
+		t.Fatalf("expected project=Gamma, got %#v", updated.Project)
+	}
+	if updated.CategoryID == nil || *updated.CategoryID != categoryID {
+		t.Fatalf("expected category_id=%d, got %#v", categoryID, updated.CategoryID)
+	}
+}
+
+// TestAzureCatalogUpdate_UnknownCategoryIDReturns422 verifies an unknown
+// category_id on PATCH is rejected with 422 — and, critically, NOT 404: both
+// UpdateAzureActivity's "azure activity not found" and validateMapping's
+// "timelog category not found" errors contain the substring "not found", so
+// the handler must distinguish them rather than routing both through the
+// generic isNotFound() 404 check.
+func TestAzureCatalogUpdate_UnknownCategoryIDReturns422(t *testing.T) {
+	base, _ := newTestServer(t)
+
+	addResp := doJSON(t, http.MethodPost, base+"/api/activities/azure-catalog", map[string]any{
+		"org": "RUNT2QA", "work_item_id": 777444, "label": "Update target",
+	})
+	assertStatus(t, addResp, http.StatusCreated)
+	var added struct {
+		ID int64 `json:"id"`
+	}
+	decodeJSON(t, addResp, &added)
+
+	updateResp := doJSON(t, http.MethodPatch, base+"/api/activities/azure-catalog/"+strconv.FormatInt(added.ID, 10), map[string]any{
+		"org": "RUNT2QA", "label": "Update target", "category_id": 999999,
+	})
+	assertStatus(t, updateResp, http.StatusUnprocessableEntity)
+	updateResp.Body.Close()
+}
+
+// TestAzureCatalogUpdate_MissingIDReturns404 locks the pre-existing
+// not-found behavior for a genuinely missing azure activity row, guarding
+// against the 404/422 distinction added for
+// TestAzureCatalogUpdate_UnknownCategoryIDReturns422 accidentally routing
+// this case to 422 instead.
+func TestAzureCatalogUpdate_MissingIDReturns404(t *testing.T) {
+	base, _ := newTestServer(t)
+
+	updateResp := doJSON(t, http.MethodPatch, base+"/api/activities/azure-catalog/999999", map[string]any{
+		"org": "RUNT2QA", "label": "Does not exist",
+	})
+	assertStatus(t, updateResp, http.StatusNotFound)
+	updateResp.Body.Close()
+}
+
+// TestActivityCatalog_CategoriesOmitAzureActivityMappingFields verifies GET
+// /api/activities/catalog no longer emits the removed category->Azure
+// activity mapping fields (azure_activity_id/azure_activity_label) — the
+// mapping direction inverted onto azure_activities in Slice 1.
+func TestActivityCatalog_CategoriesOmitAzureActivityMappingFields(t *testing.T) {
+	base, _ := newTestServer(t)
+
+	resp := get(t, base+"/api/activities/catalog")
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	mustNoErr(t, err)
+
+	var raw map[string]json.RawMessage
+	mustNoErr(t, json.Unmarshal(body, &raw))
+	var categories []map[string]any
+	mustNoErr(t, json.Unmarshal(raw["categories"], &categories))
+	if len(categories) == 0 {
+		t.Fatal("expected seeded categories")
+	}
+	for _, c := range categories {
+		if _, ok := c["azure_activity_id"]; ok {
+			t.Fatalf("expected no azure_activity_id field on category, got %#v", c)
+		}
+		if _, ok := c["azure_activity_label"]; ok {
+			t.Fatalf("expected no azure_activity_label field on category, got %#v", c)
+		}
+	}
+}
+
+// TestAzureCategoryMappingRoute_Removed verifies the old category-driven
+// mapping route no longer exists: chi falls through to a 404 for an unknown
+// path once the route registration was deleted (Slice 1 scope deviation).
+func TestAzureCategoryMappingRoute_Removed(t *testing.T) {
+	base, _ := newTestServer(t)
+
+	resp := doJSON(t, http.MethodPut, base+"/api/activities/catalog/categories/1/azure-activity", map[string]any{
+		"azure_activity_id": 1,
+	})
+	assertStatus(t, resp, http.StatusNotFound)
+	resp.Body.Close()
+}
+
+// seedTimelogCategory adds a category and returns its assigned id, resolved
+// through ListTimelogCategories since AddTimelogCategory does not return one.
+func seedTimelogCategory(t *testing.T, st *store.Store, name string) int64 {
+	t.Helper()
+	if err := st.AddTimelogCategory(name, ""); err != nil {
+		t.Fatalf("seed category %q: %v", name, err)
+	}
+	categories, err := st.ListTimelogCategories()
+	if err != nil {
+		t.Fatalf("list categories: %v", err)
+	}
+	for _, c := range categories {
+		if c.Name == name {
+			return c.ID
+		}
+	}
+	t.Fatalf("seeded category %q not found after add", name)
+	return 0
 }
 
 // TestAzureCatalogMutationsRequireLocalRequest verifies POST/PATCH/DELETE
