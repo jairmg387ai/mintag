@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"database/sql"
 	"embed"
 	"fmt"
 	"strings"
@@ -79,20 +78,22 @@ func (s *Store) ListTimelogProjects() ([]string, error) {
 	return s.listCatalog("timelog_projects")
 }
 
-// TimelogCategory is a category row from the catalog, including its
-// optional mapping to a default Azure activity (see SetCategoryAzureActivity).
+// TimelogCategory is a category row from the catalog.
+//
+// The former azure_activity_id mapping field (category -> default Azure
+// activity) was removed: the mapping direction inverted onto
+// azure_activities (project + category_id, see AzureActivityMapping in
+// azure_catalog.go) so there is exactly one editable mapping direction.
 type TimelogCategory struct {
-	ID              int64  `json:"id"`
-	Name            string `json:"name"`
-	Description     string `json:"description"`
-	AzureActivityID *int64 `json:"azure_activity_id,omitempty"`
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 // ListTimelogCategories returns all categories in the catalog, ordered
-// alphabetically by name, including each row's optional Azure activity
-// mapping.
+// alphabetically by name.
 func (s *Store) ListTimelogCategories() ([]TimelogCategory, error) {
-	rows, err := s.db.Query(`SELECT id, name, COALESCE(description, ''), azure_activity_id FROM timelog_categories ORDER BY name ASC`)
+	rows, err := s.db.Query(`SELECT id, name, COALESCE(description, '') FROM timelog_categories ORDER BY name ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -100,47 +101,12 @@ func (s *Store) ListTimelogCategories() ([]TimelogCategory, error) {
 	out := make([]TimelogCategory, 0)
 	for rows.Next() {
 		var c TimelogCategory
-		if err := rows.Scan(&c.ID, &c.Name, &c.Description, &c.AzureActivityID); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Description); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
 	}
 	return out, rows.Err()
-}
-
-// SetCategoryAzureActivity assigns (or clears, when azureActivityID is nil)
-// the category's default Azure activity mapping. The column has no real SQL
-// foreign key constraint (see addColumnIfMissing("timelog_categories",
-// "azure_activity_id", ...) in store.go), so this validates at the
-// application level, mirroring SetActivityAzureActivity: a non-nil id must
-// reference an existing, active (is_active=1) row in azure_activities.
-func (s *Store) SetCategoryAzureActivity(ctx context.Context, categoryID int64, azureActivityID *int64) error {
-	if azureActivityID != nil {
-		var isActive bool
-		err := s.db.QueryRowContext(ctx,
-			`SELECT is_active FROM azure_activities WHERE id = ?`, *azureActivityID,
-		).Scan(&isActive)
-		if err == sql.ErrNoRows {
-			return fmt.Errorf("azure activity not found: %d", *azureActivityID)
-		}
-		if err != nil {
-			return err
-		}
-		if !isActive {
-			return fmt.Errorf("azure activity %d is inactive and cannot be assigned", *azureActivityID)
-		}
-	}
-
-	res, err := s.db.ExecContext(ctx,
-		`UPDATE timelog_categories SET azure_activity_id = ? WHERE id = ?`, azureActivityID, categoryID,
-	)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("timelog category not found: %d", categoryID)
-	}
-	return nil
 }
 
 func (s *Store) listCatalog(table string) ([]string, error) {
@@ -193,8 +159,8 @@ func (s *Store) RemoveTimelogCategory(name string) error {
 }
 
 // UpdateTimelogCategoryDescription updates an existing category's
-// description and returns the updated row. Mirrors SetCategoryAzureActivity's
-// existence check (RowsAffected==0 means the id doesn't exist).
+// description and returns the updated row. RowsAffected==0 means the id
+// doesn't exist.
 func (s *Store) UpdateTimelogCategoryDescription(ctx context.Context, id int64, description string) (*TimelogCategory, error) {
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE timelog_categories SET description = ? WHERE id = ?`, strings.TrimSpace(description), id,
@@ -208,8 +174,8 @@ func (s *Store) UpdateTimelogCategoryDescription(ctx context.Context, id int64, 
 
 	var c TimelogCategory
 	err = s.db.QueryRowContext(ctx,
-		`SELECT id, name, COALESCE(description, ''), azure_activity_id FROM timelog_categories WHERE id = ?`, id,
-	).Scan(&c.ID, &c.Name, &c.Description, &c.AzureActivityID)
+		`SELECT id, name, COALESCE(description, '') FROM timelog_categories WHERE id = ?`, id,
+	).Scan(&c.ID, &c.Name, &c.Description)
 	if err != nil {
 		return nil, err
 	}

@@ -305,7 +305,7 @@ func TestUploadActivities_ExplicitActivityOverridesDefault(t *testing.T) {
 	defer s.Close()
 
 	ctx := context.Background()
-	nonDefault, err := s.AddAzureActivity(ctx, "RUNT2PSW", 999111, "QA Activity", "")
+	nonDefault, err := s.AddAzureActivity(ctx, "RUNT2PSW", 999111, "QA Activity", "", AzureActivityMapping{})
 	if err != nil {
 		t.Fatal(err)
 	}
