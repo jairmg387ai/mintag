@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, type CSSProperties } from 'react'
 import { X } from 'lucide-react'
 import type { DailyActivity, ActivityCatalog, AzureActivity } from '../../types'
 import { updateActivity } from '../../api/client'
-import { findDefaultAzureActivity, formatAzureActivityLabel } from './azureActivity'
+import { AzureActivityCombobox } from './AzureActivityCombobox'
 import { resolveAutofill } from './activityAutofill'
 
 interface EditActivityModalProps {
@@ -93,15 +93,13 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
 
   if (!open || !activity) return null
 
-  const defaultAzureActivity = findDefaultAzureActivity(azureActivities)
-
   // Fires only on an explicit, committed Azure work-item selection — never
   // on mount/open. Fills only the project/category the selected work item
   // actually has mapped, and only while that field hasn't been hand-edited.
-  function handleAzureActivityChange(activityId: number | '') {
-    setAzureActivityId(activityId === '' ? '' : String(activityId))
+  function handleAzureActivityChange(activityId: string) {
+    setAzureActivityId(activityId)
     const patch = resolveAutofill({
-      activity: azureActivities.find(a => a.id === activityId),
+      activity: azureActivities.find(a => String(a.id) === activityId),
       catalog,
       projectTouched,
       categoryTouched,
@@ -296,20 +294,12 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
           </Field>
 
           <Field label="Actividad de Azure">
-            <select
-              style={inputStyle}
+            <AzureActivityCombobox
+              azureActivities={azureActivities}
               value={azureActivityId}
-              onChange={e => handleAzureActivityChange(e.target.value === '' ? '' : Number(e.target.value))}
-            >
-              <option value="">
-                Usar predeterminada{defaultAzureActivity ? ` (${formatAzureActivityLabel(defaultAzureActivity)})` : ''}
-              </option>
-              {azureActivities.map(a => (
-                <option key={a.id} value={a.id}>
-                  {formatAzureActivityLabel(a)}
-                </option>
-              ))}
-            </select>
+              onChange={handleAzureActivityChange}
+              inputStyle={inputStyle}
+            />
           </Field>
 
           {submitError && (

@@ -1,12 +1,12 @@
 import { defineConfig } from 'vitest/config'
+import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 
-// Node-only unit test config — no jsdom/DOM dependency. Covers pure logic
-// modules only (e.g. activityAutofill.ts). Component/integration testing
-// (jsdom + Testing Library) is out of scope for this config; add a separate
-// environment if that ever becomes necessary.
 export default defineConfig({
+  plugins: [react(), tailwindcss()],
   test: {
-    environment: 'node',
-    include: ['src/**/*.test.ts'],
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./src/test/setup.ts'],
   },
 })
