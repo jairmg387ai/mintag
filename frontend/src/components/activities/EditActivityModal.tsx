@@ -3,6 +3,7 @@ import { X } from 'lucide-react'
 import type { DailyActivity, ActivityCatalog, AzureActivity } from '../../types'
 import { updateActivity } from '../../api/client'
 import { findDefaultAzureActivity, formatAzureActivityLabel } from './azureActivity'
+import { resolveAutofill } from './activityAutofill'
 
 interface EditActivityModalProps {
   activity: DailyActivity | null
@@ -62,6 +63,11 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
   const [initialAzureActivityId, setInitialAzureActivityId] = useState('')
   const [referenceId, setReferenceId] = useState('')
   const [initialReferenceId, setInitialReferenceId] = useState('')
+  // Seeded project/category start untouched (same as a fresh form's seeded
+  // defaults) so selecting a different work item can still overwrite them;
+  // they become touched only once the user hand-edits them in this session.
+  const [projectTouched, setProjectTouched] = useState(false)
+  const [categoryTouched, setCategoryTouched] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
@@ -80,12 +86,29 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
       setInitialReferenceId(loadedReferenceId)
       setErrors({})
       setSubmitError('')
+      setProjectTouched(false)
+      setCategoryTouched(false)
     }
   }, [open, activity])
 
   if (!open || !activity) return null
 
   const defaultAzureActivity = findDefaultAzureActivity(azureActivities)
+
+  // Fires only on an explicit, committed Azure work-item selection — never
+  // on mount/open. Fills only the project/category the selected work item
+  // actually has mapped, and only while that field hasn't been hand-edited.
+  function handleAzureActivityChange(activityId: number | '') {
+    setAzureActivityId(activityId === '' ? '' : String(activityId))
+    const patch = resolveAutofill({
+      activity: azureActivities.find(a => a.id === activityId),
+      catalog,
+      projectTouched,
+      categoryTouched,
+    })
+    if (patch.project !== undefined) setProject(patch.project)
+    if (patch.category !== undefined) setCategory(patch.category)
+  }
 
   function validate(): boolean {
     const errs: Record<string, string> = {}
@@ -208,7 +231,7 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
               <select
                 style={inputStyle}
                 value={project}
-                onChange={e => setProject(e.target.value)}
+                onChange={e => { setProject(e.target.value); setProjectTouched(true) }}
               >
                 {catalog.projects.map(p => (
                   <option key={p} value={p}>{p}</option>
@@ -221,7 +244,7 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
               <input
                 type="text"
                 value={project}
-                onChange={e => setProject(e.target.value)}
+                onChange={e => { setProject(e.target.value); setProjectTouched(true) }}
                 placeholder="Nombre del proyecto"
                 style={inputStyle}
               />
@@ -233,7 +256,7 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
               <select
                 style={inputStyle}
                 value={category}
-                onChange={e => setCategory(e.target.value)}
+                onChange={e => { setCategory(e.target.value); setCategoryTouched(true) }}
               >
                 {catalog.categories.map(c => (
                   <option key={c.id} value={c.name}>{c.name}</option>
@@ -246,7 +269,7 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
               <input
                 type="text"
                 value={category}
-                onChange={e => setCategory(e.target.value)}
+                onChange={e => { setCategory(e.target.value); setCategoryTouched(true) }}
                 placeholder="Categoría"
                 style={inputStyle}
               />
@@ -276,7 +299,7 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
             <select
               style={inputStyle}
               value={azureActivityId}
-              onChange={e => setAzureActivityId(e.target.value)}
+              onChange={e => handleAzureActivityChange(e.target.value === '' ? '' : Number(e.target.value))}
             >
               <option value="">
                 Usar predeterminada{defaultAzureActivity ? ` (${formatAzureActivityLabel(defaultAzureActivity)})` : ''}
