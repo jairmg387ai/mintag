@@ -86,19 +86,6 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
 
   if (!open) return null
 
-  // Only fires on an explicit user interaction with the category <select>
-  // (see the onChange handler below) — never on modal open, so it can never
-  // clobber a value the user hasn't touched. An unmapped or stale (inactive)
-  // mapping is left untouched, matching "unmapped category behaves as
-  // today" from the spec.
-  function handleCategoryChange(name: string) {
-    setCategory(name)
-    const mapped = catalog?.categories.find(c => c.name === name)?.azure_activity_id
-    if (mapped != null && azureActivities.some(a => a.id === mapped)) {
-      setAzureActivityId(String(mapped))
-    }
-  }
-
   const emptyCatalog =
     catalog !== null &&
     catalog.projects.length === 0 &&
@@ -277,7 +264,7 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
               <select
                 style={selectStyle}
                 value={category}
-                onChange={e => handleCategoryChange(e.target.value)}
+                onChange={e => setCategory(e.target.value)}
                 disabled={emptyCatalog}
               >
                 {catalog.categories.length === 0 ? (

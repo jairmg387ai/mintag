@@ -6,7 +6,6 @@ import {
   removeCatalogProject,
   addCatalogCategory,
   removeCatalogCategory,
-  setCategoryAzureActivity,
   updateCatalogCategoryDescription,
   addAzureActivity,
   updateAzureActivity,
@@ -14,21 +13,8 @@ import {
   setDefaultAzureActivity,
   listAssignedAzureWorkItems,
 } from '../../api/client'
-import { friendlyCatalogErrorMessage, formatAzureActivityLabel } from './azureActivity'
+import { friendlyCatalogErrorMessage } from './azureActivity'
 import { AzureWorkItemLink } from './AzureActivityLink'
-
-// friendlyMappingErrorMessage maps the two known store-layer validation
-// failures for SetCategoryAzureActivity (unknown or inactive azure activity
-// id — both distinguishable by their English message text) to the exact
-// Spanish copy from the design; anything else (network failure, etc.) falls
-// back to the generic Spanish message.
-function friendlyMappingErrorMessage(e: unknown): string {
-  const message = e instanceof Error ? e.message : ''
-  if (/inactive|not found/i.test(message)) {
-    return 'La actividad de Azure seleccionada ya no está disponible'
-  }
-  return 'No se pudo guardar el mapeo de la categoría'
-}
 
 interface CatalogManagementModalProps {
   open: boolean
@@ -165,23 +151,20 @@ function CatalogSection({
 
 function CategorySection({
   categories,
-  azureActivities,
   onAdd,
   onRemove,
-  onMappingChanged,
+  onDescriptionSaved,
 }: {
   categories: TimelogCategory[]
-  azureActivities: AzureActivity[]
   onAdd: (name: string, description: string) => Promise<void>
   onRemove: (name: string) => Promise<void>
-  onMappingChanged: () => void
+  onDescriptionSaved: () => void
 }) {
   const [newName, setNewName] = useState('')
   const [newDescription, setNewDescription] = useState('')
   const [adding, setAdding] = useState(false)
   const [error, setError] = useState('')
   const [removing, setRemoving] = useState<Record<string, boolean>>({})
-  const [savingMapping, setSavingMapping] = useState<Record<number, boolean>>({})
   const [descDrafts, setDescDrafts] = useState<Record<number, string>>({})
   const [savingDescription, setSavingDescription] = useState<Record<number, boolean>>({})
 
@@ -222,7 +205,7 @@ function CategorySection({
         delete next[category.id]
         return next
       })
-      onMappingChanged()
+      onDescriptionSaved()
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'No se pudo guardar la descripción')
     } finally {
@@ -238,37 +221,6 @@ function CategorySection({
       setError(e instanceof Error ? e.message : 'No se pudo eliminar el registro')
     } finally {
       setRemoving(prev => ({ ...prev, [name]: false }))
-    }
-  }
-
-  // Combo rule (D5, hard): this <select> is fed ONLY by azureActivities,
-  // which is already the active-only list (GET /activities/azure-catalog).
-  // No synthetic/disabled/"(inactive)" option is ever added here — a stale
-  // mapping is surfaced separately below as plain status text, not as an
-  // option.
-  async function handleSelectChange(category: TimelogCategory, value: string) {
-    setSavingMapping(prev => ({ ...prev, [category.id]: true }))
-    setError('')
-    try {
-      await setCategoryAzureActivity(category.id, value ? Number(value) : null)
-      onMappingChanged()
-    } catch (e: unknown) {
-      setError(friendlyMappingErrorMessage(e))
-    } finally {
-      setSavingMapping(prev => ({ ...prev, [category.id]: false }))
-    }
-  }
-
-  async function handleClearMapping(category: TimelogCategory) {
-    setSavingMapping(prev => ({ ...prev, [category.id]: true }))
-    setError('')
-    try {
-      await setCategoryAzureActivity(category.id, null)
-      onMappingChanged()
-    } catch (e: unknown) {
-      setError(friendlyMappingErrorMessage(e))
-    } finally {
-      setSavingMapping(prev => ({ ...prev, [category.id]: false }))
     }
   }
 
@@ -318,16 +270,6 @@ function CategorySection({
           </div>
         ) : (
           categories.map(c => {
-            // Stale = a mapping exists (azure_activity_id set) but the id is
-            // not present in the active-only azureActivities feed. Re-picking
-            // the already-empty "Sin mapeo" value in that state would not
-            // fire onChange (the DOM value never actually changes), so the
-            // stale state needs the explicit "Limpiar mapeo" button below —
-            // this is why it PUTs {azure_activity_id: null} directly instead
-            // of relying on the select.
-            const isStale = c.azure_activity_id != null && !azureActivities.some(a => a.id === c.azure_activity_id)
-            const selectValue = isStale ? '' : (c.azure_activity_id != null ? String(c.azure_activity_id) : '')
-            const busy = !!savingMapping[c.id]
             return (
               <div
                 key={c.id}
@@ -367,36 +309,6 @@ function CategorySection({
                   disabled={!!savingDescription[c.id]}
                   style={{ ...inputStyle, fontSize: '0.85em', padding: '4px 8px' }}
                 />
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <select
-                    aria-label="Actividad de Azure"
-                    value={selectValue}
-                    onChange={e => handleSelectChange(c, e.target.value)}
-                    disabled={busy}
-                    style={{ ...inputStyle, fontSize: '0.85em', padding: '4px 8px' }}
-                  >
-                    <option value="">Sin mapeo</option>
-                    {azureActivities.map(a => (
-                      <option key={a.id} value={a.id}>{formatAzureActivityLabel(a)}</option>
-                    ))}
-                  </select>
-                  {isStale && (
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => handleClearMapping(c)}
-                      disabled={busy}
-                      title={`Limpiar mapeo de ${c.name}`}
-                      aria-label={`Limpiar mapeo de ${c.name}`}
-                    >
-                      Limpiar mapeo
-                    </button>
-                  )}
-                </div>
-                {isStale && (
-                  <div style={{ font: 'var(--text-caption)', color: 'var(--fg3)', fontSize: '0.8em' }}>
-                    Mapeo actual: {c.azure_activity_label ?? `#${c.azure_activity_id}`} (inactiva — se ignora hasta que elijas otra)
-                  </div>
-                )}
               </div>
             )
           })
@@ -408,21 +320,27 @@ function CategorySection({
 
 function AzureActivitySection({
   activities,
+  catalog,
   onChanged,
 }: {
   activities: AzureActivity[]
+  catalog: ActivityCatalog | null
   onChanged: () => void
 }) {
   const [org, setOrg] = useState('')
   const [workItemId, setWorkItemId] = useState('')
   const [label, setLabel] = useState('')
   const [workItemType, setWorkItemType] = useState('')
+  const [project, setProject] = useState('')
+  const [category, setCategory] = useState('')
   const [adding, setAdding] = useState(false)
   const [error, setError] = useState('')
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editOrg, setEditOrg] = useState('')
   const [editLabel, setEditLabel] = useState('')
   const [editWorkItemType, setEditWorkItemType] = useState('')
+  const [editProject, setEditProject] = useState('')
+  const [editCategory, setEditCategory] = useState('')
   const [busyId, setBusyId] = useState<number | null>(null)
 
   const [importOpen, setImportOpen] = useState(false)
@@ -491,11 +409,20 @@ function AzureActivitySection({
     setAdding(true)
     setError('')
     try {
-      await addAzureActivity({ org: org.trim(), work_item_id: wid, label: label.trim(), work_item_type: workItemType || undefined })
+      await addAzureActivity({
+        org: org.trim(),
+        work_item_id: wid,
+        label: label.trim(),
+        work_item_type: workItemType || undefined,
+        project: project || undefined,
+        category_id: category ? Number(category) : undefined,
+      })
       setOrg('')
       setWorkItemId('')
       setLabel('')
       setWorkItemType('')
+      setProject('')
+      setCategory('')
       onChanged()
     } catch (e: unknown) {
       setError(friendlyCatalogErrorMessage(e, 'No se pudo agregar la actividad'))
@@ -509,9 +436,15 @@ function AzureActivitySection({
     setEditOrg(a.org)
     setEditLabel(a.label)
     setEditWorkItemType(a.work_item_type ?? '')
+    setEditProject(a.project ?? '')
+    setEditCategory(a.category_id != null ? String(a.category_id) : '')
     setError('')
   }
 
+  // UpdateAzureActivity is a full replace: project/category_id are always
+  // sent (empty string / '' -> null), never omitted, so an unedited field
+  // isn't silently cleared by relying on "undefined drops the key" like the
+  // add row does — that behavior only applies to inserts.
   async function saveEdit(id: number) {
     if (!editOrg.trim() || !editLabel.trim()) {
       setError('La organización y la etiqueta son obligatorias')
@@ -520,7 +453,13 @@ function AzureActivitySection({
     setBusyId(id)
     setError('')
     try {
-      await updateAzureActivity(id, { org: editOrg.trim(), label: editLabel.trim(), work_item_type: editWorkItemType })
+      await updateAzureActivity(id, {
+        org: editOrg.trim(),
+        label: editLabel.trim(),
+        work_item_type: editWorkItemType,
+        project: editProject.trim() || null,
+        category_id: editCategory ? Number(editCategory) : null,
+      })
       setEditingId(null)
       onChanged()
     } catch (e: unknown) {
@@ -706,6 +645,41 @@ function AzureActivitySection({
           <option value="Bug">Bug</option>
           <option value="Task">Task</option>
         </select>
+        {catalog !== null ? (
+          <select
+            aria-label="Proyecto"
+            value={project}
+            onChange={e => setProject(e.target.value)}
+            style={{ ...inputStyle, flex: '0 1 140px' }}
+            disabled={adding}
+          >
+            <option value="">Sin proyecto</option>
+            {catalog.projects.map(p => (
+              <option key={p} value={p}>{p}</option>
+            ))}
+          </select>
+        ) : (
+          <input
+            type="text"
+            value={project}
+            onChange={e => setProject(e.target.value)}
+            placeholder="Proyecto (opcional)"
+            style={{ ...inputStyle, flex: '1 1 140px' }}
+            disabled={adding}
+          />
+        )}
+        <select
+          aria-label="Categoría"
+          value={category}
+          onChange={e => setCategory(e.target.value)}
+          style={{ ...inputStyle, flex: '0 1 140px' }}
+          disabled={adding}
+        >
+          <option value="">Sin categoría</option>
+          {(catalog?.categories ?? []).map(c => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
         <button
           className="btn btn-primary btn-sm"
           onClick={handleAdd}
@@ -768,6 +742,51 @@ function AzureActivitySection({
                     <option value="">Sin tipo</option>
                     <option value="Bug">Bug</option>
                     <option value="Task">Task</option>
+                  </select>
+                  {catalog !== null ? (
+                    <select
+                      aria-label="Proyecto"
+                      value={editProject}
+                      onChange={e => setEditProject(e.target.value)}
+                      style={{ ...inputStyle, flex: '0 1 140px' }}
+                      disabled={busyId === a.id}
+                    >
+                      <option value="">Sin proyecto</option>
+                      {catalog.projects.map(p => (
+                        <option key={p} value={p}>{p}</option>
+                      ))}
+                      {editProject && !catalog.projects.includes(editProject) && (
+                        <option value={editProject}>{editProject}</option>
+                      )}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={editProject}
+                      onChange={e => setEditProject(e.target.value)}
+                      placeholder="Proyecto (opcional)"
+                      style={{ ...inputStyle, flex: '1 1 140px' }}
+                      disabled={busyId === a.id}
+                    />
+                  )}
+                  <select
+                    aria-label="Categoría"
+                    value={editCategory}
+                    onChange={e => setEditCategory(e.target.value)}
+                    style={{ ...inputStyle, flex: '0 1 140px' }}
+                    disabled={busyId === a.id}
+                  >
+                    <option value="">Sin categoría</option>
+                    {(catalog?.categories ?? []).map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                    {/* Existence-only validation on the backend: a stored
+                        category_id can dangle once a category is hard-deleted.
+                        Keep it selectable/visible instead of silently
+                        collapsing it to "Sin categoría" and clearing it on save. */}
+                    {editCategory && !(catalog?.categories ?? []).some(c => String(c.id) === editCategory) && (
+                      <option value={editCategory}>{`Categoría desconocida (#${editCategory})`}</option>
+                    )}
                   </select>
                   <button
                     className="btn btn-ghost btn-sm"
@@ -974,14 +993,13 @@ export function CatalogManagementModal({ open, onClose, catalog, onCatalogChange
           {activeTab === 'categories' && (
             <CategorySection
               categories={catalog?.categories ?? []}
-              azureActivities={azureActivities}
               onAdd={handleAddCategory}
               onRemove={handleRemoveCategory}
-              onMappingChanged={onCatalogChanged}
+              onDescriptionSaved={onCatalogChanged}
             />
           )}
           {activeTab === 'azure' && (
-            <AzureActivitySection activities={azureActivities} onChanged={onAzureActivitiesChanged} />
+            <AzureActivitySection activities={azureActivities} catalog={catalog} onChanged={onAzureActivitiesChanged} />
           )}
         </div>
 
