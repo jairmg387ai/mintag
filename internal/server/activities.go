@@ -41,7 +41,6 @@ var reActivityDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 //	DELETE /api/activities/catalog/projects/{name}
 //	POST   /api/activities/catalog/categories
 //	DELETE /api/activities/catalog/categories/{name}
-//	PUT    /api/activities/catalog/categories/{id}/azure-activity
 //	PUT    /api/activities/catalog/categories/{id}/description
 //	GET    /api/activities/export                    ?from=&to=
 //	GET    /api/activities/azure-catalog
@@ -66,7 +65,6 @@ func registerActivityRoutes(r chi.Router, srv *Server) {
 	r.Delete("/activities/catalog/projects/{name}", srv.handleRemoveCatalogProject)
 	r.Post("/activities/catalog/categories", srv.handleAddCatalogCategory)
 	r.Delete("/activities/catalog/categories/{name}", srv.handleRemoveCatalogCategory)
-	r.Put("/activities/catalog/categories/{id}/azure-activity", srv.handleSetCategoryAzureActivity)
 	r.Put("/activities/catalog/categories/{id}/description", srv.handleUpdateCatalogCategoryDescription)
 	r.Get("/activities/export", srv.handleExportActivities)
 	// azure-catalog routes are grouped here, before /activities/{id}, to
@@ -498,26 +496,16 @@ func sanitizePublicError(err error) string {
 	return msg
 }
 
-// categoryResponse decorates a store.TimelogCategory with a derived,
-// read-only label for its Azure activity mapping. The embedded struct
-// flattens into the JSON response alongside AzureActivityLabel.
-//
-// The label is resolved against ListAzureActivities(ctx, true) (includes
-// inactive rows) so a stale mapping — one pointing at a since-deactivated
-// Azure activity — still displays a real label instead of a bare id. This
-// is presentation only: store.TimelogCategory itself stays free of it, and
-// every <select> that offers Azure activities as options keeps using the
-// active-only list (GET /activities/azure-catalog) as its single source, so
-// an inactive activity never becomes a selectable option anywhere.
-type categoryResponse struct {
-	store.TimelogCategory
-	AzureActivityLabel *string `json:"azure_activity_label,omitempty"`
-}
-
 // azureLabelByID indexes a list of Azure activities by id for O(1) label
-// lookups. Shared by the /catalog decorator above and the xlsx export.
-// The work item id is included alongside the label everywhere this is
-// displayed — the label alone doesn't identify the Azure work item.
+// lookups. The work item id is included alongside the label everywhere this
+// is displayed — the label alone doesn't identify the Azure work item.
+//
+// This is currently unused (its sole caller, the now-removed category->Azure
+// activity mapping decorator in handleActivityCatalog, was deleted when the
+// mapping direction inverted onto azure_activities — see design D2). Kept for
+// a future consumer (e.g. the xlsx export) rather than deleted, since it has
+// no dependency on the removed mapping and Go permits unused package-level
+// functions.
 func azureLabelByID(az []*store.AzureActivity) map[int64]string {
 	out := make(map[int64]string, len(az))
 	for _, a := range az {
@@ -528,7 +516,6 @@ func azureLabelByID(az []*store.AzureActivity) map[int64]string {
 
 // GET /api/activities/catalog
 func (srv *Server) handleActivityCatalog(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
 	projects, err := srv.st.ListTimelogProjects()
 	if err != nil {
 		writeJSON(w, nil, err)
@@ -539,78 +526,11 @@ func (srv *Server) handleActivityCatalog(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, nil, err)
 		return
 	}
-	// includeInactive=true: a stale mapping must still resolve to its real
-	// label (D5a) even though it can no longer be picked as a new option.
-	azureActivities, err := srv.st.ListAzureActivities(ctx, true)
-	if err != nil {
-		writeJSON(w, nil, err)
-		return
-	}
-	labels := azureLabelByID(azureActivities)
-
-	decorated := make([]categoryResponse, len(categories))
-	for i, c := range categories {
-		cr := categoryResponse{TimelogCategory: c}
-		if c.AzureActivityID != nil {
-			if label, ok := labels[*c.AzureActivityID]; ok {
-				cr.AzureActivityLabel = &label
-			}
-		}
-		decorated[i] = cr
-	}
 
 	writeJSON(w, map[string]any{
 		"projects":   projects,
-		"categories": decorated,
+		"categories": categories,
 	}, nil)
-}
-
-// PUT /api/activities/catalog/categories/{id}/azure-activity
-// Body: {"azure_activity_id": 3 | null}
-func (srv *Server) handleSetCategoryAzureActivity(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r, "id")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	var body struct {
-		AzureActivityID *int64 `json:"azure_activity_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	ctx := r.Context()
-	if err := srv.st.SetCategoryAzureActivity(ctx, id, body.AzureActivityID); err != nil {
-		// isNotFound alone can't disambiguate here: both "unknown category"
-		// and "unknown azure activity id" errors contain "not found", but
-		// only the former is a 404 — an unknown/inactive azure_activity_id
-		// is a validation failure on an otherwise-valid category (422).
-		status := http.StatusUnprocessableEntity
-		if isNotFound(err) && strings.Contains(err.Error(), "timelog category") {
-			status = http.StatusNotFound
-		}
-		http.Error(w, err.Error(), status)
-		return
-	}
-
-	categories, err := srv.st.ListTimelogCategories()
-	if err != nil {
-		writeJSON(w, nil, err)
-		return
-	}
-	for _, c := range categories {
-		if c.ID == id {
-			writeJSON(w, c, nil)
-			return
-		}
-	}
-	// SetCategoryAzureActivity above already validated the category exists
-	// (it errors with RowsAffected==0 otherwise, caught as 404 above), so
-	// reaching here would mean the row vanished between the two queries —
-	// treat it as a server error rather than inventing a 4xx for it.
-	http.Error(w, "category not found after update", http.StatusInternalServerError)
 }
 
 // PUT /api/activities/catalog/categories/{id}/description
@@ -732,7 +652,11 @@ func (srv *Server) handleAddAzureActivity(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	a, err := srv.st.AddAzureActivity(r.Context(), body.Org, body.WorkItemID, body.Label, body.WorkItemType)
+	// project/category_id threading through this handler's request body lands
+	// in the follow-up PR (Slice 2, T2.2); this call site only carries the
+	// mechanical AzureActivityMapping{} trailing arg required for this PR's
+	// store signature change to compile.
+	a, err := srv.st.AddAzureActivity(r.Context(), body.Org, body.WorkItemID, body.Label, body.WorkItemType, store.AzureActivityMapping{})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
@@ -761,7 +685,9 @@ func (srv *Server) handleUpdateAzureActivity(w http.ResponseWriter, r *http.Requ
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	a, err := srv.st.UpdateAzureActivity(r.Context(), id, body.Org, body.Label, body.WorkItemType)
+	// See handleAddAzureActivity's comment: project/category_id threading is
+	// Slice 2's T2.2; this is the mechanical compile-only update.
+	a, err := srv.st.UpdateAzureActivity(r.Context(), id, body.Org, body.Label, body.WorkItemType, store.AzureActivityMapping{})
 	if err != nil {
 		status := http.StatusUnprocessableEntity
 		if isNotFound(err) {
