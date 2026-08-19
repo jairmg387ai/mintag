@@ -87,7 +87,7 @@ func TestAddAzureActivity_FirstRowIsAutoDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999001, "QA Activity", "Bug")
+	a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999001, "QA Activity", "Bug", AzureActivityMapping{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestAddAzureActivity_SecondRowIsNotDefault(t *testing.T) {
 
 	ctx := context.Background()
 	// A default already exists from the migration seed.
-	a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999002, "Second Activity", "")
+	a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999002, "Second Activity", "", AzureActivityMapping{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestListAzureActivities_ExcludesInactiveUnlessRequested(t *testing.T) {
 	defer s.Close()
 
 	ctx := context.Background()
-	extra, err := s.AddAzureActivity(ctx, "RUNT2QA", 999003, "To Deactivate", "")
+	extra, err := s.AddAzureActivity(ctx, "RUNT2QA", 999003, "To Deactivate", "", AzureActivityMapping{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,12 +169,12 @@ func TestUpdateAzureActivity_ChangesOrgAndLabelOnly(t *testing.T) {
 	defer s.Close()
 
 	ctx := context.Background()
-	a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999004, "Old Label", "")
+	a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999004, "Old Label", "", AzureActivityMapping{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	updated, err := s.UpdateAzureActivity(ctx, a.ID, "RUNT2QA-NEW", "New Label", "")
+	updated, err := s.UpdateAzureActivity(ctx, a.ID, "RUNT2QA-NEW", "New Label", "", AzureActivityMapping{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestSetActivityAzureActivity_PersistsAndClearsFK(t *testing.T) {
 		t.Fatal("expected new activity to start with nil azure_activity_id")
 	}
 
-	azureActivity, err := s.AddAzureActivity(ctx, "RUNT2QA", 999005, "Assigned Activity", "")
+	azureActivity, err := s.AddAzureActivity(ctx, "RUNT2QA", 999005, "Assigned Activity", "", AzureActivityMapping{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +292,7 @@ func TestSetActivityAzureActivity_RejectsInactiveAzureActivityID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inactive, err := s.AddAzureActivity(ctx, "RUNT2QA", 999007, "Inactive Assignable", "")
+	inactive, err := s.AddAzureActivity(ctx, "RUNT2QA", 999007, "Inactive Assignable", "", AzureActivityMapping{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +325,7 @@ func TestListActivities_IncludesAzureActivityID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	azureActivity, err := s.AddAzureActivity(ctx, "RUNT2QA", 999006, "Listed Activity", "")
+	azureActivity, err := s.AddAzureActivity(ctx, "RUNT2QA", 999006, "Listed Activity", "", AzureActivityMapping{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,5 +348,224 @@ func TestListActivities_IncludesAzureActivityID(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected created activity to appear in ListActivities")
+	}
+}
+
+// --- AzureActivityMapping round-trip (project + category_id, task 1.2) ---
+
+func mustStrPtr(s string) *string { return &s }
+
+// TestAddAzureActivity_MappingRoundTrip_BothSet verifies AddAzureActivity
+// persists both project and category_id when the mapping specifies both.
+func TestAddAzureActivity_MappingRoundTrip_BothSet(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	cats, err := s.ListTimelogCategories()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cats) == 0 {
+		t.Fatal("expected seeded categories")
+	}
+	category := cats[0]
+
+	a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999010, "Mapped Both", "",
+		AzureActivityMapping{Project: mustStrPtr("Alpha"), CategoryID: &category.ID})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if a.Project == nil || *a.Project != "Alpha" {
+		t.Fatalf("expected project=Alpha, got %v", a.Project)
+	}
+	if a.CategoryID == nil || *a.CategoryID != category.ID {
+		t.Fatalf("expected category_id=%d, got %v", category.ID, a.CategoryID)
+	}
+}
+
+// TestAddAzureActivity_MappingRoundTrip_ProjectOnly verifies a project-only
+// mapping leaves category_id nil.
+func TestAddAzureActivity_MappingRoundTrip_ProjectOnly(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999011, "Mapped Project Only", "",
+		AzureActivityMapping{Project: mustStrPtr("Beta")})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if a.Project == nil || *a.Project != "Beta" {
+		t.Fatalf("expected project=Beta, got %v", a.Project)
+	}
+	if a.CategoryID != nil {
+		t.Fatalf("expected category_id=nil, got %v", *a.CategoryID)
+	}
+}
+
+// TestAddAzureActivity_MappingRoundTrip_CategoryOnly verifies a category-only
+// mapping leaves project nil.
+func TestAddAzureActivity_MappingRoundTrip_CategoryOnly(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	cats, err := s.ListTimelogCategories()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cats) == 0 {
+		t.Fatal("expected seeded categories")
+	}
+	category := cats[0]
+
+	a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999012, "Mapped Category Only", "",
+		AzureActivityMapping{CategoryID: &category.ID})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if a.Project != nil {
+		t.Fatalf("expected project=nil, got %v", *a.Project)
+	}
+	if a.CategoryID == nil || *a.CategoryID != category.ID {
+		t.Fatalf("expected category_id=%d, got %v", category.ID, a.CategoryID)
+	}
+}
+
+// TestAddAzureActivity_MappingRoundTrip_Neither verifies a zero-value mapping
+// (both nil) leaves both fields nil — NULL in the database, not the caller's
+// responsibility to special-case.
+func TestAddAzureActivity_MappingRoundTrip_Neither(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999013, "Unmapped", "", AzureActivityMapping{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if a.Project != nil {
+		t.Fatalf("expected project=nil, got %v", *a.Project)
+	}
+	if a.CategoryID != nil {
+		t.Fatalf("expected category_id=nil, got %v", *a.CategoryID)
+	}
+}
+
+// TestAddAzureActivity_MappingBlankProjectStoredAsNil verifies a
+// whitespace-only project string normalizes to nil (NULL), not an empty
+// string, mirroring the trim behavior used elsewhere in this package (e.g.
+// AddTimelogProject).
+func TestAddAzureActivity_MappingBlankProjectStoredAsNil(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999014, "Blank Project", "",
+		AzureActivityMapping{Project: mustStrPtr("   ")})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if a.Project != nil {
+		t.Fatalf("expected blank/whitespace project to normalize to nil, got %q", *a.Project)
+	}
+}
+
+// TestAddAzureActivity_MappingRejectsUnknownCategoryID verifies validateMapping
+// performs an existence-only check against timelog_categories (no is_active
+// column exists on that table — design correction #1).
+func TestAddAzureActivity_MappingRejectsUnknownCategoryID(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	unknown := int64(999999)
+	_, err = s.AddAzureActivity(ctx, "RUNT2QA", 999015, "Bad Category", "",
+		AzureActivityMapping{CategoryID: &unknown})
+	if err == nil {
+		t.Fatal("expected error for unknown category_id")
+	}
+	wantMsg := "timelog category not found: 999999"
+	if err.Error() != wantMsg {
+		t.Fatalf("expected error %q, got %q", wantMsg, err.Error())
+	}
+}
+
+// TestUpdateAzureActivity_MappingRoundTrip_ReplacesMapping verifies
+// UpdateAzureActivity is a full replace of the mapping: an omitted
+// project/category_id in the call clears any previously-stored mapping.
+func TestUpdateAzureActivity_MappingRoundTrip_ReplacesMapping(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	cats, err := s.ListTimelogCategories()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cats) == 0 {
+		t.Fatal("expected seeded categories")
+	}
+	category := cats[0]
+
+	a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999016, "Initially Mapped", "",
+		AzureActivityMapping{Project: mustStrPtr("Alpha"), CategoryID: &category.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := s.UpdateAzureActivity(ctx, a.ID, "RUNT2QA", "Initially Mapped", "", AzureActivityMapping{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if updated.Project != nil {
+		t.Fatalf("expected project cleared to nil, got %q", *updated.Project)
+	}
+	if updated.CategoryID != nil {
+		t.Fatalf("expected category_id cleared to nil, got %v", *updated.CategoryID)
+	}
+}
+
+// TestUpdateAzureActivity_MappingRejectsUnknownCategoryID mirrors the Add
+// path's rejection for Update.
+func TestUpdateAzureActivity_MappingRejectsUnknownCategoryID(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999017, "To Update", "", AzureActivityMapping{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	unknown := int64(999999)
+	_, err = s.UpdateAzureActivity(ctx, a.ID, "RUNT2QA", "To Update", "", AzureActivityMapping{CategoryID: &unknown})
+	if err == nil {
+		t.Fatal("expected error for unknown category_id")
 	}
 }

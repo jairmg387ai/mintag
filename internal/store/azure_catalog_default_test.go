@@ -22,7 +22,7 @@ func TestSetDefaultAzureActivity_ClearsPreviousDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := s.AddAzureActivity(ctx, "RUNT2QA", 999101, "Activity B", "")
+	b, err := s.AddAzureActivity(ctx, "RUNT2QA", 999101, "Activity B", "", AzureActivityMapping{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestSetDefaultAzureActivity_RejectsInactiveID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inactive, err := s.AddAzureActivity(ctx, "RUNT2QA", 999102, "Inactive Activity", "")
+	inactive, err := s.AddAzureActivity(ctx, "RUNT2QA", 999102, "Inactive Activity", "", AzureActivityMapping{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestDeactivateAzureActivity_ConcurrentWithSetDefault_NeverLeavesInactiveDef
 	const n = 5
 	ids := make([]int64, 0, n)
 	for i := 0; i < n; i++ {
-		a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999400+i, "Race Activity", "")
+		a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999400+i, "Race Activity", "", AzureActivityMapping{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -239,7 +239,7 @@ func TestSetDefaultAzureActivity_ConcurrentRequestsYieldExactlyOneDefault(t *tes
 	const n = 8
 	ids := make([]int64, 0, n)
 	for i := 0; i < n; i++ {
-		a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999200+i, "Concurrent Activity", "")
+		a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999200+i, "Concurrent Activity", "", AzureActivityMapping{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -298,7 +298,7 @@ func TestSetDefaultAzureActivity_ConcurrentRequestsRealDB(t *testing.T) {
 	const n = 8
 	ids := make([]int64, 0, n)
 	for i := 0; i < n; i++ {
-		a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999300+i, "Real DB Concurrent Activity", "")
+		a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999300+i, "Real DB Concurrent Activity", "", AzureActivityMapping{})
 		if err != nil {
 			t.Fatal(err)
 		}

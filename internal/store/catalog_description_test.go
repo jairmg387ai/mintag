@@ -66,9 +66,9 @@ func TestUpdateTimelogCategoryDescription_UpdatesExistingCategory(t *testing.T) 
 	}
 }
 
-// TestUpdateTimelogCategoryDescription_UnknownIDReturnsError mirrors
-// SetCategoryAzureActivity's not-found convention: an update against a
-// nonexistent category id surfaces as an error, not a silent no-op.
+// TestUpdateTimelogCategoryDescription_UnknownIDReturnsError verifies the
+// package's not-found convention: an update against a nonexistent category id
+// surfaces as an error, not a silent no-op.
 func TestUpdateTimelogCategoryDescription_UnknownIDReturnsError(t *testing.T) {
 	s := openTestDB(t)
 	ctx := context.Background()

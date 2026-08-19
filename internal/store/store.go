@@ -366,13 +366,23 @@ func (s *Store) migrateActivities() error {
 	if err := s.addColumnIfMissing("daily_activities", "reference_id", "reference_id TEXT"); err != nil {
 		return err
 	}
-	if err := s.addColumnIfMissing("timelog_categories", "azure_activity_id", "azure_activity_id INTEGER"); err != nil {
-		return err
-	}
 	if err := s.addColumnIfMissing("timelog_categories", "description", "description TEXT"); err != nil {
 		return err
 	}
 	if err := s.addColumnIfMissing("azure_activities", "work_item_type", "work_item_type TEXT"); err != nil {
+		return err
+	}
+	// project/category_id invert the mapping direction onto azure_activities:
+	// the work item is now the single source of truth for project/category
+	// autofill (see design D1/D2). The former timelog_categories.azure_activity_id
+	// column is intentionally left orphaned above — its addColumnIfMissing call
+	// was deleted, not replaced with a DROP COLUMN (no DROP precedent in this
+	// repo's additive-only migrate()); fresh installs never get it, existing
+	// installs keep it unread.
+	if err := s.addColumnIfMissing("azure_activities", "project", "project TEXT"); err != nil {
+		return err
+	}
+	if err := s.addColumnIfMissing("azure_activities", "category_id", "category_id INTEGER"); err != nil {
 		return err
 	}
 	return s.seedDefaultAzureActivity()

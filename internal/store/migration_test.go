@@ -71,27 +71,37 @@ func TestOpenMigratesExistingActivitiesWithoutDataLoss(t *testing.T) {
 	}
 }
 
-// TestMigrationIdempotency_TimelogCategoriesAzureActivityID verifies the
-// nullable timelog_categories.azure_activity_id column is created by
-// migrate() and that re-running migrate() on the same store is a no-op
-// (addColumnIfMissing idempotency), matching the daily_activities precedent.
-func TestMigrationIdempotency_TimelogCategoriesAzureActivityID(t *testing.T) {
+// TestMigrationIdempotency_AzureActivitiesProjectAndCategoryID verifies the
+// nullable azure_activities.project and azure_activities.category_id columns
+// are created by migrate() and that re-running migrate() on the same store is
+// a no-op (addColumnIfMissing idempotency), matching the daily_activities
+// precedent. This replaces the removed
+// TestMigrationIdempotency_TimelogCategoriesAzureActivityID: the mapping
+// direction moved from timelog_categories onto azure_activities (see
+// design D1/D2 — the category→work-item column is orphaned, not migrated).
+func TestMigrationIdempotency_AzureActivitiesProjectAndCategoryID(t *testing.T) {
 	s, err := OpenInMemory()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
 
-	if !columnExists(t, s.db, "timelog_categories", "azure_activity_id") {
-		t.Fatal("expected timelog_categories.azure_activity_id column to exist after Open")
+	if !columnExists(t, s.db, "azure_activities", "project") {
+		t.Fatal("expected azure_activities.project column to exist after Open")
+	}
+	if !columnExists(t, s.db, "azure_activities", "category_id") {
+		t.Fatal("expected azure_activities.category_id column to exist after Open")
 	}
 
 	// run migrate again on the same store — addColumnIfMissing must be a no-op
 	if err := s.migrate(); err != nil {
 		t.Fatalf("second migrate() call failed: %v", err)
 	}
-	if !columnExists(t, s.db, "timelog_categories", "azure_activity_id") {
-		t.Fatal("expected timelog_categories.azure_activity_id column to still exist after re-migrate")
+	if !columnExists(t, s.db, "azure_activities", "project") {
+		t.Fatal("expected azure_activities.project column to still exist after re-migrate")
+	}
+	if !columnExists(t, s.db, "azure_activities", "category_id") {
+		t.Fatal("expected azure_activities.category_id column to still exist after re-migrate")
 	}
 }
 
