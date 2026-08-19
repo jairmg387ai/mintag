@@ -229,6 +229,8 @@ export interface AzureActivity {
   work_item_type: string
   is_active: boolean
   is_default: boolean
+  project?: string | null
+  category_id?: number | null
 }
 
 export interface AssignedAzureWorkItem {
@@ -278,8 +280,6 @@ export interface TimelogCategory {
   id: number
   name: string
   description?: string
-  azure_activity_id?: number | null
-  azure_activity_label?: string | null
 }
 
 export interface ActivityCatalog {

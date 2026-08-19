@@ -256,15 +256,6 @@ export async function removeCatalogCategory(name: string): Promise<void> {
   if (!res.ok) throw new Error(await res.text())
 }
 
-// setCategoryAzureActivity assigns (azureActivityId a number) or clears
-// (azureActivityId null) a category's default Azure activity mapping.
-export function setCategoryAzureActivity(id: number, azureActivityId: number | null): Promise<TimelogCategory> {
-  return request<TimelogCategory>(`/api/activities/catalog/categories/${id}/azure-activity`, {
-    method: 'PUT',
-    body: JSON.stringify({ azure_activity_id: azureActivityId }),
-  })
-}
-
 // updateCatalogCategoryDescription updates an existing category's description.
 export function updateCatalogCategoryDescription(id: number, description: string): Promise<TimelogCategory> {
   return request<TimelogCategory>(`/api/activities/catalog/categories/${id}/description`, {
@@ -279,11 +270,16 @@ export function listAzureActivities(): Promise<AzureActivity[]> {
   return request<AzureActivity[]>('/api/activities/azure-catalog')
 }
 
-export function addAzureActivity(body: { org: string; work_item_id: number; label: string; work_item_type?: string }): Promise<AzureActivity> {
+export function addAzureActivity(
+  body: { org: string; work_item_id: number; label: string; work_item_type?: string; project?: string | null; category_id?: number | null },
+): Promise<AzureActivity> {
   return request<AzureActivity>('/api/activities/azure-catalog', { method: 'POST', body: JSON.stringify(body) })
 }
 
-export function updateAzureActivity(id: number, body: { org: string; label: string; work_item_type?: string }): Promise<AzureActivity> {
+export function updateAzureActivity(
+  id: number,
+  body: { org: string; label: string; work_item_type?: string; project?: string | null; category_id?: number | null },
+): Promise<AzureActivity> {
   return request<AzureActivity>(`/api/activities/azure-catalog/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
 }
 
