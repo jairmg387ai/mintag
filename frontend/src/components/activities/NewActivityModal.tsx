@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, type CSSProperties } from 'react'
 import { X } from 'lucide-react'
 import type { ActivityCatalog, AzureActivity } from '../../types'
 import { createActivity } from '../../api/client'
-import { findDefaultAzureActivity, formatAzureActivityLabel } from './azureActivity'
+import { AzureActivityCombobox } from './AzureActivityCombobox'
 
 interface NewActivityModalProps {
   open: boolean
@@ -85,8 +85,6 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
   }, [open, defaultDate, catalog])
 
   if (!open) return null
-
-  const defaultAzureActivity = findDefaultAzureActivity(azureActivities)
 
   const emptyCatalog =
     catalog !== null &&
@@ -308,20 +306,12 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
           </Field>
 
           <Field label="Actividad de Azure">
-            <select
-              style={selectStyle}
+            <AzureActivityCombobox
+              azureActivities={azureActivities}
               value={azureActivityId}
-              onChange={e => setAzureActivityId(e.target.value)}
-            >
-              <option value="">
-                Usar predeterminada{defaultAzureActivity ? ` (${formatAzureActivityLabel(defaultAzureActivity)})` : ''}
-              </option>
-              {azureActivities.map(a => (
-                <option key={a.id} value={a.id}>
-                  {formatAzureActivityLabel(a)}
-                </option>
-              ))}
-            </select>
+              onChange={setAzureActivityId}
+              inputStyle={selectStyle}
+            />
           </Field>
 
           {submitError && (

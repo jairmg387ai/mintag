@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, type CSSProperties } from 'react'
 import { X } from 'lucide-react'
 import type { DailyActivity, ActivityCatalog, AzureActivity } from '../../types'
 import { updateActivity } from '../../api/client'
-import { findDefaultAzureActivity, formatAzureActivityLabel } from './azureActivity'
+import { AzureActivityCombobox } from './AzureActivityCombobox'
 
 interface EditActivityModalProps {
   activity: DailyActivity | null
@@ -84,8 +84,6 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
   }, [open, activity])
 
   if (!open || !activity) return null
-
-  const defaultAzureActivity = findDefaultAzureActivity(azureActivities)
 
   function validate(): boolean {
     const errs: Record<string, string> = {}
@@ -273,20 +271,12 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
           </Field>
 
           <Field label="Actividad de Azure">
-            <select
-              style={inputStyle}
+            <AzureActivityCombobox
+              azureActivities={azureActivities}
               value={azureActivityId}
-              onChange={e => setAzureActivityId(e.target.value)}
-            >
-              <option value="">
-                Usar predeterminada{defaultAzureActivity ? ` (${formatAzureActivityLabel(defaultAzureActivity)})` : ''}
-              </option>
-              {azureActivities.map(a => (
-                <option key={a.id} value={a.id}>
-                  {formatAzureActivityLabel(a)}
-                </option>
-              ))}
-            </select>
+              onChange={setAzureActivityId}
+              inputStyle={inputStyle}
+            />
           </Field>
 
           {submitError && (
