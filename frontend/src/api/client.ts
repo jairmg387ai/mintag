@@ -31,6 +31,8 @@ import type {
   ClassificationNode,
   CreateWorkItemInput,
   CreatedWorkItemResponse,
+  CloseWorkItemResponse,
+  RecreateWorkItemResponse,
 } from '../types'
 
 async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
@@ -332,6 +334,24 @@ export function fetchAzureWorkItemStates(ids: number[]): Promise<AssignedAzureWo
   if (ids.length === 0) return Promise.resolve({ org: '', items: [] })
   const qs = new URLSearchParams({ ids: ids.join(',') })
   return request<AssignedAzureWorkItemsResponse>(`/api/activities/azure-work-items/states?${qs}`)
+}
+
+// closeAzureWorkItem closes a Task in Azure DevOps, syncing Completed/Remaining
+// Work with hours logged in TimeLog first. Irreversible — callers must confirm
+// with the user before calling this.
+export function closeAzureWorkItem(workItemId: number): Promise<CloseWorkItemResponse> {
+  return request<CloseWorkItemResponse>(`/api/activities/azure-work-items/${workItemId}/close`, {
+    method: 'POST',
+  })
+}
+
+// recreateAzureWorkItem closes workItemId and creates a new work item with
+// the same Title/Description/Area/Iteration/Estimate. Irreversible — callers
+// must confirm with the user before calling this.
+export function recreateAzureWorkItem(workItemId: number): Promise<RecreateWorkItemResponse> {
+  return request<RecreateWorkItemResponse>(`/api/activities/azure-work-items/${workItemId}/recreate`, {
+    method: 'POST',
+  })
 }
 
 // exportActivities downloads the .xlsx export for [from, to] (inclusive) and

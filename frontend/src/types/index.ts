@@ -156,6 +156,24 @@ export interface CreatedWorkItemResponse {
   catalog_error?: string
 }
 
+export interface CloseWorkItemResponse {
+  state: string
+  hours_synced: number
+  already_closed?: boolean
+  effort_sync_error?: string
+}
+
+export interface RecreateWorkItemResponse {
+  id: number
+  state: string
+  hours_synced: number
+  catalog_reassigned: boolean
+  azure_activity_id?: number
+  activation_error?: string
+  effort_sync_error?: string
+  catalog_error?: string
+}
+
 // --- Menu Options (configurable sidebar catalog) ---
 
 export interface MenuOptionStatus {

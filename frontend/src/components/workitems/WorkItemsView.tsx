@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Plus, FilePlus2, RefreshCw } from 'lucide-react'
 import type { ActivityCatalog, AzureActivity, AssignedAzureWorkItem, CreatedWorkItemResponse } from '../../types'
-import { getActivityCatalog, listAzureActivities, fetchAzureWorkItemStates } from '../../api/client'
+import { getActivityCatalog, listAzureActivities, fetchAzureWorkItemStates, closeAzureWorkItem, recreateAzureWorkItem } from '../../api/client'
 import { useAppActions } from '../../store/AppContext'
 import { Card, CardHeader } from '../ui/Card'
 import { CreateWorkItemModal } from './CreateWorkItemModal'
@@ -22,6 +22,7 @@ export function WorkItemsView() {
   const [activitiesLoading, setActivitiesLoading] = useState(true)
   const [liveStates, setLiveStates] = useState<Record<number, AssignedAzureWorkItem>>({})
   const [statesLoading, setStatesLoading] = useState(false)
+  const [rowBusy, setRowBusy] = useState<Record<number, boolean>>({})
 
   const loadAzureActivities = useCallback(() => {
     setActivitiesLoading(true)
@@ -53,6 +54,59 @@ export function WorkItemsView() {
       pushToast(e instanceof Error ? e.message : 'No se pudo refrescar el estado de los work items', true)
     } finally {
       setStatesLoading(false)
+    }
+  }
+
+  // handleClose/handleRecreate are destructive, irreversible Azure mutations
+  // (see azure.Client.CloseWorkItem/CreateAndActivateWorkItem doc comments) —
+  // both require an explicit confirm, mirroring ActivitiesView's
+  // window.confirm convention for the delete action.
+  async function handleClose(workItemId: number, label: string) {
+    const message = `Se cerrará el work item ${workItemId} (${label}) en Azure DevOps. Antes se sincronizarán Completed Work y Remaining Work con las horas registradas en TimeLog. Esta acción no se puede deshacer.`
+    if (!window.confirm(message)) return
+
+    setRowBusy(prev => ({ ...prev, [workItemId]: true }))
+    try {
+      const result = await closeAzureWorkItem(workItemId)
+      setLiveStates(prev => ({
+        ...prev,
+        [workItemId]: { ...(prev[workItemId] ?? { id: workItemId, title: '', type: '' }), state: result.state },
+      }))
+      pushToast(
+        result.already_closed
+          ? `El work item ${workItemId} ya estaba cerrado.`
+          : `Work item ${workItemId} cerrado (${result.hours_synced} h sincronizadas).`,
+        false,
+      )
+      if (result.effort_sync_error) {
+        pushToast(`No se pudo sincronizar el esfuerzo: ${result.effort_sync_error}`, true)
+      }
+    } catch (e: unknown) {
+      pushToast(e instanceof Error ? e.message : 'No se pudo cerrar el work item', true)
+    } finally {
+      setRowBusy(prev => ({ ...prev, [workItemId]: false }))
+    }
+  }
+
+  async function handleRecreate(workItemId: number, label: string) {
+    const message = `Se cerrará el work item ${workItemId} (${label}) y se creará uno nuevo con la misma información, ajustando las fechas al mes actual. Antes de cerrarlo se sincronizarán Completed Work y Remaining Work con las horas registradas en TimeLog. Esta acción no se puede deshacer.`
+    if (!window.confirm(message)) return
+
+    setRowBusy(prev => ({ ...prev, [workItemId]: true }))
+    try {
+      const result = await recreateAzureWorkItem(workItemId)
+      pushToast(`Work item ${workItemId} cerrado (${result.hours_synced} h sincronizadas) y recreado como #${result.id}.`, false)
+      if (result.activation_error) {
+        pushToast(`No se pudo activar el nuevo work item: ${result.activation_error}`, true)
+      }
+      if (result.catalog_error) {
+        pushToast(`No se pudo reasignar el catálogo al nuevo work item: ${result.catalog_error}`, true)
+      }
+      loadAzureActivities()
+    } catch (e: unknown) {
+      pushToast(e instanceof Error ? e.message : 'No se pudo recrear el work item', true)
+    } finally {
+      setRowBusy(prev => ({ ...prev, [workItemId]: false }))
     }
   }
 
@@ -154,24 +208,57 @@ export function WorkItemsView() {
                       <th>CATEGORÍA</th>
                       <th>PREDETERMINADO</th>
                       <th>ESTADO</th>
+                      <th>ACCIONES</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {azureActivities.map(a => (
-                      <tr key={a.id}>
-                        <td style={{ font: 'var(--text-mono)', color: 'var(--fg1)' }}>{a.work_item_id}</td>
-                        <td style={{ color: 'var(--fg1)' }}>{a.label}</td>
-                        <td style={{ color: 'var(--fg2)' }}>{a.work_item_type || '—'}</td>
-                        <td style={{ color: 'var(--fg2)' }}>{a.project || '—'}</td>
-                        <td style={{ color: 'var(--fg2)' }}>{categoryName(a.category_id)}</td>
-                        <td style={{ color: 'var(--fg2)' }}>{a.is_default ? 'Sí' : '—'}</td>
-                        <td>
-                          {liveStates[a.work_item_id]
-                            ? <AzureWorkItemStateBadge state={liveStates[a.work_item_id].state} />
-                            : <span style={{ color: 'var(--fg3)' }}>—</span>}
-                        </td>
-                      </tr>
-                    ))}
+                    {azureActivities.map(a => {
+                      // Close/Recreate only apply to Tasks — mirrors the
+                      // coworker reference implementation's isBug exclusion;
+                      // Bugs have no such action here either.
+                      const isTask = a.work_item_type === 'Task'
+                      const closedAlready = liveStates[a.work_item_id]?.state
+                        ? liveStates[a.work_item_id].state === 'Closed' || liveStates[a.work_item_id].state === 'Cerrado'
+                        : false
+                      const busy = !!rowBusy[a.work_item_id]
+                      return (
+                        <tr key={a.id}>
+                          <td style={{ font: 'var(--text-mono)', color: 'var(--fg1)' }}>{a.work_item_id}</td>
+                          <td style={{ color: 'var(--fg1)' }}>{a.label}</td>
+                          <td style={{ color: 'var(--fg2)' }}>{a.work_item_type || '—'}</td>
+                          <td style={{ color: 'var(--fg2)' }}>{a.project || '—'}</td>
+                          <td style={{ color: 'var(--fg2)' }}>{categoryName(a.category_id)}</td>
+                          <td style={{ color: 'var(--fg2)' }}>{a.is_default ? 'Sí' : '—'}</td>
+                          <td>
+                            {liveStates[a.work_item_id]
+                              ? <AzureWorkItemStateBadge state={liveStates[a.work_item_id].state} />
+                              : <span style={{ color: 'var(--fg3)' }}>—</span>}
+                          </td>
+                          <td>
+                            {isTask ? (
+                              <div style={{ display: 'flex', gap: 6 }}>
+                                <button
+                                  className="btn btn-ghost btn-sm"
+                                  disabled={busy || closedAlready}
+                                  onClick={() => handleClose(a.work_item_id, a.label)}
+                                >
+                                  Cerrar
+                                </button>
+                                <button
+                                  className="btn btn-ghost btn-sm"
+                                  disabled={busy || closedAlready}
+                                  onClick={() => handleRecreate(a.work_item_id, a.label)}
+                                >
+                                  Recrear
+                                </button>
+                              </div>
+                            ) : (
+                              <span style={{ color: 'var(--fg3)' }}>—</span>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>

@@ -37,6 +37,8 @@ var reActivityDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 //	GET    /api/activities/azure-work-items/assigned
 //	POST   /api/activities/azure-work-items
 //	GET    /api/activities/azure-work-items/states?ids=
+//	POST   /api/activities/azure-work-items/{id}/close
+//	POST   /api/activities/azure-work-items/{id}/recreate
 //	GET    /api/activities/azure-classification-nodes/{kind}
 //	GET    /api/activities/catalog
 //	POST   /api/activities/catalog/projects
@@ -66,6 +68,8 @@ func registerActivityRoutes(r chi.Router, srv *Server) {
 	r.With(requireLocalRequest).Get("/activities/azure-work-items/assigned", srv.handleListAssignedAzureWorkItems)
 	r.With(requireLocalRequest).Post("/activities/azure-work-items", srv.handleCreateAzureWorkItem)
 	r.With(requireLocalRequest).Get("/activities/azure-work-items/states", srv.handleGetAzureWorkItemStates)
+	r.With(requireLocalRequest).Post("/activities/azure-work-items/{id}/close", srv.handleCloseAzureWorkItem)
+	r.With(requireLocalRequest).Post("/activities/azure-work-items/{id}/recreate", srv.handleRecreateAzureWorkItem)
 	r.With(requireLocalRequest).Get("/activities/azure-classification-nodes/{kind}", srv.handleGetAzureClassificationTree)
 	r.Get("/activities/catalog", srv.handleActivityCatalog)
 	r.Post("/activities/catalog/projects", srv.handleAddCatalogProject)

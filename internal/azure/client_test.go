@@ -1160,6 +1160,289 @@ func TestFetchClassificationTree_ErrorStatusSanitized(t *testing.T) {
 	}
 }
 
+func TestFetchWorkItemFull_Success(t *testing.T) {
+	var path, query string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		query = r.URL.RawQuery
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":555,"fields":{
+			"System.Title":"Fix login bug",
+			"System.Description":"desc here",
+			"System.WorkItemType":"Task",
+			"System.State":"Active",
+			"System.AreaPath":"PROJ\\Team",
+			"System.IterationPath":"PROJ\\Sprint1",
+			"Microsoft.VSTS.Scheduling.OriginalEstimate":16
+		}}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", TeamProject: "PROJ", User: "U"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+	full, err := c.FetchWorkItemFull(context.Background(), 555)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if path != "/ORG/_apis/wit/workitems/555" {
+		t.Errorf("expected org-scoped (no team project) path, got %q", path)
+	}
+	if !strings.Contains(query, "api-version=7.1-preview.3") {
+		t.Errorf("unexpected query: %s", query)
+	}
+	want := &WorkItemFull{
+		ID: 555, Title: "Fix login bug", Description: "desc here", Type: "Task", State: "Active",
+		AreaPath: `PROJ\Team`, IterationPath: `PROJ\Sprint1`, OriginalEstimate: 16,
+	}
+	if *full != *want {
+		t.Errorf("unexpected result: %+v, want %+v", full, want)
+	}
+}
+
+func TestFetchWorkItemFull_NotFoundReturnsNilNil(t *testing.T) {
+	for _, status := range []int{http.StatusBadRequest, http.StatusNotFound} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(status)
+			}))
+			defer srv.Close()
+
+			c := &Client{
+				cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", TeamProject: "PROJ", User: "U"},
+				http: &http.Client{Transport: redirectToServer(srv.URL)},
+			}
+			full, err := c.FetchWorkItemFull(context.Background(), 1)
+			if err != nil {
+				t.Fatalf("expected nil error for %d, got %v", status, err)
+			}
+			if full != nil {
+				t.Errorf("expected nil result for %d, got %+v", status, full)
+			}
+		})
+	}
+}
+
+func TestFetchWorkItemFull_NotEnabled_NoHTTPCall(t *testing.T) {
+	callMade := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callMade = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "", Org: "ORG"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+	_, err := c.FetchWorkItemFull(context.Background(), 1)
+	if err == nil {
+		t.Error("expected error when token is not configured")
+	}
+	if callMade {
+		t.Error("HTTP call should not be made when not enabled")
+	}
+}
+
+func TestFetchTimeLogDocuments_BareArrayShape(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`[{"workItemId":555,"minutes":120},{"workItemId":999,"minutes":30}]`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+	docs, err := c.FetchTimeLogDocuments(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(docs) != 2 || docs[0] != (TimeLogDocument{WorkItemID: 555, Minutes: 120}) {
+		t.Errorf("unexpected docs: %+v", docs)
+	}
+}
+
+func TestFetchTimeLogDocuments_WrappedItemsShape(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"count":1,"items":[{"workItemId":555,"minutes":90}]}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+	docs, err := c.FetchTimeLogDocuments(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(docs) != 1 || docs[0] != (TimeLogDocument{WorkItemID: 555, Minutes: 90}) {
+		t.Errorf("unexpected docs: %+v", docs)
+	}
+}
+
+func TestSyncEffortFromTimeLog_ComputesTotalsAndPatches(t *testing.T) {
+	var patchOps []patchOp
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			w.WriteHeader(http.StatusOK)
+			// 555 has 90+30=120 minutes = 2h logged; a decoy id (999) must be excluded.
+			w.Write([]byte(`[{"workItemId":555,"minutes":90},{"workItemId":555,"minutes":30},{"workItemId":999,"minutes":600}]`)) //nolint:errcheck
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &patchOps) //nolint:errcheck
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":555}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", TeamProject: "PROJ", User: "U"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+	total, err := c.SyncEffortFromTimeLog(context.Background(), 555, 16)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if total != 2 {
+		t.Errorf("expected total=2h, got %v", total)
+	}
+	got := opValues(patchOps)
+	if got["/fields/Microsoft.VSTS.Scheduling.CompletedWork"] != 2.0 {
+		t.Errorf("expected CompletedWork=2, got %v", got["/fields/Microsoft.VSTS.Scheduling.CompletedWork"])
+	}
+	if got["/fields/Microsoft.VSTS.Scheduling.RemainingWork"] != 14.0 {
+		t.Errorf("expected RemainingWork=14, got %v", got["/fields/Microsoft.VSTS.Scheduling.RemainingWork"])
+	}
+}
+
+func TestSyncEffortFromTimeLog_RemainingFloorsAtZeroWhenOverEstimate(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`[{"workItemId":1,"minutes":1200}]`)) //nolint:errcheck // 20h logged
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":1}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", TeamProject: "PROJ", User: "U"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+	total, err := c.SyncEffortFromTimeLog(context.Background(), 1, 8)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if total != 20 {
+		t.Errorf("expected total=20h, got %v", total)
+	}
+}
+
+func TestCloseWorkItem_AlreadyClosed_NoOp(t *testing.T) {
+	callMade := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callMade = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", TeamProject: "PROJ", User: "U"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+	for _, state := range []string{"Closed", "Cerrado"} {
+		if err := c.CloseWorkItem(context.Background(), 1, state); err != nil {
+			t.Fatalf("unexpected error for state %q: %v", state, err)
+		}
+	}
+	if callMade {
+		t.Error("no HTTP call should be made when the work item is already closed")
+	}
+}
+
+func TestCloseWorkItem_ProposedActivatesFirstThenCloses(t *testing.T) {
+	var patches [][]patchOp
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var ops []patchOp
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &ops) //nolint:errcheck
+		patches = append(patches, ops)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":1}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", TeamProject: "PROJ", User: "U"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+	if err := c.CloseWorkItem(context.Background(), 1, "Proposed"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Activation (2 PATCHes) + close (2 PATCHes) = 4 total.
+	if len(patches) != 4 {
+		t.Fatalf("expected 4 PATCH calls (activate x2 + close x2), got %d", len(patches))
+	}
+	activateFirst := opValues(patches[0])
+	if activateFirst["/fields/System.State"] != "Active" {
+		t.Errorf("expected first PATCH to activate (State=Active), got %v", activateFirst)
+	}
+	closeFirst := opValues(patches[2])
+	if closeFirst["/fields/System.State"] != "Closed" {
+		t.Errorf("expected third PATCH to close (State=Closed), got %v", closeFirst)
+	}
+	if closeFirst["/fields/System.Reason"] != "Complete and Does Not Require Review/Test" {
+		t.Errorf("expected close reason, got %v", closeFirst)
+	}
+}
+
+func TestCloseWorkItem_ActiveState_TwoStepCloseOnly(t *testing.T) {
+	var patches [][]patchOp
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var ops []patchOp
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &ops) //nolint:errcheck
+		patches = append(patches, ops)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":1}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", TeamProject: "PROJ", User: "U"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+	if err := c.CloseWorkItem(context.Background(), 1, "Active"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(patches) != 2 {
+		t.Fatalf("expected exactly 2 PATCH calls (no activation needed), got %d", len(patches))
+	}
+	first := opValues(patches[0])
+	if first["/fields/System.State"] != "Closed" {
+		t.Errorf("expected first PATCH to set State=Closed, got %v", first)
+	}
+	const wantReason = "Complete and Does Not Require Review/Test"
+	if first["/fields/System.Reason"] != wantReason || first["/fields/Custom.Resolucion"] != wantReason {
+		t.Errorf("expected first PATCH to set close reason/resolucion, got %v", first)
+	}
+	second := opValues(patches[1])
+	if _, ok := second["/fields/System.State"]; ok {
+		t.Errorf("expected second PATCH to NOT include System.State, got %v", second)
+	}
+	if second["/fields/System.Reason"] != wantReason || second["/fields/Custom.Resolucion"] != wantReason {
+		t.Errorf("expected second PATCH to re-affirm close reason/resolucion, got %v", second)
+	}
+}
+
 // freezeNow overrides timeNow for the duration of the calling test, restoring
 // it on cleanup. fixed is given as UTC; timeNow's caller converts to the
 // fixed Colombia (UTC-5) offset before deriving optimistic dates.

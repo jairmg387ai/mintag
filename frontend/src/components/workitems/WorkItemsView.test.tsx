@@ -1,13 +1,15 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { getActivityCatalog, listAzureActivities, fetchAzureWorkItemStates } from '../../api/client'
+import { getActivityCatalog, listAzureActivities, fetchAzureWorkItemStates, closeAzureWorkItem, recreateAzureWorkItem } from '../../api/client'
 import { WorkItemsView } from './WorkItemsView'
 
 vi.mock('../../api/client', () => ({
   getActivityCatalog: vi.fn(),
   listAzureActivities: vi.fn(),
   fetchAzureWorkItemStates: vi.fn(),
+  closeAzureWorkItem: vi.fn(),
+  recreateAzureWorkItem: vi.fn(),
 }))
 
 const pushToast = vi.fn()
@@ -40,6 +42,8 @@ describe('WorkItemsView', () => {
     vi.mocked(getActivityCatalog).mockReset()
     vi.mocked(listAzureActivities).mockReset()
     vi.mocked(fetchAzureWorkItemStates).mockReset()
+    vi.mocked(closeAzureWorkItem).mockReset()
+    vi.mocked(recreateAzureWorkItem).mockReset()
     vi.mocked(getActivityCatalog).mockResolvedValue(catalog)
   })
 
@@ -96,5 +100,80 @@ describe('WorkItemsView', () => {
 
     await waitFor(() => expect(pushToast).toHaveBeenCalledWith(expect.stringContaining('azure: token is not configured'), true))
     expect(screen.getByText('101')).toBeInTheDocument()
+  })
+
+  it('hides Close/Recreate actions for a Bug-type row but shows them for a Task-type row', async () => {
+    vi.mocked(listAzureActivities).mockResolvedValue([
+      { ...oneActivity[0], id: 1, work_item_id: 101, work_item_type: 'Bug' },
+      { ...oneActivity[0], id: 2, work_item_id: 202, work_item_type: 'Task' },
+    ])
+
+    render(<WorkItemsView />)
+    await screen.findByText('101')
+
+    const rows = screen.getAllByRole('row')
+    const bugRow = rows.find(r => r.textContent?.includes('101'))!
+    const taskRow = rows.find(r => r.textContent?.includes('202'))!
+
+    expect(within(bugRow).queryByRole('button', { name: /cerrar/i })).not.toBeInTheDocument()
+    expect(within(bugRow).queryByRole('button', { name: /recrear/i })).not.toBeInTheDocument()
+    expect(within(taskRow).getByRole('button', { name: /cerrar/i })).toBeInTheDocument()
+    expect(within(taskRow).getByRole('button', { name: /recrear/i })).toBeInTheDocument()
+  })
+
+  it('closes a work item after confirmation and shows the synced hours', async () => {
+    vi.mocked(listAzureActivities).mockResolvedValue([{ ...oneActivity[0], work_item_type: 'Task' }])
+    vi.mocked(closeAzureWorkItem).mockResolvedValue({ state: 'Closed', hours_synced: 3 })
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const user = userEvent.setup()
+
+    render(<WorkItemsView />)
+    await screen.findByText('101')
+
+    await user.click(screen.getByRole('button', { name: /cerrar/i }))
+
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(closeAzureWorkItem).toHaveBeenCalledWith(101)
+    await waitFor(() => expect(pushToast).toHaveBeenCalledWith(expect.stringContaining('3'), false))
+    expect(await screen.findByText('Closed')).toBeInTheDocument()
+
+    confirmSpy.mockRestore()
+  })
+
+  it('does not call closeAzureWorkItem when the confirmation is cancelled', async () => {
+    vi.mocked(listAzureActivities).mockResolvedValue([{ ...oneActivity[0], work_item_type: 'Task' }])
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const user = userEvent.setup()
+
+    render(<WorkItemsView />)
+    await screen.findByText('101')
+
+    await user.click(screen.getByRole('button', { name: /cerrar/i }))
+
+    expect(closeAzureWorkItem).not.toHaveBeenCalled()
+
+    confirmSpy.mockRestore()
+  })
+
+  it('recreates a work item after confirmation, refreshing the catalog to show the new id', async () => {
+    vi.mocked(listAzureActivities)
+      .mockResolvedValueOnce([{ ...oneActivity[0], work_item_type: 'Task' }])
+      .mockResolvedValueOnce([{ ...oneActivity[0], work_item_id: 909, work_item_type: 'Task' }])
+    vi.mocked(recreateAzureWorkItem).mockResolvedValue({
+      id: 909, state: 'Active', hours_synced: 1, catalog_reassigned: true, azure_activity_id: 1,
+    })
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const user = userEvent.setup()
+
+    render(<WorkItemsView />)
+    await screen.findByText('101')
+
+    await user.click(screen.getByRole('button', { name: /recrear/i }))
+
+    expect(recreateAzureWorkItem).toHaveBeenCalledWith(101)
+    expect(await screen.findByText('909')).toBeInTheDocument()
+    expect(listAzureActivities).toHaveBeenCalledTimes(2)
+
+    confirmSpy.mockRestore()
   })
 })

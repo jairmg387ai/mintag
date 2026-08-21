@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -117,6 +118,106 @@ func TestAddAzureActivity_SecondRowIsNotDefault(t *testing.T) {
 	}
 	if a.IsDefault {
 		t.Error("expected second added activity to NOT become default when one already exists")
+	}
+}
+
+func TestFindAzureActivityByWorkItemID_Found(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	added, err := s.AddAzureActivity(ctx, "RUNT2QA", 999004, "Find Me", "Task", AzureActivityMapping{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	found, err := s.FindAzureActivityByWorkItemID(ctx, 999004)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if found.ID != added.ID {
+		t.Errorf("expected to find catalog row %d, got %d", added.ID, found.ID)
+	}
+}
+
+func TestFindAzureActivityByWorkItemID_NotFound(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	_, err = s.FindAzureActivityByWorkItemID(context.Background(), 424242)
+	if !errors.Is(err, ErrAzureActivityNotFound) {
+		t.Fatalf("expected ErrAzureActivityNotFound, got %v", err)
+	}
+}
+
+func TestReassignAzureActivityWorkItem_UpdatesWorkItemID(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	added, err := s.AddAzureActivity(ctx, "RUNT2QA", 999005, "Reassign Me", "Task", AzureActivityMapping{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := s.ReassignAzureActivityWorkItem(ctx, added.ID, 999006)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if updated.WorkItemID != 999006 {
+		t.Errorf("expected work_item_id=999006, got %d", updated.WorkItemID)
+	}
+	// Label/project/category/active/default must be untouched by a reassign.
+	if updated.Label != "Reassign Me" {
+		t.Errorf("expected label to remain unchanged, got %q", updated.Label)
+	}
+
+	// The old work item id must no longer resolve.
+	if _, err := s.FindAzureActivityByWorkItemID(ctx, 999005); !errors.Is(err, ErrAzureActivityNotFound) {
+		t.Errorf("expected old work_item_id to no longer resolve, got %v", err)
+	}
+}
+
+func TestReassignAzureActivityWorkItem_RejectsNonPositiveID(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	added, err := s.AddAzureActivity(ctx, "RUNT2QA", 999007, "Reject Me", "Task", AzureActivityMapping{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.ReassignAzureActivityWorkItem(ctx, added.ID, 0); err == nil {
+		t.Error("expected error for newWorkItemID=0")
+	}
+	if _, err := s.ReassignAzureActivityWorkItem(ctx, added.ID, -5); err == nil {
+		t.Error("expected error for negative newWorkItemID")
+	}
+}
+
+func TestReassignAzureActivityWorkItem_NotFound(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	_, err = s.ReassignAzureActivityWorkItem(context.Background(), 999999, 111)
+	if err == nil {
+		t.Error("expected error for a non-existent catalog id")
 	}
 }
 

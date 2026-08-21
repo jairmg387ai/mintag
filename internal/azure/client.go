@@ -726,6 +726,222 @@ func (c *Client) FetchClassificationTree(ctx context.Context, kind string) (Clas
 	return node, nil
 }
 
+// WorkItemFull is the richer single-work-item read used by the Close/Recreate
+// flows (title, description, area/iteration paths, and estimate) — unlike
+// AssignedWorkItem, which only carries the fields the list/table view needs.
+type WorkItemFull struct {
+	ID               int
+	Title            string
+	Description      string
+	Type             string
+	State            string
+	AreaPath         string
+	IterationPath    string
+	OriginalEstimate float64
+}
+
+// FetchWorkItemFull resolves the full field set for a single work item by
+// id, org-scoped (no team project segment — Azure DevOps work item ids are
+// unique per-organization, same as fetchWorkItemDetails above). A 400 or 404
+// response means the work item does not exist and is reported as (nil, nil),
+// not an error, so callers can distinguish "doesn't exist" from a real
+// failure without inspecting error text.
+func (c *Client) FetchWorkItemFull(ctx context.Context, id int) (*WorkItemFull, error) {
+	if !c.Enabled() {
+		return nil, fmt.Errorf("Azure TimeLog token is not configured")
+	}
+
+	const fields = "System.Title,System.Description,System.WorkItemType,System.State," +
+		"System.AreaPath,System.IterationPath,Microsoft.VSTS.Scheduling.OriginalEstimate"
+	url := fmt.Sprintf(
+		"https://dev.azure.com/%s/_apis/wit/workitems/%d?fields=%s&api-version=7.1-preview.3",
+		c.cfg.Org, id, fields,
+	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("azure: build fetch work item request: %w", err)
+	}
+	c.setAuthHeader(req)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("azure: fetch work item http request: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("azure: unexpected fetch work item status %d%s", resp.StatusCode, sanitizedResponseMessage(respBody))
+	}
+	if isHTMLResponse(resp.Header.Get("Content-Type"), respBody) {
+		return nil, fmt.Errorf("azure: Azure returned HTML/sign-in response; token may be expired or auth mode invalid")
+	}
+
+	var parsed struct {
+		ID     int `json:"id"`
+		Fields struct {
+			Title            string  `json:"System.Title"`
+			Description      string  `json:"System.Description"`
+			Type             string  `json:"System.WorkItemType"`
+			State            string  `json:"System.State"`
+			AreaPath         string  `json:"System.AreaPath"`
+			IterationPath    string  `json:"System.IterationPath"`
+			OriginalEstimate float64 `json:"Microsoft.VSTS.Scheduling.OriginalEstimate"`
+		} `json:"fields"`
+	}
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return nil, fmt.Errorf("azure: decode fetch work item response: %w", err)
+	}
+	return &WorkItemFull{
+		ID:               parsed.ID,
+		Title:            parsed.Fields.Title,
+		Description:      parsed.Fields.Description,
+		Type:             parsed.Fields.Type,
+		State:            parsed.Fields.State,
+		AreaPath:         parsed.Fields.AreaPath,
+		IterationPath:    parsed.Fields.IterationPath,
+		OriginalEstimate: parsed.Fields.OriginalEstimate,
+	}, nil
+}
+
+// TimeLogDocument is one entry from the TimeLog extension's Documents
+// collection — the same collection PostTimeEntry/DeleteTimeEntry write to.
+type TimeLogDocument struct {
+	WorkItemID int `json:"workItemId"`
+	Minutes    int `json:"minutes"`
+}
+
+// FetchTimeLogDocuments lists every TimeLog document in the configured org's
+// collection (not scoped to one work item or one user — the same collection
+// GET the coworker reference implementation uses to compute registered
+// hours per work item, see fetchTimeLogs in that codebase). The response is
+// either a bare JSON array or an {"items": [...]} envelope; both are
+// accepted since the collection API has been observed to return either
+// shape.
+func (c *Client) FetchTimeLogDocuments(ctx context.Context) ([]TimeLogDocument, error) {
+	if !c.Enabled() {
+		return nil, fmt.Errorf("Azure TimeLog token is not configured")
+	}
+
+	url := fmt.Sprintf(
+		"https://extmgmt.dev.azure.com/%s/_apis/ExtensionManagement/InstalledExtensions/TimeLog/time-logging-extension/Data/Scopes/Default/Current/Collections/TimeLogData/Documents",
+		c.cfg.Org,
+	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("azure: build fetch time log documents request: %w", err)
+	}
+	c.setAuthHeader(req)
+	req.Header.Set("Accept", "application/json;api-version=3.1-preview.1;excludeUrls=true")
+	req.Header.Set("X-TFS-FedAuthRedirect", "Suppress")
+	req.Header.Set("Origin", "https://dev.azure.com")
+	req.Header.Set("Referer", "https://dev.azure.com/")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("azure: fetch time log documents http request: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("azure: unexpected fetch time log documents status %d%s", resp.StatusCode, sanitizedResponseMessage(respBody))
+	}
+	if isHTMLResponse(resp.Header.Get("Content-Type"), respBody) {
+		return nil, fmt.Errorf("azure: Azure returned HTML/sign-in response; token may be expired or auth mode invalid")
+	}
+
+	var docs []TimeLogDocument
+	if err := json.Unmarshal(respBody, &docs); err != nil {
+		var wrapped struct {
+			Items []TimeLogDocument `json:"items"`
+		}
+		if err2 := json.Unmarshal(respBody, &wrapped); err2 != nil {
+			return nil, fmt.Errorf("azure: decode time log documents response: %w", err)
+		}
+		docs = wrapped.Items
+	}
+	return docs, nil
+}
+
+// SyncEffortFromTimeLog reconciles a work item's CompletedWork/RemainingWork
+// fields with hours actually logged in TimeLog: CompletedWork becomes the
+// total logged (rounded to 2 decimals), RemainingWork becomes
+// max(0, originalEstimate-total) — floored at 0 so over-logging never
+// produces a negative remaining value. Returns the total hours synced.
+func (c *Client) SyncEffortFromTimeLog(ctx context.Context, id int, originalEstimate float64) (float64, error) {
+	docs, err := c.FetchTimeLogDocuments(ctx)
+	if err != nil {
+		return 0, err
+	}
+	var minutes int
+	for _, d := range docs {
+		if d.WorkItemID == id {
+			minutes += d.Minutes
+		}
+	}
+	total := math.Round(float64(minutes)/60*100) / 100
+
+	remaining := 0.0
+	if originalEstimate > 0 {
+		remaining = math.Max(0, math.Round((originalEstimate-total)*100)/100)
+	}
+
+	if err := c.patchWorkItem(ctx, id, []patchOp{
+		{Op: "add", Path: "/fields/Microsoft.VSTS.Scheduling.CompletedWork", Value: total},
+		{Op: "add", Path: "/fields/Microsoft.VSTS.Scheduling.RemainingWork", Value: remaining},
+	}); err != nil {
+		return total, err
+	}
+	return total, nil
+}
+
+// IsClosedState reports whether state is a terminal closed state, in either
+// language the shared process template uses. Exported so callers (e.g. the
+// REST handler layer) can short-circuit a redundant close attempt without
+// duplicating this comparison.
+func IsClosedState(state string) bool {
+	return state == "Closed" || state == "Cerrado"
+}
+
+// closeReason is the fixed CMMI resolution value the shared process template
+// requires for a closed Task — used for both System.Reason and
+// Custom.Resolucion, must match verbatim (case and wording).
+const closeReason = "Complete and Does Not Require Review/Test"
+
+// CloseWorkItem transitions a Task to Closed/"Complete and Does Not Require
+// Review/Test". Already-closed states are a no-op. Proposed tasks have no
+// direct transition to Closed, so they are activated first (same two-step
+// activation as ActivateWorkItem). The close itself is also a two-step PATCH
+// — Azure resets Reason as a side effect of the state transition, so a
+// second PATCH re-affirms Reason/Custom.Resolucion, mirroring
+// ActivateWorkItem's identical gotcha.
+func (c *Client) CloseWorkItem(ctx context.Context, id int, currentState string) error {
+	if IsClosedState(currentState) {
+		return nil
+	}
+	if currentState == "Proposed" {
+		if err := c.ActivateWorkItem(ctx, id); err != nil {
+			return err
+		}
+	}
+	if err := c.patchWorkItem(ctx, id, []patchOp{
+		{Op: "add", Path: "/fields/System.State", Value: "Closed"},
+		{Op: "add", Path: "/fields/System.Reason", Value: closeReason},
+		{Op: "add", Path: "/fields/Custom.Resolucion", Value: closeReason},
+	}); err != nil {
+		return err
+	}
+	return c.patchWorkItem(ctx, id, []patchOp{
+		{Op: "add", Path: "/fields/System.Reason", Value: closeReason},
+		{Op: "add", Path: "/fields/Custom.Resolucion", Value: closeReason},
+	})
+}
+
 func isHTMLResponse(contentType string, body []byte) bool {
 	if strings.Contains(strings.ToLower(contentType), "text/html") {
 		return true

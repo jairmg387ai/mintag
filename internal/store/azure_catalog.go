@@ -15,6 +15,12 @@ import (
 // query failure (e.g. a dropped connection), which is returned as-is.
 var ErrNoDefaultAzureActivity = errors.New("no default azure activity is configured")
 
+// ErrAzureActivityNotFound is returned by FindAzureActivityByWorkItemID when
+// no catalog entry references the given work item id. Not every work item is
+// catalog-registered, so this is an expected, recoverable state — callers
+// use errors.Is to distinguish it from a genuine query failure.
+var ErrAzureActivityNotFound = errors.New("azure activity not found")
+
 // AzureActivity represents a managed, labeled Azure work item that
 // daily_activities records can be assigned to. Exactly one row has
 // IsDefault=true at any point in time (enforced by uq_azure_activities_default
@@ -180,6 +186,45 @@ func (s *Store) UpdateAzureActivity(ctx context.Context, id int64, org, label st
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE azure_activities SET org = ?, label = ?, work_item_type = ?, project = ?, category_id = ? WHERE id = ?`,
 		org, label, strings.TrimSpace(workItemType), normalizedProject(m.Project), m.CategoryID, id,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, fmt.Errorf("azure activity not found: %d", id)
+	}
+	return s.getAzureActivity(ctx, id)
+}
+
+// FindAzureActivityByWorkItemID returns the catalog entry (active or
+// inactive) that references the given Azure work item id, or
+// ErrAzureActivityNotFound if none does — not every work item is
+// catalog-registered, so absence is expected, not an error condition.
+func (s *Store) FindAzureActivityByWorkItemID(ctx context.Context, workItemID int) (*AzureActivity, error) {
+	a := &AzureActivity{}
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, org, work_item_id, label, COALESCE(work_item_type, ''), is_active, is_default, project, category_id FROM azure_activities WHERE work_item_id = ?`, workItemID,
+	).Scan(&a.ID, &a.Org, &a.WorkItemID, &a.Label, &a.WorkItemType, &a.IsActive, &a.IsDefault, &a.Project, &a.CategoryID)
+	if err == sql.ErrNoRows {
+		return nil, ErrAzureActivityNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
+// ReassignAzureActivityWorkItem repoints an existing catalog entry at a new
+// Azure work item id — used when a Task is recreated (closed + a new one
+// created in its place) so the catalog's Project/Category mapping keeps
+// pointing at a loggable, open work item instead of the now-closed original.
+// Label, mapping, is_active, and is_default are all left untouched.
+func (s *Store) ReassignAzureActivityWorkItem(ctx context.Context, id int64, newWorkItemID int) (*AzureActivity, error) {
+	if newWorkItemID <= 0 {
+		return nil, fmt.Errorf("new work_item_id must be greater than 0, got %d", newWorkItemID)
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE azure_activities SET work_item_id = ? WHERE id = ?`, newWorkItemID, id,
 	)
 	if err != nil {
 		return nil, err

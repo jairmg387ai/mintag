@@ -2,10 +2,13 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/Gentleman-Programming/mintag/internal/store"
 )
 
 // azureWorkItemsSuccessServer returns an httptest server that fakes the
@@ -550,4 +553,352 @@ func TestGetAzureClassificationTree_Success(t *testing.T) {
 	badResp, err := http.Get(base + "/api/activities/azure-classification-nodes/bogus")
 	mustNoErr(t, err)
 	assertStatus(t, badResp, http.StatusBadRequest)
+}
+
+// TestCloseAzureWorkItem_Success exercises the full fetch -> effort sync ->
+// two-step close path through the REST handler.
+func TestCloseAzureWorkItem_Success(t *testing.T) {
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
+
+	var patchCount int
+	azureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "connectiondata"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"authenticatedUser":{"id":"id","providerDisplayName":"Name"}}`)) //nolint:errcheck
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/_apis/wit/workitems/555"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"id":555,"fields":{"System.Title":"T","System.WorkItemType":"Task","System.State":"Active","System.AreaPath":"A","System.IterationPath":"I","Microsoft.VSTS.Scheduling.OriginalEstimate":8}}`)) //nolint:errcheck
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "TimeLogData/Documents"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`[{"workItemId":555,"minutes":120}]`)) //nolint:errcheck
+		case r.Method == http.MethodPatch:
+			patchCount++
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"id":555}`)) //nolint:errcheck
+		default:
+			t.Fatalf("unexpected azure request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer azureServer.Close()
+
+	base, _ := newTestServerWithAzureRedirect(t, azureServer.URL)
+	putResp := doJSON(t, http.MethodPut, base+"/api/activities/azure-config", map[string]any{"token": "db-token", "auth_mode": "bearer"})
+	assertStatus(t, putResp, http.StatusOK)
+
+	resp := doJSON(t, http.MethodPost, base+"/api/activities/azure-work-items/555/close", nil)
+	assertStatus(t, resp, http.StatusOK)
+
+	var body struct {
+		State         string  `json:"state"`
+		HoursSynced   float64 `json:"hours_synced"`
+		AlreadyClosed bool    `json:"already_closed"`
+		EffortSyncErr string  `json:"effort_sync_error"`
+	}
+	decodeJSON(t, resp, &body)
+	if body.State != "Closed" || body.HoursSynced != 2 || body.AlreadyClosed {
+		t.Errorf("unexpected response: %+v", body)
+	}
+	if body.EffortSyncErr != "" {
+		t.Errorf("expected no effort_sync_error, got %q", body.EffortSyncErr)
+	}
+	// 1 effort-sync PATCH + 2 close PATCHes = 3.
+	if patchCount != 3 {
+		t.Errorf("expected 3 PATCH calls, got %d", patchCount)
+	}
+}
+
+// TestCloseAzureWorkItem_AlreadyClosed verifies the no-mutation info path:
+// no TimeLog fetch, no PATCH, just an already_closed report.
+func TestCloseAzureWorkItem_AlreadyClosed(t *testing.T) {
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
+
+	azureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "connectiondata"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"authenticatedUser":{"id":"id","providerDisplayName":"Name"}}`)) //nolint:errcheck
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/_apis/wit/workitems/555"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"id":555,"fields":{"System.Title":"T","System.WorkItemType":"Task","System.State":"Closed"}}`)) //nolint:errcheck
+		default:
+			t.Fatalf("unexpected azure request (no TimeLog/PATCH call expected): %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer azureServer.Close()
+
+	base, _ := newTestServerWithAzureRedirect(t, azureServer.URL)
+	putResp := doJSON(t, http.MethodPut, base+"/api/activities/azure-config", map[string]any{"token": "db-token", "auth_mode": "bearer"})
+	assertStatus(t, putResp, http.StatusOK)
+
+	resp := doJSON(t, http.MethodPost, base+"/api/activities/azure-work-items/555/close", nil)
+	assertStatus(t, resp, http.StatusOK)
+
+	var body struct {
+		State         string  `json:"state"`
+		HoursSynced   float64 `json:"hours_synced"`
+		AlreadyClosed bool    `json:"already_closed"`
+	}
+	decodeJSON(t, resp, &body)
+	if body.State != "Closed" || body.HoursSynced != 0 || !body.AlreadyClosed {
+		t.Errorf("unexpected response: %+v", body)
+	}
+}
+
+// TestCloseAzureWorkItem_NotFound verifies a 400/404 from Azure surfaces as
+// a 404 through the handler.
+func TestCloseAzureWorkItem_NotFound(t *testing.T) {
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
+
+	azureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "connectiondata") {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"authenticatedUser":{"id":"id","providerDisplayName":"Name"}}`)) //nolint:errcheck
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer azureServer.Close()
+
+	base, _ := newTestServerWithAzureRedirect(t, azureServer.URL)
+	putResp := doJSON(t, http.MethodPut, base+"/api/activities/azure-config", map[string]any{"token": "db-token", "auth_mode": "bearer"})
+	assertStatus(t, putResp, http.StatusOK)
+
+	resp := doJSON(t, http.MethodPost, base+"/api/activities/azure-work-items/9999/close", nil)
+	assertStatus(t, resp, http.StatusNotFound)
+}
+
+// TestRecreateAzureWorkItem_Success_WithCatalogReassignment covers the full
+// close-old -> create-new -> reassign-catalog happy path.
+func TestRecreateAzureWorkItem_Success_WithCatalogReassignment(t *testing.T) {
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
+
+	azureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "connectiondata"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"authenticatedUser":{"id":"id","providerDisplayName":"Name"}}`)) //nolint:errcheck
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/_apis/wit/workitems/555"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"id":555,"fields":{"System.Title":"Old title","System.WorkItemType":"Task","System.State":"Active","System.AreaPath":"A","System.IterationPath":"I","Microsoft.VSTS.Scheduling.OriginalEstimate":8}}`)) //nolint:errcheck
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "TimeLogData/Documents"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`[{"workItemId":555,"minutes":60}]`)) //nolint:errcheck
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/_apis/wit/workitems/$Task"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"id":777}`)) //nolint:errcheck
+		case r.Method == http.MethodPatch:
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"id":1}`)) //nolint:errcheck
+		default:
+			t.Fatalf("unexpected azure request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer azureServer.Close()
+
+	base, st := newTestServerWithAzureRedirect(t, azureServer.URL)
+	putResp := doJSON(t, http.MethodPut, base+"/api/activities/azure-config", map[string]any{"token": "db-token", "auth_mode": "bearer"})
+	assertStatus(t, putResp, http.StatusOK)
+
+	ctx := context.Background()
+	added, err := st.AddAzureActivity(ctx, "ORG", 555, "Old title", "Task", store.AzureActivityMapping{})
+	mustNoErr(t, err)
+
+	resp := doJSON(t, http.MethodPost, base+"/api/activities/azure-work-items/555/recreate", nil)
+	assertStatus(t, resp, http.StatusOK)
+
+	var body struct {
+		ID                int     `json:"id"`
+		State             string  `json:"state"`
+		HoursSynced       float64 `json:"hours_synced"`
+		CatalogReassigned bool    `json:"catalog_reassigned"`
+		AzureActivityID   int64   `json:"azure_activity_id"`
+		ActivationError   string  `json:"activation_error"`
+		CatalogError      string  `json:"catalog_error"`
+	}
+	decodeJSON(t, resp, &body)
+	if body.ID != 777 || body.State != "Active" || body.HoursSynced != 1 {
+		t.Errorf("unexpected response: %+v", body)
+	}
+	if !body.CatalogReassigned || body.AzureActivityID != added.ID {
+		t.Errorf("expected catalog reassignment to azure_activity_id=%d, got %+v", added.ID, body)
+	}
+	if body.ActivationError != "" || body.CatalogError != "" {
+		t.Errorf("expected no errors, got %+v", body)
+	}
+
+	reassigned, err := st.FindAzureActivityByWorkItemID(ctx, 777)
+	mustNoErr(t, err)
+	if reassigned.ID != added.ID {
+		t.Errorf("expected the same catalog row to now resolve for the new id, got %+v", reassigned)
+	}
+	if _, err := st.FindAzureActivityByWorkItemID(ctx, 555); !errors.Is(err, store.ErrAzureActivityNotFound) {
+		t.Errorf("expected the old id to no longer resolve, got %v", err)
+	}
+}
+
+// TestRecreateAzureWorkItem_NoCatalogEntry_NoReassignment verifies recreate
+// works fine (and reports catalog_reassigned=false, no error) when the old
+// work item was never catalog-registered.
+func TestRecreateAzureWorkItem_NoCatalogEntry_NoReassignment(t *testing.T) {
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
+
+	azureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "connectiondata"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"authenticatedUser":{"id":"id","providerDisplayName":"Name"}}`)) //nolint:errcheck
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/_apis/wit/workitems/321"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"id":321,"fields":{"System.Title":"Unregistered","System.WorkItemType":"Task","System.State":"Active","System.AreaPath":"A","System.IterationPath":"I","Microsoft.VSTS.Scheduling.OriginalEstimate":8}}`)) //nolint:errcheck
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "TimeLogData/Documents"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`[]`)) //nolint:errcheck
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/_apis/wit/workitems/$Task"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"id":888}`)) //nolint:errcheck
+		case r.Method == http.MethodPatch:
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"id":1}`)) //nolint:errcheck
+		default:
+			t.Fatalf("unexpected azure request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer azureServer.Close()
+
+	base, st := newTestServerWithAzureRedirect(t, azureServer.URL)
+	putResp := doJSON(t, http.MethodPut, base+"/api/activities/azure-config", map[string]any{"token": "db-token", "auth_mode": "bearer"})
+	assertStatus(t, putResp, http.StatusOK)
+
+	resp := doJSON(t, http.MethodPost, base+"/api/activities/azure-work-items/321/recreate", nil)
+	assertStatus(t, resp, http.StatusOK)
+
+	var body struct {
+		ID                int    `json:"id"`
+		CatalogReassigned bool   `json:"catalog_reassigned"`
+		CatalogError      string `json:"catalog_error"`
+	}
+	decodeJSON(t, resp, &body)
+	if body.ID != 888 {
+		t.Errorf("unexpected id: %+v", body)
+	}
+	if body.CatalogReassigned {
+		t.Error("expected catalog_reassigned=false when no catalog entry existed for the old id")
+	}
+	if body.CatalogError != "" {
+		t.Errorf("expected no catalog_error when there was simply nothing to reassign, got %q", body.CatalogError)
+	}
+	_ = st
+}
+
+// TestRecreateAzureWorkItem_CloseFails_AbortsBeforeCreate verifies that a
+// failure to close the old work item aborts the whole recreate — a new work
+// item must never be created if the old one couldn't be closed (that would
+// leave two open work items for the same effort).
+func TestRecreateAzureWorkItem_CloseFails_AbortsBeforeCreate(t *testing.T) {
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
+
+	createCalled := false
+	azureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "connectiondata"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"authenticatedUser":{"id":"id","providerDisplayName":"Name"}}`)) //nolint:errcheck
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/_apis/wit/workitems/555"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"id":555,"fields":{"System.Title":"T","System.WorkItemType":"Task","System.State":"Active","System.AreaPath":"A","System.IterationPath":"I","Microsoft.VSTS.Scheduling.OriginalEstimate":8}}`)) //nolint:errcheck
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "TimeLogData/Documents"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`[]`)) //nolint:errcheck
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/_apis/wit/workitems/$Task"):
+			createCalled = true
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"id":999}`)) //nolint:errcheck
+		case r.Method == http.MethodPatch:
+			// Every PATCH fails — including the close attempt.
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(`{"message":"not allowed"}`)) //nolint:errcheck
+		default:
+			t.Fatalf("unexpected azure request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer azureServer.Close()
+
+	base, _ := newTestServerWithAzureRedirect(t, azureServer.URL)
+	putResp := doJSON(t, http.MethodPut, base+"/api/activities/azure-config", map[string]any{"token": "db-token", "auth_mode": "bearer"})
+	assertStatus(t, putResp, http.StatusOK)
+
+	resp := doJSON(t, http.MethodPost, base+"/api/activities/azure-work-items/555/recreate", nil)
+	assertStatus(t, resp, http.StatusBadGateway)
+
+	if createCalled {
+		t.Error("a new work item must never be created when closing the old one failed")
+	}
+}
+
+// TestRecreateAzureWorkItem_ActivationPartialFailure mirrors
+// TestCreateAzureWorkItem's partial-success handling: the new work item
+// exists (Proposed) even though activation failed, so this is a 200 with
+// activation_error, never a 5xx.
+func TestRecreateAzureWorkItem_ActivationPartialFailure(t *testing.T) {
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
+
+	azureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "connectiondata"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"authenticatedUser":{"id":"id","providerDisplayName":"Name"}}`)) //nolint:errcheck
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/_apis/wit/workitems/555"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"id":555,"fields":{"System.Title":"T","System.WorkItemType":"Task","System.State":"Active","System.AreaPath":"A","System.IterationPath":"I","Microsoft.VSTS.Scheduling.OriginalEstimate":8}}`)) //nolint:errcheck
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "TimeLogData/Documents"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`[]`)) //nolint:errcheck
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/_apis/wit/workitems/$Task"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"id":444}`)) //nolint:errcheck
+		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/555"):
+			// Closing the OLD item succeeds.
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"id":555}`)) //nolint:errcheck
+		case r.Method == http.MethodPatch:
+			// Activating the NEW item (444) fails.
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(`{"message":"not allowed"}`)) //nolint:errcheck
+		default:
+			t.Fatalf("unexpected azure request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer azureServer.Close()
+
+	base, _ := newTestServerWithAzureRedirect(t, azureServer.URL)
+	putResp := doJSON(t, http.MethodPut, base+"/api/activities/azure-config", map[string]any{"token": "db-token", "auth_mode": "bearer"})
+	assertStatus(t, putResp, http.StatusOK)
+
+	resp := doJSON(t, http.MethodPost, base+"/api/activities/azure-work-items/555/recreate", nil)
+	assertStatus(t, resp, http.StatusOK)
+
+	var body struct {
+		ID              int    `json:"id"`
+		State           string `json:"state"`
+		ActivationError string `json:"activation_error"`
+	}
+	decodeJSON(t, resp, &body)
+	if body.ID != 444 || body.State != "Proposed" || body.ActivationError == "" {
+		t.Errorf("expected partial success (444, Proposed, non-empty activation_error), got %+v", body)
+	}
 }

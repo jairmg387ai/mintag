@@ -159,6 +159,180 @@ func (srv *Server) handleGetAzureWorkItemStates(w http.ResponseWriter, r *http.R
 	writeJSON(w, map[string]any{"org": az.Config().Org, "items": items}, nil)
 }
 
+// azureWorkItemID parses the {id} path param shared by the close/recreate
+// routes, writing a 400 and returning ok=false on a malformed value.
+func azureWorkItemID(w http.ResponseWriter, r *http.Request) (int, bool) {
+	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil || id <= 0 {
+		http.Error(w, fmt.Sprintf("invalid work item id %q", chi.URLParam(r, "id")), http.StatusBadRequest)
+		return 0, false
+	}
+	return id, true
+}
+
+// POST /api/activities/azure-work-items/{id}/close
+// Closes a Task work item, syncing Completed/Remaining Work with hours
+// actually logged in TimeLog first. Already-closed work items are a no-op
+// (already_closed:true), not an error. The effort sync is best-effort: a
+// failure there does not block the close — the state transition is the
+// point of this action, and a stale Completed/Remaining field is a lesser
+// problem than the work item staying open — so it is surfaced as a non-fatal
+// effort_sync_error while the close still proceeds. A failure to close
+// itself (the primary mutation) IS a hard failure, since nothing else
+// succeeded worth reporting.
+func (srv *Server) handleCloseAzureWorkItem(w http.ResponseWriter, r *http.Request) {
+	id, ok := azureWorkItemID(w, r)
+	if !ok {
+		return
+	}
+
+	az, err := srv.newAzureTimeLogClient(r.Context())
+	if err != nil {
+		writeJSON(w, nil, err)
+		return
+	}
+	if az == nil || !az.Enabled() {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Azure TimeLog token is not configured"}) //nolint:errcheck
+		return
+	}
+
+	full, err := az.FetchWorkItemFull(r.Context(), id)
+	if err != nil {
+		http.Error(w, sanitizePublicError(err), http.StatusBadGateway)
+		return
+	}
+	if full == nil {
+		http.Error(w, fmt.Sprintf("work item %d not found", id), http.StatusNotFound)
+		return
+	}
+
+	if azure.IsClosedState(full.State) {
+		writeJSON(w, map[string]any{"state": full.State, "hours_synced": 0, "already_closed": true}, nil)
+		return
+	}
+
+	resp := map[string]any{}
+	hoursSynced, syncErr := az.SyncEffortFromTimeLog(r.Context(), id, full.OriginalEstimate)
+	if syncErr != nil {
+		resp["effort_sync_error"] = sanitizePublicError(syncErr)
+	}
+	if err := az.CloseWorkItem(r.Context(), id, full.State); err != nil {
+		http.Error(w, sanitizePublicError(err), http.StatusBadGateway)
+		return
+	}
+	resp["state"] = "Closed"
+	resp["hours_synced"] = hoursSynced
+	writeJSON(w, resp, nil)
+}
+
+// POST /api/activities/azure-work-items/{id}/recreate
+// Closes the given Task (same effort-sync-then-close as handleCloseAzureWorkItem)
+// and creates a new one with the same Title/Description/AreaPath/IterationPath/
+// OriginalEstimate. If the old work item was registered in the azure_activities
+// catalog, that entry's work_item_id is repointed at the new work item so the
+// Activities autofill mapping (Project/Category) keeps working — the catalog
+// otherwise silently ends up pointing at a closed, unloggable work item.
+//
+// Closing the old work item is NOT best-effort: if it fails, the whole
+// operation aborts before creating anything, because leaving both the old
+// and a brand-new work item open would double the outstanding effort for
+// the same task. Effort sync and catalog reassignment, like the create
+// endpoint's activation, are both best-effort and surfaced as non-fatal
+// *_error fields once the new work item safely exists.
+func (srv *Server) handleRecreateAzureWorkItem(w http.ResponseWriter, r *http.Request) {
+	id, ok := azureWorkItemID(w, r)
+	if !ok {
+		return
+	}
+
+	az, err := srv.newAzureTimeLogClient(r.Context())
+	if err != nil {
+		writeJSON(w, nil, err)
+		return
+	}
+	if az == nil || !az.Enabled() {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Azure TimeLog token is not configured"}) //nolint:errcheck
+		return
+	}
+
+	old, err := az.FetchWorkItemFull(r.Context(), id)
+	if err != nil {
+		http.Error(w, sanitizePublicError(err), http.StatusBadGateway)
+		return
+	}
+	if old == nil {
+		http.Error(w, fmt.Sprintf("work item %d not found", id), http.StatusNotFound)
+		return
+	}
+
+	resp := map[string]any{}
+	hoursSynced, syncErr := az.SyncEffortFromTimeLog(r.Context(), id, old.OriginalEstimate)
+	if syncErr != nil {
+		resp["effort_sync_error"] = sanitizePublicError(syncErr)
+	}
+	resp["hours_synced"] = hoursSynced
+
+	if err := az.CloseWorkItem(r.Context(), id, old.State); err != nil {
+		http.Error(w, fmt.Sprintf("could not close work item %d, no new work item was created: %s", id, sanitizePublicError(err)), http.StatusBadGateway)
+		return
+	}
+
+	created, err := az.CreateAndActivateWorkItem(r.Context(), azure.CreateWorkItemInput{
+		Title:            old.Title,
+		Description:      old.Description,
+		AreaPath:         old.AreaPath,
+		IterationPath:    old.IterationPath,
+		OriginalEstimate: old.OriginalEstimate,
+	})
+
+	var activationErr *azure.ActivationError
+	if errors.As(err, &activationErr) {
+		resp["id"] = created.ID
+		resp["state"] = created.State
+		resp["activation_error"] = sanitizePublicError(activationErr.Err)
+	} else if err != nil {
+		http.Error(w, sanitizePublicError(err), http.StatusBadGateway)
+		return
+	} else {
+		resp["id"] = created.ID
+		resp["state"] = created.State
+	}
+
+	srv.reassignAzureWorkItemCatalogEntry(r.Context(), id, created.ID, resp)
+	writeJSON(w, resp, nil)
+}
+
+// reassignAzureWorkItemCatalogEntry repoints the catalog entry (if any)
+// referencing oldWorkItemID at newWorkItemID, mutating resp in place with
+// catalog_reassigned/azure_activity_id on success, or catalog_error on
+// failure. Absence of a catalog entry for oldWorkItemID is not an error —
+// not every work item is catalog-registered — and resp reports
+// catalog_reassigned:false in that case.
+func (srv *Server) reassignAzureWorkItemCatalogEntry(ctx context.Context, oldWorkItemID, newWorkItemID int, resp map[string]any) {
+	existing, err := srv.st.FindAzureActivityByWorkItemID(ctx, oldWorkItemID)
+	if errors.Is(err, store.ErrAzureActivityNotFound) {
+		resp["catalog_reassigned"] = false
+		return
+	}
+	if err != nil {
+		resp["catalog_reassigned"] = false
+		resp["catalog_error"] = sanitizePublicError(err)
+		return
+	}
+	reassigned, err := srv.st.ReassignAzureActivityWorkItem(ctx, existing.ID, newWorkItemID)
+	if err != nil {
+		resp["catalog_reassigned"] = false
+		resp["catalog_error"] = sanitizePublicError(err)
+		return
+	}
+	resp["catalog_reassigned"] = true
+	resp["azure_activity_id"] = reassigned.ID
+}
+
 // GET /api/activities/azure-classification-nodes/{kind}
 // Returns the full Area or Iteration path tree for the configured team
 // project (kind must be "areas" or "iterations"), so the frontend can offer
