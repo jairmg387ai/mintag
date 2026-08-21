@@ -283,7 +283,7 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
                   <>
                     <option value="">— Seleccionar proyecto —</option>
                     {catalog.projects.map(p => (
-                      <option key={p} value={p}>{p}</option>
+                      <option key={p.name} value={p.name}>{p.name}</option>
                     ))}
                   </>
                 )}

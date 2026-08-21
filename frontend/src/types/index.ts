@@ -129,7 +129,28 @@ export interface GraphNodeDetail {
   neighbor_count: number
 }
 
-export type ViewName = 'dashboard' | 'tasks' | 'meetings' | 'graph' | 'activities' | 'deployment-windows' | 'settings'
+export type ViewName = 'dashboard' | 'tasks' | 'meetings' | 'graph' | 'activities' | 'deployment-windows' | 'work-items' | 'settings'
+
+// --- Work Items (manual Azure DevOps Task creation) ---
+
+export interface ClassificationNode {
+  name: string
+  children?: ClassificationNode[]
+}
+
+export interface CreateWorkItemInput {
+  title: string
+  description?: string
+  area_path: string
+  iteration_path: string
+  original_estimate?: number
+}
+
+export interface CreatedWorkItemResponse {
+  id: number
+  state: string
+  activation_error?: string
+}
 
 // --- Menu Options (configurable sidebar catalog) ---
 
@@ -282,9 +303,19 @@ export interface TimelogCategory {
   description?: string
 }
 
+export interface CatalogProject {
+  name: string
+  is_active: boolean
+}
+
 export interface ActivityCatalog {
-  projects: string[]
+  projects: CatalogProject[]
   categories: TimelogCategory[]
+}
+
+export interface CatalogRetentionSettings {
+  bug_retention_days: number | null
+  project_retention_days: number | null
 }
 export type TaskViewName = 'list' | 'kanban'
 export type ModalName = 'task' | 'new-task' | 'import' | 'new-project' | 'meeting' | null

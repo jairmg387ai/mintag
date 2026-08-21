@@ -3,7 +3,10 @@ import { resolveAutofill } from './activityAutofill'
 import type { ActivityCatalog, AzureActivity } from '../../types'
 
 const catalog: ActivityCatalog = {
-  projects: ['Alpha', 'Beta'],
+  projects: [
+    { name: 'Alpha', is_active: true },
+    { name: 'Beta', is_active: true },
+  ],
   categories: [
     { id: 1, name: 'Bug' },
     { id: 2, name: 'Feature' },

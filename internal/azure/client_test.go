@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -641,6 +642,428 @@ func TestFetchAssignedWorkItems_WiqlErrorStatus(t *testing.T) {
 	if !strings.Contains(err.Error(), "unexpected wiql status 401: token expired") {
 		t.Errorf("unexpected error message: %v", err)
 	}
+}
+
+func TestNewClientFromEnv_TeamProjectDefault(t *testing.T) {
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "test-pat")
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TEAM_PROJECT", "")
+
+	c := NewClientFromEnv()
+	if c.cfg.TeamProject != "RUNTPRO" {
+		t.Errorf("expected default TeamProject=RUNTPRO, got %q", c.cfg.TeamProject)
+	}
+}
+
+func TestNewClientFromEnv_TeamProjectOverride(t *testing.T) {
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "test-pat")
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TEAM_PROJECT", "CUSTOMPROJ")
+
+	c := NewClientFromEnv()
+	if c.cfg.TeamProject != "CUSTOMPROJ" {
+		t.Errorf("expected TeamProject=CUSTOMPROJ, got %q", c.cfg.TeamProject)
+	}
+}
+
+func TestCreateWorkItem_RequestShapeAndPayload(t *testing.T) {
+	restore := freezeNow(t, time.Date(2026, 6, 12, 14, 30, 0, 0, time.UTC)) // 2026-06-12 09:30 COT
+	defer restore()
+
+	var method, path, contentType string
+	var capturedOps []patchOp
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method = r.Method
+		path = r.URL.Path
+		contentType = r.Header.Get("Content-Type")
+		if !strings.Contains(r.URL.RawQuery, "api-version=7.1-preview.3") {
+			t.Errorf("expected api-version=7.1-preview.3 in query, got %q", r.URL.RawQuery)
+		}
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &capturedOps); err != nil {
+			t.Fatalf("unmarshal request body: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":4242}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", TeamProject: "PROJ", User: "Test User"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+
+	got, err := c.CreateWorkItem(context.Background(), CreateWorkItemInput{
+		Title:            "Fix the thing",
+		AreaPath:         `PROJ\Team\Sub`,
+		IterationPath:    `PROJ\Sprint 1`,
+		OriginalEstimate: 16,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.ID != 4242 || got.State != "Proposed" {
+		t.Errorf("expected {4242 Proposed}, got %+v", got)
+	}
+	if method != http.MethodPost {
+		t.Errorf("expected POST, got %s", method)
+	}
+	if path != "/ORG/PROJ/_apis/wit/workitems/$Task" {
+		t.Errorf("expected path /ORG/PROJ/_apis/wit/workitems/$Task, got %q", path)
+	}
+	if contentType != "application/json-patch+json" {
+		t.Errorf("expected json-patch content type, got %q", contentType)
+	}
+
+	values := opValues(capturedOps)
+	wantValue := map[string]any{
+		"/fields/System.Title":                               "Fix the thing",
+		"/fields/System.AreaPath":                            `PROJ\Team\Sub`,
+		"/fields/System.IterationPath":                       `PROJ\Sprint 1`,
+		"/fields/System.AssignedTo":                          "Test User",
+		"/fields/System.State":                               "Proposed",
+		"/fields/System.Reason":                              "New",
+		"/fields/Microsoft.VSTS.Scheduling.OriginalEstimate": float64(16),
+		"/fields/Microsoft.VSTS.Scheduling.RemainingWork":    float64(16),
+		"/fields/Microsoft.VSTS.Scheduling.CompletedWork":    float64(0),
+		"/fields/Microsoft.VSTS.Common.Triage":               "Pending",
+		"/fields/Microsoft.VSTS.Common.Discipline":           "Desarrollo de Software (Codificación)",
+		"/fields/Microsoft.VSTS.CMMI.Blocked":                "No",
+		"/fields/Microsoft.VSTS.CMMI.TaskType":               "Planned",
+		"/fields/Microsoft.VSTS.CMMI.RequiresReview":         "No",
+		"/fields/Microsoft.VSTS.CMMI.RequiresTest":           "No",
+		"/fields/Microsoft.VSTS.Scheduling.StartDate":        "2026-06-12T05:00:00Z",
+		"/fields/Custom.InicioOptimista":                     "2026-06-12T05:00:00Z",
+		"/fields/Custom.FinOptimista":                        "2026-06-30T05:00:00Z",
+	}
+	for path, want := range wantValue {
+		if got, ok := values[path]; !ok {
+			t.Errorf("missing op for path %q", path)
+		} else if got != want {
+			t.Errorf("path %q: expected value %v, got %v", path, want, got)
+		}
+	}
+	if _, ok := values["/fields/System.Description"]; ok {
+		t.Error("expected no System.Description op when Description is blank")
+	}
+}
+
+func TestCreateWorkItem_DescriptionIncludedWhenProvided(t *testing.T) {
+	restore := freezeNow(t, time.Date(2026, 6, 12, 14, 30, 0, 0, time.UTC))
+	defer restore()
+
+	var capturedOps []patchOp
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &capturedOps) //nolint:errcheck
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":1}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", TeamProject: "PROJ", User: "U"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+	_, err := c.CreateWorkItem(context.Background(), CreateWorkItemInput{
+		Title: "T", Description: "  some description  ", AreaPath: "A", IterationPath: "I",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	values := opValues(capturedOps)
+	if got := values["/fields/System.Description"]; got != "some description" {
+		t.Errorf("expected trimmed description, got %v", got)
+	}
+}
+
+func TestCreateWorkItem_DefaultsEstimateWhenZeroOrNegative(t *testing.T) {
+	restore := freezeNow(t, time.Date(2026, 6, 12, 14, 30, 0, 0, time.UTC))
+	defer restore()
+
+	for _, estimate := range []float64{0, -5} {
+		var capturedOps []patchOp
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			json.Unmarshal(body, &capturedOps) //nolint:errcheck
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"id":1}`)) //nolint:errcheck
+		}))
+
+		c := &Client{
+			cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", TeamProject: "PROJ", User: "U"},
+			http: &http.Client{Transport: redirectToServer(srv.URL)},
+		}
+		_, err := c.CreateWorkItem(context.Background(), CreateWorkItemInput{
+			Title: "T", AreaPath: "A", IterationPath: "I", OriginalEstimate: estimate,
+		})
+		srv.Close()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		values := opValues(capturedOps)
+		if got := values["/fields/Microsoft.VSTS.Scheduling.OriginalEstimate"]; got != float64(24) {
+			t.Errorf("estimate=%v: expected default 24, got %v", estimate, got)
+		}
+	}
+}
+
+func TestCreateWorkItem_NotEnabled_NoHTTPCall(t *testing.T) {
+	callMade := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callMade = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := &Client{cfg: Config{Token: ""}, http: &http.Client{Transport: redirectToServer(srv.URL)}}
+	_, err := c.CreateWorkItem(context.Background(), CreateWorkItemInput{Title: "T", AreaPath: "A", IterationPath: "I"})
+	if err == nil {
+		t.Error("expected error when token is empty")
+	}
+	if callMade {
+		t.Error("HTTP call should not be made when token is empty")
+	}
+}
+
+func TestCreateWorkItem_ErrorStatusSanitized(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"message":"invalid area path","token":"must-not-leak"}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", TeamProject: "PROJ", User: "U"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+	_, err := c.CreateWorkItem(context.Background(), CreateWorkItemInput{Title: "T", AreaPath: "A", IterationPath: "I"})
+	if err == nil || !strings.Contains(err.Error(), "invalid area path") {
+		t.Fatalf("expected sanitized 400 error, got %v", err)
+	}
+	if strings.Contains(err.Error(), "must-not-leak") {
+		t.Errorf("error leaked raw response body: %v", err)
+	}
+}
+
+func TestActivateWorkItem_TwoStepPatch(t *testing.T) {
+	var patches [][]patchOp
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		var ops []patchOp
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &ops) //nolint:errcheck
+		patches = append(patches, ops)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":4242}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", TeamProject: "PROJ", User: "U"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+	if err := c.ActivateWorkItem(context.Background(), 4242); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(patches) != 2 {
+		t.Fatalf("expected exactly 2 PATCH calls, got %d", len(patches))
+	}
+	for _, p := range paths {
+		if p != "/ORG/PROJ/_apis/wit/workitems/4242" {
+			t.Errorf("expected PATCH path /ORG/PROJ/_apis/wit/workitems/4242, got %q", p)
+		}
+	}
+
+	first := opValues(patches[0])
+	if first["/fields/System.State"] != "Active" {
+		t.Errorf("expected first PATCH to set State=Active, got %v", first)
+	}
+	if first["/fields/System.Reason"] != "Accepted" || first["/fields/Custom.Resolucion"] != "Accepted" {
+		t.Errorf("expected first PATCH to set Reason/Resolucion=Accepted, got %v", first)
+	}
+
+	second := opValues(patches[1])
+	if _, ok := second["/fields/System.State"]; ok {
+		t.Errorf("expected second PATCH to NOT include System.State, got %v", second)
+	}
+	if second["/fields/System.Reason"] != "Accepted" || second["/fields/Custom.Resolucion"] != "Accepted" {
+		t.Errorf("expected second PATCH to re-affirm Reason/Resolucion=Accepted, got %v", second)
+	}
+}
+
+func TestActivateWorkItem_FirstPatchFailure_StopsBeforeSecond(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"message":"not allowed"}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", TeamProject: "PROJ", User: "U"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+	err := c.ActivateWorkItem(context.Background(), 1)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if calls != 1 {
+		t.Errorf("expected exactly 1 PATCH call before stopping, got %d", calls)
+	}
+}
+
+func TestCreateAndActivateWorkItem_Success_ReturnsActiveState(t *testing.T) {
+	restore := freezeNow(t, time.Date(2026, 6, 12, 14, 30, 0, 0, time.UTC))
+	defer restore()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		if r.Method == http.MethodPost {
+			w.Write([]byte(`{"id":777}`)) //nolint:errcheck
+			return
+		}
+		w.Write([]byte(`{"id":777}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", TeamProject: "PROJ", User: "U"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+	got, err := c.CreateAndActivateWorkItem(context.Background(), CreateWorkItemInput{Title: "T", AreaPath: "A", IterationPath: "I"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.ID != 777 || got.State != "Active" {
+		t.Errorf("expected {777 Active}, got %+v", got)
+	}
+}
+
+func TestCreateAndActivateWorkItem_ActivationFails_ReturnsPartialSuccessWithProposedState(t *testing.T) {
+	restore := freezeNow(t, time.Date(2026, 6, 12, 14, 30, 0, 0, time.UTC))
+	defer restore()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"id":888}`)) //nolint:errcheck
+			return
+		}
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"message":"cannot transition"}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", TeamProject: "PROJ", User: "U"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+	got, err := c.CreateAndActivateWorkItem(context.Background(), CreateWorkItemInput{Title: "T", AreaPath: "A", IterationPath: "I"})
+	if err == nil {
+		t.Fatal("expected a partial-success error when activation fails")
+	}
+	var activationErr *ActivationError
+	if !errors.As(err, &activationErr) {
+		t.Fatalf("expected *ActivationError, got %T: %v", err, err)
+	}
+	if got.ID != 888 || got.State != "Proposed" {
+		t.Errorf("expected the created work item to be preserved as {888 Proposed}, got %+v", got)
+	}
+	if activationErr.WorkItem.ID != 888 {
+		t.Errorf("expected ActivationError to carry the created work item, got %+v", activationErr.WorkItem)
+	}
+}
+
+func TestFetchClassificationTree_Success_ParsesNestedNodes(t *testing.T) {
+	var path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		if !strings.Contains(r.URL.RawQuery, "$depth=10") || !strings.Contains(r.URL.RawQuery, "api-version=7.1-preview.2") {
+			t.Errorf("unexpected query: %s", r.URL.RawQuery)
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"name":"PROJ","children":[{"name":"Team","children":[{"name":"Sub"}]}]}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", TeamProject: "PROJ", User: "U"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+	node, err := c.FetchClassificationTree(context.Background(), "areas")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if path != "/ORG/PROJ/_apis/wit/classificationnodes/areas" {
+		t.Errorf("expected classification nodes path, got %q", path)
+	}
+	if node.Name != "PROJ" || len(node.Children) != 1 || node.Children[0].Name != "Team" {
+		t.Fatalf("unexpected tree shape: %+v", node)
+	}
+	if len(node.Children[0].Children) != 1 || node.Children[0].Children[0].Name != "Sub" {
+		t.Fatalf("unexpected nested children: %+v", node.Children[0])
+	}
+}
+
+func TestFetchClassificationTree_InvalidKindRejectedLocally_NoHTTPCall(t *testing.T) {
+	callMade := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callMade = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", TeamProject: "PROJ", User: "U"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+	_, err := c.FetchClassificationTree(context.Background(), "bogus")
+	if err == nil {
+		t.Error("expected error for invalid kind")
+	}
+	if callMade {
+		t.Error("HTTP call should not be made for a locally-rejected kind")
+	}
+}
+
+func TestFetchClassificationTree_ErrorStatusSanitized(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"message":"token expired"}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", TeamProject: "PROJ", User: "U"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+	_, err := c.FetchClassificationTree(context.Background(), "iterations")
+	if err == nil || !strings.Contains(err.Error(), "token expired") {
+		t.Fatalf("expected sanitized 401 error, got %v", err)
+	}
+}
+
+// freezeNow overrides timeNow for the duration of the calling test, restoring
+// it on cleanup. fixed is given as UTC; timeNow's caller converts to the
+// fixed Colombia (UTC-5) offset before deriving optimistic dates.
+func freezeNow(t *testing.T, fixed time.Time) func() {
+	t.Helper()
+	orig := timeNow
+	timeNow = func() time.Time { return fixed }
+	return func() { timeNow = orig }
+}
+
+// opValues flattens a json-patch op list to a path->value map for easy
+// assertions (the payload never repeats a path, so this loses no information).
+func opValues(ops []patchOp) map[string]any {
+	out := make(map[string]any, len(ops))
+	for _, op := range ops {
+		out[op.Path] = op.Value
+	}
+	return out
 }
 
 // redirectToServer is a transport that rewrites the host to the test server URL.

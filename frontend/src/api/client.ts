@@ -16,6 +16,7 @@ import type {
   ActivityCatalog,
   TimelogCategory,
   AzureActivity,
+  CatalogRetentionSettings,
   AssignedAzureWorkItemsResponse,
   AzureTimeLogConfigStatus,
   AzureDeviceCodeStartResponse,
@@ -27,6 +28,9 @@ import type {
   DWArtifact,
   DWTestScenario,
   MenuOptionStatus,
+  ClassificationNode,
+  CreateWorkItemInput,
+  CreatedWorkItemResponse,
 } from '../types'
 
 async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
@@ -220,8 +224,9 @@ export function completeAzureDeviceAuth(deviceCode: string): Promise<AzureDevice
   })
 }
 
-export function getActivityCatalog(): Promise<ActivityCatalog> {
-  return request<ActivityCatalog>('/api/activities/catalog')
+export function getActivityCatalog(includeInactive?: boolean): Promise<ActivityCatalog> {
+  const qs = includeInactive ? '?include_inactive=true' : ''
+  return request<ActivityCatalog>(`/api/activities/catalog${qs}`)
 }
 
 export async function deleteActivity(id: number): Promise<void> {
@@ -266,8 +271,9 @@ export function updateCatalogCategoryDescription(id: number, description: string
 
 // --- Azure Activity Catalog (work items) ---
 
-export function listAzureActivities(): Promise<AzureActivity[]> {
-  return request<AzureActivity[]>('/api/activities/azure-catalog')
+export function listAzureActivities(includeInactive?: boolean): Promise<AzureActivity[]> {
+  const qs = includeInactive ? '?include_inactive=true' : ''
+  return request<AzureActivity[]>(`/api/activities/azure-catalog${qs}`)
 }
 
 export function addAzureActivity(
@@ -302,6 +308,23 @@ export function listAssignedAzureWorkItems(): Promise<AssignedAzureWorkItemsResp
   return request<AssignedAzureWorkItemsResponse>('/api/activities/azure-work-items/assigned')
 }
 
+// createAzureWorkItem creates a new Azure DevOps Task work item and
+// attempts to activate it immediately. A response with activation_error set
+// still means the work item was created (state stays "Proposed") — that is
+// not thrown as an error, callers should surface it as a warning instead.
+export function createAzureWorkItem(input: CreateWorkItemInput): Promise<CreatedWorkItemResponse> {
+  return request<CreatedWorkItemResponse>('/api/activities/azure-work-items', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+// fetchClassificationTree returns the full Area or Iteration path tree for
+// the configured Azure DevOps team project.
+export function fetchClassificationTree(kind: 'areas' | 'iterations'): Promise<ClassificationNode> {
+  return request<ClassificationNode>(`/api/activities/azure-classification-nodes/${kind}`)
+}
+
 // exportActivities downloads the .xlsx export for [from, to] (inclusive) and
 // triggers a browser download using the filename the server sent via
 // Content-Disposition, falling back to a locally built name if that header
@@ -328,6 +351,16 @@ export async function exportActivities(from: string, to: string): Promise<void> 
 
 export function updateMeetingSummary(id: number, summary: string): Promise<Meeting> {
   return request<Meeting>(`/api/meetings/${id}/summary`, { method: 'PUT', body: JSON.stringify({ summary }) })
+}
+
+// --- Catalog retention settings ---
+
+export function getCatalogRetention(): Promise<CatalogRetentionSettings> {
+  return request<CatalogRetentionSettings>('/api/settings/catalog-retention')
+}
+
+export function updateCatalogRetention(body: CatalogRetentionSettings): Promise<CatalogRetentionSettings> {
+  return request<CatalogRetentionSettings>('/api/settings/catalog-retention', { method: 'PUT', body: JSON.stringify(body) })
 }
 
 // --- Deployment Windows ---

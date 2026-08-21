@@ -54,6 +54,7 @@ var menuOptionsCatalog = []MenuOption{
 	{ID: "graph", Label: "Knowledge Graph", DefaultEnabled: false},
 	{ID: "activities", Label: "Activities", DefaultEnabled: true},
 	{ID: "deployment-windows", Label: "Deployment Windows", DefaultEnabled: false},
+	{ID: "work-items", Label: "Work Items", DefaultEnabled: false},
 }
 
 // lookupMenuOption returns the catalog entry for id, if any.

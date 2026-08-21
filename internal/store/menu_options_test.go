@@ -313,6 +313,7 @@ func TestMigrateMenuOptions_FreshDatabaseUsesFallbackOnly(t *testing.T) {
 		"graph":              false,
 		"activities":         true,
 		"deployment-windows": false,
+		"work-items":         false,
 	}
 	for _, o := range opts {
 		if o.Enabled != wantEnabled[o.ID] {
@@ -407,7 +408,7 @@ func TestMigrateMenuOptions_ReopenIsIdempotent(t *testing.T) {
 	}
 	wantEnabled := map[string]bool{
 		"dashboard": true, "tasks": true, "meetings": false,
-		"graph": false, "activities": true, "deployment-windows": false,
+		"graph": false, "activities": true, "deployment-windows": false, "work-items": false,
 	}
 	for _, o := range opts {
 		if o.Enabled != wantEnabled[o.ID] {

@@ -1,7 +1,11 @@
 package store
 
 import (
+	"context"
+	"database/sql"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestSeedCatalogs_Idempotent(t *testing.T) {
@@ -16,7 +20,8 @@ func TestSeedCatalogs_Idempotent(t *testing.T) {
 		t.Fatalf("first seed: %v", err)
 	}
 
-	projects, err := s.ListTimelogProjects()
+	ctx := context.Background()
+	projects, err := s.ListTimelogProjects(ctx, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +35,7 @@ func TestSeedCatalogs_Idempotent(t *testing.T) {
 		t.Fatalf("second seed: %v", err)
 	}
 
-	projects2, err := s.ListTimelogProjects()
+	projects2, err := s.ListTimelogProjects(ctx, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,13 +63,189 @@ func TestListTimelogProjects_OrderedAlphabetically(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	projects, err := s.ListTimelogProjects()
+	projects, err := s.ListTimelogProjects(context.Background(), false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for i := 1; i < len(projects); i++ {
 		if projects[i] < projects[i-1] {
 			t.Errorf("projects not ordered at index %d: %q before %q", i, projects[i-1], projects[i])
+		}
+	}
+}
+
+// TestAddTimelogProject_SetsCreatedAt verifies AddTimelogProject stamps
+// created_at on insert (used as the SweepStaleTimelogProjects fallback via
+// COALESCE(last_used_at, created_at) when a project was never touched).
+func TestAddTimelogProject_SetsCreatedAt(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	if err := s.AddTimelogProject("New Project"); err != nil {
+		t.Fatal(err)
+	}
+
+	var createdAt sql.NullString
+	if err := s.db.QueryRow(`SELECT created_at FROM timelog_projects WHERE name = ?`, "New Project").Scan(&createdAt); err != nil {
+		t.Fatal(err)
+	}
+	if !createdAt.Valid || createdAt.String == "" {
+		t.Fatal("expected non-empty created_at after AddTimelogProject")
+	}
+}
+
+// TestListTimelogProjects_ExcludesInactiveUnlessRequested verifies the new
+// includeInactive parameter filters is_active=0 rows by default.
+func TestListTimelogProjects_ExcludesInactiveUnlessRequested(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	if err := s.AddTimelogProject("Active Project"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddTimelogProject("Inactive Project"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeactivateTimelogProject(ctx, "Inactive Project"); err != nil {
+		t.Fatal(err)
+	}
+
+	activeOnly, err := s.ListTimelogProjects(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contains(activeOnly, "Inactive Project") {
+		t.Errorf("expected Inactive Project excluded by default, got %v", activeOnly)
+	}
+	if !contains(activeOnly, "Active Project") {
+		t.Errorf("expected Active Project included, got %v", activeOnly)
+	}
+
+	all, err := s.ListTimelogProjects(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(all, "Inactive Project") {
+		t.Errorf("expected Inactive Project included with includeInactive=true, got %v", all)
+	}
+}
+
+func contains(ss []string, target string) bool {
+	for _, s := range ss {
+		if s == target {
+			return true
+		}
+	}
+	return false
+}
+
+// TestDeactivateTimelogProject_NotFound verifies deactivating an unknown
+// project name returns a "not found"-style error.
+func TestDeactivateTimelogProject_NotFound(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	err = s.DeactivateTimelogProject(context.Background(), "Does Not Exist")
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected 'not found' error, got %v", err)
+	}
+}
+
+// TestTouchTimelogProjectLastUsed_UnknownProjectIsNotAnError verifies
+// touching a project name that was never added to the catalog (project is
+// plain free TEXT on daily_activities, not a FK) is a silent no-op.
+func TestTouchTimelogProjectLastUsed_UnknownProjectIsNotAnError(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	if err := s.TouchTimelogProjectLastUsed(context.Background(), "Never Added"); err != nil {
+		t.Fatalf("expected no error touching an uncataloged project, got %v", err)
+	}
+}
+
+// TestSweepStaleTimelogProjects_DeactivatesOnlyStaleEntries verifies the
+// sweep deactivates only projects whose last_used_at (or created_at, when
+// never touched) predates the retention cutoff, and leaves recently-used
+// projects alone.
+func TestSweepStaleTimelogProjects_DeactivatesOnlyStaleEntries(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	if err := s.AddTimelogProject("Stale Project"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddTimelogProject("Fresh Project"); err != nil {
+		t.Fatal(err)
+	}
+
+	old := time.Now().UTC().AddDate(0, 0, -100).Format(time.RFC3339)
+	if _, err := s.db.Exec(`UPDATE timelog_projects SET created_at = ?, last_used_at = NULL WHERE name = ?`, old, "Stale Project"); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := s.SweepStaleTimelogProjects(ctx, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("expected 1 deactivated, got %d", n)
+	}
+
+	activeOnly, err := s.ListTimelogProjects(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contains(activeOnly, "Stale Project") {
+		t.Error("expected Stale Project deactivated by sweep")
+	}
+	if !contains(activeOnly, "Fresh Project") {
+		t.Error("expected Fresh Project to remain active")
+	}
+}
+
+// TestSweepStaleTimelogProjects_DisabledWhenRetentionDaysNotPositive
+// verifies retentionDays<=0 is a no-op, per the "disabled" convention shared
+// with SweepStaleBugActivities.
+func TestSweepStaleTimelogProjects_DisabledWhenRetentionDaysNotPositive(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	if err := s.AddTimelogProject("Ancient Project"); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().UTC().AddDate(0, 0, -3650).Format(time.RFC3339)
+	if _, err := s.db.Exec(`UPDATE timelog_projects SET created_at = ? WHERE name = ?`, old, "Ancient Project"); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, days := range []int{0, -5} {
+		n, err := s.SweepStaleTimelogProjects(ctx, days)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != 0 {
+			t.Errorf("retentionDays=%d: expected 0 deactivated, got %d", days, n)
 		}
 	}
 }

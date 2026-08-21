@@ -385,7 +385,59 @@ func (s *Store) migrateActivities() error {
 	if err := s.addColumnIfMissing("azure_activities", "category_id", "category_id INTEGER"); err != nil {
 		return err
 	}
-	return s.seedDefaultAzureActivity()
+	// created_at/last_used_at back the automatic catalog staleness sweep (see
+	// catalog_retention.go): a Bug-type work item that goes untouched for the
+	// configured retention window is auto-deactivated. Both are nullable TEXT
+	// added via addColumnIfMissing (this repo's addColumnIfMissing convention
+	// never uses a non-constant default like CURRENT_TIMESTAMP), so existing
+	// rows land with created_at=NULL — backfillCreatedAt below fixes that in
+	// the same migrate() pass, safe to re-run since it only touches NULL rows.
+	if err := s.addColumnIfMissing("azure_activities", "created_at", "created_at TEXT"); err != nil {
+		return err
+	}
+	if err := s.addColumnIfMissing("azure_activities", "last_used_at", "last_used_at TEXT"); err != nil {
+		return err
+	}
+	// backfillCreatedAt for azure_activities runs after seedDefaultAzureActivity
+	// below (not here) — seeding inserts a row without created_at set, and
+	// running backfill before that insert would miss it for a full migrate()
+	// cycle. See the call further down.
+
+	// is_active/created_at/last_used_at mirror the azure_activities retention
+	// columns above, but for timelog_projects (see SweepStaleTimelogProjects
+	// in catalog.go). timelog_projects previously had no soft-delete concept
+	// at all — RemoveTimelogProject hard-deleted — so is_active defaults to 1
+	// (a constant default, same ADD COLUMN precedent as rich_content/
+	// content_type above) so every pre-existing row starts active.
+	if err := s.addColumnIfMissing("timelog_projects", "is_active", "is_active INTEGER NOT NULL DEFAULT 1"); err != nil {
+		return err
+	}
+	if err := s.addColumnIfMissing("timelog_projects", "created_at", "created_at TEXT"); err != nil {
+		return err
+	}
+	if err := s.addColumnIfMissing("timelog_projects", "last_used_at", "last_used_at TEXT"); err != nil {
+		return err
+	}
+	if err := s.backfillCreatedAt("timelog_projects"); err != nil {
+		return err
+	}
+
+	if err := s.seedDefaultAzureActivity(); err != nil {
+		return err
+	}
+	// Runs after seeding so the seeded default row (inserted without
+	// created_at set) gets backfilled in the same migrate() pass instead of
+	// staying NULL until a second call.
+	return s.backfillCreatedAt("azure_activities")
+}
+
+// backfillCreatedAt sets created_at to the current UTC timestamp for every
+// row that still has it NULL (i.e. rows that predate the created_at column
+// being added). Safe to call on every migrate() pass: it only ever touches
+// NULL rows, so it is a no-op once a table is fully backfilled.
+func (s *Store) backfillCreatedAt(table string) error {
+	_, err := s.db.Exec(`UPDATE `+table+` SET created_at = ? WHERE created_at IS NULL`, time.Now().UTC().Format(time.RFC3339))
+	return err
 }
 
 // seedDefaultAzureActivity inserts the legacy hardcoded work item as the sole

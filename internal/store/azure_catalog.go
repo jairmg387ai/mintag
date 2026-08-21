@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // ErrNoDefaultAzureActivity is returned by GetDefaultAzureActivity when the
@@ -81,7 +82,15 @@ func (s *Store) validateMapping(ctx context.Context, m AzureActivityMapping) err
 
 // ListAzureActivities returns catalog entries ordered by label. When
 // includeInactive is false, soft-deleted (is_active=0) rows are excluded.
+//
+// It opportunistically runs the automatic staleness sweep first (see
+// maybeSweepCatalogs in catalog_retention.go) — there is no cron/ticker
+// infrastructure in this codebase, so "sweep on read" is how retention gets
+// enforced without a background job. The sweep's own error is discarded: a
+// failed sweep must never break a plain catalog list read.
 func (s *Store) ListAzureActivities(ctx context.Context, includeInactive bool) ([]*AzureActivity, error) {
+	_ = s.maybeSweepCatalogs(ctx)
+
 	query := `SELECT id, org, work_item_id, label, COALESCE(work_item_type, ''), is_active, is_default, project, category_id FROM azure_activities`
 	if !includeInactive {
 		query += ` WHERE is_active = 1`
@@ -140,8 +149,8 @@ func (s *Store) AddAzureActivity(ctx context.Context, org string, workItemID int
 	isDefault := existing == 0
 
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO azure_activities (org, work_item_id, label, work_item_type, is_active, is_default, project, category_id) VALUES (?, ?, ?, ?, 1, ?, ?, ?)`,
-		org, workItemID, label, strings.TrimSpace(workItemType), isDefault, normalizedProject(m.Project), m.CategoryID,
+		`INSERT INTO azure_activities (org, work_item_id, label, work_item_type, is_active, is_default, project, category_id, created_at) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+		org, workItemID, label, strings.TrimSpace(workItemType), isDefault, normalizedProject(m.Project), m.CategoryID, time.Now().UTC().Format(time.RFC3339),
 	)
 	if err != nil {
 		return nil, err
@@ -263,6 +272,62 @@ func (s *Store) DeactivateAzureActivity(ctx context.Context, id int64) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// TouchAzureActivityLastUsed sets last_used_at = now (UTC, RFC3339) for the
+// given catalog entry, so it survives SweepStaleBugActivities for another
+// full retention window. Callers are the write paths that actually put this
+// entry to use — see activities.go's CreateActivity/ApproveActivities and
+// SetActivityAzureActivity, which link a daily_activities row to id.
+//
+// A missing id is not treated as an error (mirrors
+// TouchTimelogProjectLastUsed in catalog.go): the UPDATE simply affects zero
+// rows, and the caller has no reason to fail an activity write over a
+// catalog-touch miss.
+func (s *Store) TouchAzureActivityLastUsed(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE azure_activities SET last_used_at = ? WHERE id = ?`,
+		time.Now().UTC().Format(time.RFC3339), id,
+	)
+	return err
+}
+
+// SweepStaleBugActivities soft-deletes (is_active=0) Bug-type azure_activities
+// entries that have gone untouched for more than retentionDays. Scoped to
+// work_item_type="Bug" only (case/whitespace-insensitive) — a Task like
+// "Vacaciones" is legitimately used rarely and must never be auto-deactivated
+// by this sweep. The current default (is_default=1) is always exempt, same as
+// DeactivateAzureActivity's manual guard above.
+//
+// retentionDays <= 0 means "disabled" and returns (0, nil) without querying —
+// SetCatalogRetentionDays (catalog_retention.go) represents "disabled" as a
+// nil *int, so callers translate that to 0 (or simply skip calling this at
+// all) rather than passing a negative sentinel through.
+//
+// COALESCE(last_used_at, created_at) means an entry that was created but
+// never explicitly "used" (linked to a daily_activities row) still ages out
+// from its creation date, not forever — both columns are backfilled non-NULL
+// by store.go's migrateActivities, so the COALESCE only matters for the
+// theoretical case where backfill hasn't run yet.
+func (s *Store) SweepStaleBugActivities(ctx context.Context, retentionDays int) (int64, error) {
+	if retentionDays <= 0 {
+		return 0, nil
+	}
+	cutoff := time.Now().UTC().AddDate(0, 0, -retentionDays).Format(time.RFC3339)
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE azure_activities
+		 SET is_active = 0
+		 WHERE is_active = 1
+		   AND is_default = 0
+		   AND LOWER(TRIM(COALESCE(work_item_type, ''))) = 'bug'
+		   AND COALESCE(last_used_at, created_at) < ?`,
+		cutoff,
+	)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
 }
 
 func (s *Store) getAzureActivity(ctx context.Context, id int64) (*AzureActivity, error) {

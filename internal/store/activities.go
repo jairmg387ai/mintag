@@ -78,6 +78,11 @@ func (s *Store) CreateActivity(ctx context.Context, date string, hours float64, 
 		return nil, err
 	}
 	id, _ := res.LastInsertId()
+	// Best-effort: logging an activity always refreshes the project catalog
+	// entry's last_used_at (see TouchTimelogProjectLastUsed's doc comment for
+	// why a project not present in the catalog is not an error here). A
+	// touch failure must never fail the activity that was already created.
+	_ = s.TouchTimelogProjectLastUsed(ctx, project)
 	return s.GetActivity(ctx, id)
 }
 
@@ -180,7 +185,23 @@ func (s *Store) ApproveActivities(ctx context.Context, ids []int64) (int, error)
 			return approved, err
 		}
 		n, _ := res.RowsAffected()
+		if n == 0 {
+			continue
+		}
 		approved += int(n)
+		// Best-effort: approving confirms the activity's project and (if
+		// linked) Azure work item are genuinely in use, so both catalog
+		// entries' last_used_at get refreshed the same as at creation time
+		// (see CreateActivity above). GetActivity can only fail here if the
+		// row vanished between the UPDATE and this read, which would be a
+		// real anomaly — not worth failing an approval that already
+		// committed, so it's swallowed like the touch calls themselves.
+		if a, gerr := s.GetActivity(ctx, id); gerr == nil {
+			_ = s.TouchTimelogProjectLastUsed(ctx, a.Project)
+			if a.AzureActivityID != nil {
+				_ = s.TouchAzureActivityLastUsed(ctx, *a.AzureActivityID)
+			}
+		}
 	}
 	return approved, nil
 }
@@ -232,6 +253,13 @@ func (s *Store) UpdateActivity(ctx context.Context, id int64, hours float64, pro
 	)
 	if err != nil {
 		return nil, err
+	}
+	if project != "" {
+		// Best-effort, same as CreateActivity: editing an activity onto a
+		// new project name means that project is now in use, so refresh its
+		// catalog last_used_at. An unchanged (empty) project isn't touched
+		// here — ApproveActivities already refreshes it independently.
+		_ = s.TouchTimelogProjectLastUsed(ctx, a.Project)
 	}
 	return s.GetActivity(ctx, id)
 }
@@ -352,6 +380,14 @@ func (s *Store) SetActivityAzureActivity(ctx context.Context, id int64, azureAct
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return fmt.Errorf("activity not found: %d", id)
+	}
+	if azureActivityID != nil {
+		// Best-effort: linking an activity to a work item confirms it is
+		// genuinely in use, so refresh the catalog entry's last_used_at
+		// (see TouchAzureActivityLastUsed's doc comment). Never touched when
+		// azureActivityID is nil (clearing the link back to "use the
+		// default") — that's not a "use" of any specific catalog entry.
+		_ = s.TouchAzureActivityLastUsed(ctx, *azureActivityID)
 	}
 	return nil
 }

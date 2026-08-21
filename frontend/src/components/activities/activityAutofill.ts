@@ -40,7 +40,7 @@ export function resolveAutofill({
     // <option> may be written — the loaded catalog is the source of truth
     // for what's selectable. Free-text mode (catalog === null) has no such
     // constraint, so the raw value is written as-is.
-    const valid = project && (catalog === null || catalog.projects.includes(project))
+    const valid = project && (catalog === null || catalog.projects.some(p => p.name === project))
     patch.project = valid ? project : ''
   }
 

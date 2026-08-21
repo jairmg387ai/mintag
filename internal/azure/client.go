@@ -20,13 +20,14 @@ import (
 // Config holds the Azure TimeLog client configuration. All fields have
 // sensible defaults applied by NewClientFromEnv.
 type Config struct {
-	Token      string // MINTAG_AZURE_TIMELOG_TOKEN, or PAT fallback — empty means uploads are disabled
-	AuthMode   string // "bearer" or "basic"; PAT fallback defaults to "basic"
-	Org        string // default: "RUNT2PSW"
-	WorkItemID int    // default: 156263
-	User       string // no default — must be resolved per-identity (see FetchIdentity) or set via MINTAG_AZURE_USER
-	UserID     string // no default — must be resolved per-identity (see FetchIdentity) or set via MINTAG_AZURE_USER_ID
-	EntryType  string // default: "Desarrollo de Software (Codificación)"
+	Token       string // MINTAG_AZURE_TIMELOG_TOKEN, or PAT fallback — empty means uploads are disabled
+	AuthMode    string // "bearer" or "basic"; PAT fallback defaults to "basic"
+	Org         string // default: "RUNT2PSW"
+	WorkItemID  int    // default: 156263
+	User        string // no default — must be resolved per-identity (see FetchIdentity) or set via MINTAG_AZURE_USER
+	UserID      string // no default — must be resolved per-identity (see FetchIdentity) or set via MINTAG_AZURE_USER_ID
+	EntryType   string // default: "Desarrollo de Software (Codificación)"
+	TeamProject string // Azure DevOps team project (distinct from mintag's own "project" concept), default: "RUNTPRO"
 }
 
 // TimeEntry is the payload for a single time-log upload.
@@ -64,13 +65,14 @@ func NewClientFromEnv() *Client {
 		authMode = AuthModeBasic
 	}
 	cfg := Config{
-		Token:      token,
-		AuthMode:   authMode,
-		Org:        envOrDefault("MINTAG_AZURE_ORG", "RUNT2PSW"),
-		WorkItemID: 156263,
-		User:       os.Getenv("MINTAG_AZURE_USER"),
-		UserID:     os.Getenv("MINTAG_AZURE_USER_ID"),
-		EntryType:  envOrDefault("MINTAG_AZURE_ENTRY_TYPE", "Desarrollo de Software (Codificación)"),
+		Token:       token,
+		AuthMode:    authMode,
+		Org:         envOrDefault("MINTAG_AZURE_ORG", "RUNT2PSW"),
+		WorkItemID:  156263,
+		User:        os.Getenv("MINTAG_AZURE_USER"),
+		UserID:      os.Getenv("MINTAG_AZURE_USER_ID"),
+		EntryType:   envOrDefault("MINTAG_AZURE_ENTRY_TYPE", "Desarrollo de Software (Codificación)"),
+		TeamProject: envOrDefault("MINTAG_AZURE_TEAM_PROJECT", "RUNTPRO"),
 	}
 	return NewClient(cfg)
 }
@@ -431,6 +433,283 @@ func (c *Client) fetchWorkItemDetails(ctx context.Context, ids []int) ([]Assigne
 		}
 	}
 	return out, nil
+}
+
+// colombiaLocation is a fixed UTC-5 offset (no DST) used to derive the
+// "optimistic date" fields the shared Azure process template expects
+// (Custom.InicioOptimista/FinOptimista, Scheduling.StartDate) as midnight in
+// Colombia, regardless of what timezone this binary happens to run in.
+var colombiaLocation = time.FixedZone("COT", -5*3600)
+
+// timeNow is a seam for tests to freeze "now" when asserting the
+// optimistic-date fields CreateWorkItem stamps onto a new work item.
+var timeNow = time.Now
+
+// patchOp is one operation in an Azure DevOps json-patch document. A struct
+// (rather than map[string]any) so field order in the marshaled JSON is
+// always op/path/value, matching Azure's own examples and keeping test
+// fixtures diff-friendly.
+type patchOp struct {
+	Op    string `json:"op"`
+	Path  string `json:"path"`
+	Value any    `json:"value"`
+}
+
+// CreateWorkItemInput is the caller-provided subset of fields for a new Task
+// work item; every other field (state, CMMI process fields, optimistic
+// dates) is fixed by CreateWorkItem to match the shared process template.
+type CreateWorkItemInput struct {
+	Title            string
+	Description      string // optional
+	AreaPath         string
+	IterationPath    string
+	OriginalEstimate float64 // hours; <=0 defaults to 24
+}
+
+// CreatedWorkItem is the outcome of CreateWorkItem/CreateAndActivateWorkItem.
+type CreatedWorkItem struct {
+	ID    int
+	State string
+}
+
+// ActivationError wraps a failure to activate a work item that WAS
+// successfully created. Callers must not treat this as a hard failure: the
+// work item exists in Azure (in "Proposed" state) and its ID must not be
+// lost — errors.As lets a caller recover WorkItem to report a partial
+// success instead of pretending nothing happened.
+type ActivationError struct {
+	WorkItem CreatedWorkItem
+	Err      error
+}
+
+func (e *ActivationError) Error() string {
+	return fmt.Sprintf("work item %d created but activation failed: %v", e.WorkItem.ID, e.Err)
+}
+
+func (e *ActivationError) Unwrap() error { return e.Err }
+
+// ClassificationNode is one node of an Azure DevOps Area/Iteration path
+// tree, as returned by the classificationnodes API (only the fields this
+// client needs to flatten into selectable paths are mapped).
+type ClassificationNode struct {
+	Name     string               `json:"name"`
+	Children []ClassificationNode `json:"children,omitempty"`
+}
+
+// toOptimisticDate formats t (expected to already be in colombiaLocation) as
+// the "midnight in Colombia" timestamp the shared CMMI process template
+// expects: YYYY-MM-DDT05:00:00Z.
+func toOptimisticDate(t time.Time) string {
+	return t.Format("2006-01-02") + "T05:00:00Z"
+}
+
+// CreateWorkItem creates a new Task work item in Proposed/New, matching the
+// field set the team's shared Azure DevOps CMMI process template requires
+// (see the coworker reference implementation this was ported from). It does
+// NOT activate the item — callers that want it usable immediately should use
+// CreateAndActivateWorkItem.
+func (c *Client) CreateWorkItem(ctx context.Context, in CreateWorkItemInput) (CreatedWorkItem, error) {
+	if !c.Enabled() {
+		return CreatedWorkItem{}, fmt.Errorf("Azure TimeLog token is not configured")
+	}
+	if strings.TrimSpace(c.cfg.User) == "" {
+		return CreatedWorkItem{}, fmt.Errorf("azure: identity not resolved — reconnect the Azure token (FetchIdentity) before creating work items")
+	}
+
+	estimate := in.OriginalEstimate
+	if estimate <= 0 {
+		estimate = 24
+	}
+
+	now := timeNow().In(colombiaLocation)
+	lastDayOfMonth := time.Date(now.Year(), now.Month()+1, 0, 0, 0, 0, 0, colombiaLocation)
+
+	ops := []patchOp{
+		{Op: "add", Path: "/fields/System.Title", Value: in.Title},
+	}
+	if desc := strings.TrimSpace(in.Description); desc != "" {
+		ops = append(ops, patchOp{Op: "add", Path: "/fields/System.Description", Value: desc})
+	}
+	ops = append(ops,
+		patchOp{Op: "add", Path: "/fields/System.AreaPath", Value: in.AreaPath},
+		patchOp{Op: "add", Path: "/fields/System.IterationPath", Value: in.IterationPath},
+		patchOp{Op: "add", Path: "/fields/System.AssignedTo", Value: c.cfg.User},
+		patchOp{Op: "add", Path: "/fields/System.State", Value: "Proposed"},
+		patchOp{Op: "add", Path: "/fields/System.Reason", Value: "New"},
+		patchOp{Op: "add", Path: "/fields/Microsoft.VSTS.Scheduling.OriginalEstimate", Value: estimate},
+		patchOp{Op: "add", Path: "/fields/Microsoft.VSTS.Scheduling.RemainingWork", Value: estimate},
+		patchOp{Op: "add", Path: "/fields/Microsoft.VSTS.Scheduling.CompletedWork", Value: 0},
+		patchOp{Op: "add", Path: "/fields/Microsoft.VSTS.Common.Triage", Value: "Pending"},
+		patchOp{Op: "add", Path: "/fields/Microsoft.VSTS.Common.Discipline", Value: "Desarrollo de Software (Codificación)"},
+		patchOp{Op: "add", Path: "/fields/Microsoft.VSTS.CMMI.Blocked", Value: "No"},
+		patchOp{Op: "add", Path: "/fields/Microsoft.VSTS.CMMI.TaskType", Value: "Planned"},
+		patchOp{Op: "add", Path: "/fields/Microsoft.VSTS.CMMI.RequiresReview", Value: "No"},
+		patchOp{Op: "add", Path: "/fields/Microsoft.VSTS.CMMI.RequiresTest", Value: "No"},
+		patchOp{Op: "add", Path: "/fields/Microsoft.VSTS.Scheduling.StartDate", Value: toOptimisticDate(now)},
+		patchOp{Op: "add", Path: "/fields/Custom.InicioOptimista", Value: toOptimisticDate(now)},
+		patchOp{Op: "add", Path: "/fields/Custom.FinOptimista", Value: toOptimisticDate(lastDayOfMonth)},
+	)
+
+	body, err := json.Marshal(ops)
+	if err != nil {
+		return CreatedWorkItem{}, fmt.Errorf("azure: marshal create work item payload: %w", err)
+	}
+
+	url := fmt.Sprintf(
+		"https://dev.azure.com/%s/%s/_apis/wit/workitems/$Task?api-version=7.1-preview.3",
+		c.cfg.Org, c.cfg.TeamProject,
+	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return CreatedWorkItem{}, fmt.Errorf("azure: build create work item request: %w", err)
+	}
+	c.setAuthHeader(req)
+	req.Header.Set("Content-Type", "application/json-patch+json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return CreatedWorkItem{}, fmt.Errorf("azure: create work item http request: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return CreatedWorkItem{}, fmt.Errorf("azure: unexpected create work item status %d%s", resp.StatusCode, sanitizedResponseMessage(respBody))
+	}
+	if isHTMLResponse(resp.Header.Get("Content-Type"), respBody) {
+		return CreatedWorkItem{}, fmt.Errorf("azure: Azure returned HTML/sign-in response; token may be expired or auth mode invalid")
+	}
+
+	var created struct {
+		ID int `json:"id"`
+	}
+	if err := json.Unmarshal(respBody, &created); err != nil {
+		return CreatedWorkItem{}, fmt.Errorf("azure: decode create work item response: %w", err)
+	}
+	if created.ID == 0 {
+		return CreatedWorkItem{}, fmt.Errorf("azure: success response missing work item id")
+	}
+	return CreatedWorkItem{ID: created.ID, State: "Proposed"}, nil
+}
+
+// ActivateWorkItem transitions a Task from Proposed to Active/Accepted. This
+// is a non-obvious two-step PATCH: the first PATCH sets State=Active plus
+// Reason/Custom.Resolucion=Accepted, but Azure's workflow resets Reason to
+// its own default as a side effect of the state transition — so a second
+// PATCH re-affirms Reason/Custom.Resolucion=Accepted for it to actually
+// stick. Both must succeed; if the first fails, the second is not attempted.
+func (c *Client) ActivateWorkItem(ctx context.Context, id int) error {
+	if err := c.patchWorkItem(ctx, id, []patchOp{
+		{Op: "add", Path: "/fields/System.State", Value: "Active"},
+		{Op: "add", Path: "/fields/System.Reason", Value: "Accepted"},
+		{Op: "add", Path: "/fields/Custom.Resolucion", Value: "Accepted"},
+	}); err != nil {
+		return err
+	}
+	return c.patchWorkItem(ctx, id, []patchOp{
+		{Op: "add", Path: "/fields/System.Reason", Value: "Accepted"},
+		{Op: "add", Path: "/fields/Custom.Resolucion", Value: "Accepted"},
+	})
+}
+
+// CreateAndActivateWorkItem creates a Task and immediately activates it. If
+// creation fails, no work item exists and the error is returned as-is. If
+// creation succeeds but activation fails, the work item still exists in
+// Azure (Proposed) — that is reported as a partial success: the returned
+// CreatedWorkItem carries the real ID/State and the error is an
+// *ActivationError a caller can unwrap for the underlying activation cause.
+func (c *Client) CreateAndActivateWorkItem(ctx context.Context, in CreateWorkItemInput) (CreatedWorkItem, error) {
+	created, err := c.CreateWorkItem(ctx, in)
+	if err != nil {
+		return CreatedWorkItem{}, err
+	}
+	if err := c.ActivateWorkItem(ctx, created.ID); err != nil {
+		return created, &ActivationError{WorkItem: created, Err: err}
+	}
+	created.State = "Active"
+	return created, nil
+}
+
+// patchWorkItem sends one json-patch PATCH to an existing work item. Shared
+// by the two ActivateWorkItem steps so the request-building/error-handling
+// code exists in exactly one place.
+func (c *Client) patchWorkItem(ctx context.Context, id int, ops []patchOp) error {
+	body, err := json.Marshal(ops)
+	if err != nil {
+		return fmt.Errorf("azure: marshal patch work item payload: %w", err)
+	}
+
+	url := fmt.Sprintf(
+		"https://dev.azure.com/%s/%s/_apis/wit/workitems/%d?api-version=7.1-preview.3",
+		c.cfg.Org, c.cfg.TeamProject, id,
+	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("azure: build patch work item request: %w", err)
+	}
+	c.setAuthHeader(req)
+	req.Header.Set("Content-Type", "application/json-patch+json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("azure: patch work item http request: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("azure: unexpected patch work item status %d%s", resp.StatusCode, sanitizedResponseMessage(respBody))
+	}
+	if isHTMLResponse(resp.Header.Get("Content-Type"), respBody) {
+		return fmt.Errorf("azure: Azure returned HTML/sign-in response; token may be expired or auth mode invalid")
+	}
+	return nil
+}
+
+// FetchClassificationTree returns the full Area or Iteration path tree
+// (kind must be "areas" or "iterations") for the configured team project, so
+// callers can offer a searchable picker instead of requiring a hand-typed
+// path.
+func (c *Client) FetchClassificationTree(ctx context.Context, kind string) (ClassificationNode, error) {
+	if kind != "areas" && kind != "iterations" {
+		return ClassificationNode{}, fmt.Errorf("azure: kind must be %q or %q, got %q", "areas", "iterations", kind)
+	}
+	if !c.Enabled() {
+		return ClassificationNode{}, fmt.Errorf("Azure TimeLog token is not configured")
+	}
+
+	url := fmt.Sprintf(
+		"https://dev.azure.com/%s/%s/_apis/wit/classificationnodes/%s?$depth=10&api-version=7.1-preview.2",
+		c.cfg.Org, c.cfg.TeamProject, kind,
+	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return ClassificationNode{}, fmt.Errorf("azure: build classification nodes request: %w", err)
+	}
+	c.setAuthHeader(req)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return ClassificationNode{}, fmt.Errorf("azure: classification nodes http request: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return ClassificationNode{}, fmt.Errorf("azure: unexpected classification nodes status %d%s", resp.StatusCode, sanitizedResponseMessage(respBody))
+	}
+	if isHTMLResponse(resp.Header.Get("Content-Type"), respBody) {
+		return ClassificationNode{}, fmt.Errorf("azure: Azure returned HTML/sign-in response; token may be expired or auth mode invalid")
+	}
+
+	var node ClassificationNode
+	if err := json.Unmarshal(respBody, &node); err != nil {
+		return ClassificationNode{}, fmt.Errorf("azure: decode classification nodes response: %w", err)
+	}
+	return node, nil
 }
 
 func isHTMLResponse(contentType string, body []byte) bool {

@@ -680,6 +680,135 @@ func TestSetActivityReferenceID_NotFound(t *testing.T) {
 	}
 }
 
+// TestCreateActivity_TouchesProjectLastUsed verifies logging an activity
+// refreshes the matching timelog_projects catalog entry's last_used_at, so
+// it survives a sweep that would otherwise catch it (a stale-looking entry
+// that is actually still in use must never be auto-deactivated).
+func TestCreateActivity_TouchesProjectLastUsed(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	if err := s.AddTimelogProject("RNCEA"); err != nil {
+		t.Fatal(err)
+	}
+	old := "2020-01-01T00:00:00Z"
+	if _, err := s.db.ExecContext(ctx, `UPDATE timelog_projects SET created_at = ? WHERE name = ?`, old, "RNCEA"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.CreateActivity(ctx, "2026-06-12", 1.0, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo", "manual"); err != nil {
+		t.Fatal(err)
+	}
+
+	// A 3650-day retention window would still catch the old created_at, but
+	// must NOT catch it now that CreateActivity touched last_used_at today.
+	n, err := s.SweepStaleTimelogProjects(ctx, 3650)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("expected the just-logged project to survive the sweep, but %d were deactivated", n)
+	}
+}
+
+// TestApproveActivities_TouchesProjectAndAzureActivityLastUsed verifies
+// approving an activity refreshes both catalogs' last_used_at when the
+// activity is linked to an Azure activity.
+func TestApproveActivities_TouchesProjectAndAzureActivityLastUsed(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	if err := s.AddTimelogProject("RNCEA"); err != nil {
+		t.Fatal(err)
+	}
+	azureActivity, err := s.AddAzureActivity(ctx, "RUNT2QA", 999040, "Linked Bug", "Bug", AzureActivityMapping{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	old := "2020-01-01T00:00:00Z"
+	if _, err := s.db.ExecContext(ctx, `UPDATE timelog_projects SET created_at = ? WHERE name = ?`, old, "RNCEA"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE azure_activities SET created_at = ? WHERE id = ?`, old, azureActivity.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	a, err := s.CreateActivity(ctx, "2026-06-12", 1.0, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo", "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetActivityAzureActivity(ctx, a.ID, &azureActivity.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.ApproveActivities(ctx, []int64{a.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	projectN, err := s.SweepStaleTimelogProjects(ctx, 3650)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projectN != 0 {
+		t.Fatalf("expected project to survive sweep after approval, but %d were deactivated", projectN)
+	}
+
+	// azureActivity is not the default, so it's eligible to be swept if stale.
+	bugN, err := s.SweepStaleBugActivities(ctx, 3650)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bugN != 0 {
+		t.Fatalf("expected azure activity to survive sweep after approval, but %d were deactivated", bugN)
+	}
+}
+
+// TestSetActivityAzureActivity_TouchesLastUsedOnLink verifies linking an
+// activity to a work item refreshes that catalog entry's last_used_at, and
+// that clearing the link (nil) does not touch anything.
+func TestSetActivityAzureActivity_TouchesLastUsedOnLink(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	azureActivity, err := s.AddAzureActivity(ctx, "RUNT2QA", 999041, "Linked Bug", "Bug", AzureActivityMapping{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := "2020-01-01T00:00:00Z"
+	if _, err := s.db.ExecContext(ctx, `UPDATE azure_activities SET created_at = ? WHERE id = ?`, old, azureActivity.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	a, err := s.CreateActivity(ctx, "2026-06-12", 1.0, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo", "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetActivityAzureActivity(ctx, a.ID, &azureActivity.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := s.SweepStaleBugActivities(ctx, 3650)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("expected linked azure activity to survive sweep, but %d were deactivated", n)
+	}
+}
+
 type fakeTimeEntryDeleter struct {
 	documentID string
 	err        error

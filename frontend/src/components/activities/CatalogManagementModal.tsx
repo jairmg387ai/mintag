@@ -1,6 +1,6 @@
-import { useState, useRef, type CSSProperties } from 'react'
+import { useEffect, useState, useRef, type CSSProperties } from 'react'
 import { X, Trash2, Plus, Star, Pencil, Check, Download } from 'lucide-react'
-import type { ActivityCatalog, AssignedAzureWorkItem, AzureActivity, TimelogCategory } from '../../types'
+import type { ActivityCatalog, AssignedAzureWorkItem, AzureActivity, CatalogProject, TimelogCategory } from '../../types'
 import {
   addCatalogProject,
   removeCatalogProject,
@@ -12,6 +12,8 @@ import {
   deactivateAzureActivity,
   setDefaultAzureActivity,
   listAssignedAzureWorkItems,
+  getActivityCatalog,
+  listAzureActivities,
 } from '../../api/client'
 import { friendlyCatalogErrorMessage } from './azureActivity'
 import { AzureWorkItemLink } from './AzureActivityLink'
@@ -42,11 +44,15 @@ function CatalogSection({
   items,
   onAdd,
   onRemove,
+  showInactive,
+  onShowInactiveChange,
 }: {
   title: string
-  items: string[]
+  items: CatalogProject[]
   onAdd: (name: string) => Promise<void>
   onRemove: (name: string) => Promise<void>
+  showInactive: boolean
+  onShowInactiveChange: (value: boolean) => void
 }) {
   const [newName, setNewName] = useState('')
   const [adding, setAdding] = useState(false)
@@ -108,6 +114,15 @@ function CatalogSection({
         </div>
       )}
 
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, cursor: 'pointer' }}>
+        <input
+          type="checkbox"
+          checked={showInactive}
+          onChange={e => onShowInactiveChange(e.target.checked)}
+        />
+        <span style={{ font: 'var(--text-caption)', color: 'var(--fg3)' }}>Mostrar inactivos</span>
+      </label>
+
       {/* Item list */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 360, overflowY: 'auto' }}>
         {items.length === 0 ? (
@@ -117,7 +132,7 @@ function CatalogSection({
         ) : (
           items.map(item => (
             <div
-              key={item}
+              key={item.name}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -126,17 +141,21 @@ function CatalogSection({
                 background: 'var(--bg-sunken)',
                 borderRadius: 'var(--radius-md)',
                 border: '1px solid var(--border)',
+                opacity: item.is_active ? 1 : 0.55,
               }}
             >
               <span style={{ flex: 1, font: 'var(--text-body)', color: 'var(--fg1)', fontSize: '0.9em' }}>
-                {item}
+                {item.name}
               </span>
+              {!item.is_active && (
+                <span className="chip chip-todo" style={{ fontSize: '0.7em' }}>Inactivo</span>
+              )}
               <button
                 className="btn btn-ghost btn-sm"
-                onClick={() => handleRemove(item)}
-                disabled={removing[item]}
-                title={`Eliminar ${item}`}
-                aria-label={`Eliminar ${item}`}
+                onClick={() => handleRemove(item.name)}
+                disabled={removing[item.name] || !item.is_active}
+                title={item.is_active ? `Eliminar ${item.name}` : `${item.name} ya está inactivo`}
+                aria-label={`Eliminar ${item.name}`}
                 style={{ padding: '2px 4px' }}
               >
                 <Trash2 size={13} strokeWidth={1.75} />
@@ -322,10 +341,14 @@ function AzureActivitySection({
   activities,
   catalog,
   onChanged,
+  showInactive,
+  onShowInactiveChange,
 }: {
   activities: AzureActivity[]
   catalog: ActivityCatalog | null
   onChanged: () => void
+  showInactive: boolean
+  onShowInactiveChange: (value: boolean) => void
 }) {
   const [org, setOrg] = useState('')
   const [workItemId, setWorkItemId] = useState('')
@@ -655,7 +678,7 @@ function AzureActivitySection({
           >
             <option value="">Sin proyecto</option>
             {catalog.projects.map(p => (
-              <option key={p} value={p}>{p}</option>
+              <option key={p.name} value={p.name}>{p.name}</option>
             ))}
           </select>
         ) : (
@@ -696,6 +719,15 @@ function AzureActivitySection({
         </div>
       )}
 
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, cursor: 'pointer' }}>
+        <input
+          type="checkbox"
+          checked={showInactive}
+          onChange={e => onShowInactiveChange(e.target.checked)}
+        />
+        <span style={{ font: 'var(--text-caption)', color: 'var(--fg3)' }}>Mostrar inactivos</span>
+      </label>
+
       {/* Item list */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 360, overflowY: 'auto' }}>
         {activities.length === 0 ? (
@@ -714,6 +746,7 @@ function AzureActivitySection({
                 background: 'var(--bg-sunken)',
                 borderRadius: 'var(--radius-md)',
                 border: '1px solid var(--border)',
+                opacity: a.is_active ? 1 : 0.55,
               }}
             >
               {editingId === a.id ? (
@@ -753,9 +786,9 @@ function AzureActivitySection({
                     >
                       <option value="">Sin proyecto</option>
                       {catalog.projects.map(p => (
-                        <option key={p} value={p}>{p}</option>
+                        <option key={p.name} value={p.name}>{p.name}</option>
                       ))}
-                      {editProject && !catalog.projects.includes(editProject) && (
+                      {editProject && !catalog.projects.some(p => p.name === editProject) && (
                         <option value={editProject}>{editProject}</option>
                       )}
                     </select>
@@ -809,6 +842,9 @@ function AzureActivitySection({
                     {a.work_item_type && (
                       <span className="chip" style={{ fontSize: '0.7em' }}>{a.work_item_type}</span>
                     )}
+                    {!a.is_active && (
+                      <span className="chip chip-todo" style={{ fontSize: '0.7em' }}>Inactivo</span>
+                    )}
                   </span>
                   {a.is_default ? (
                     <span className="chip chip-done" style={{ fontSize: '0.75em' }}>Predeterminada</span>
@@ -837,8 +873,8 @@ function AzureActivitySection({
                   <button
                     className="btn btn-ghost btn-sm"
                     onClick={() => handleDeactivate(a.id)}
-                    disabled={busyId === a.id || a.is_default}
-                    title={a.is_default ? 'Primero define otra actividad como predeterminada' : 'Desactivar'}
+                    disabled={busyId === a.id || a.is_default || !a.is_active}
+                    title={!a.is_active ? 'Ya está inactiva' : a.is_default ? 'Primero define otra actividad como predeterminada' : 'Desactivar'}
                     aria-label={`Desactivar ${a.label}`}
                     style={{ padding: '2px 4px' }}
                   >
@@ -866,7 +902,33 @@ export function CatalogManagementModal({ open, onClose, catalog, onCatalogChange
   const pressedOnOverlay = useRef(false)
   const [activeTab, setActiveTab] = useState<CatalogTab>('projects')
 
+  // Both lists the parent gives us (`catalog.projects` / `azureActivities`)
+  // are fetched active-only, since that's what every other consumer (the
+  // new/edit activity forms, the add-Azure-activity row) needs. "Mostrar
+  // inactivos" pulls a separate include_inactive=true snapshot on demand
+  // instead of widening the parent's fetch, so those other consumers never
+  // see deactivated entries. Re-fetching whenever the parent's active-only
+  // data changes (via the catalog/azureActivities deps below) keeps the
+  // inactive-augmented view in sync after every add/remove/deactivate.
+  const [showInactiveProjects, setShowInactiveProjects] = useState(false)
+  const [projectsWithInactive, setProjectsWithInactive] = useState<CatalogProject[] | null>(null)
+  const [showInactiveAzure, setShowInactiveAzure] = useState(false)
+  const [azureWithInactive, setAzureWithInactive] = useState<AzureActivity[] | null>(null)
+
+  useEffect(() => {
+    if (!open || !showInactiveProjects) return
+    getActivityCatalog(true).then(c => setProjectsWithInactive(c.projects)).catch(() => setProjectsWithInactive([]))
+  }, [open, showInactiveProjects, catalog])
+
+  useEffect(() => {
+    if (!open || !showInactiveAzure) return
+    listAzureActivities(true).then(setAzureWithInactive).catch(() => setAzureWithInactive([]))
+  }, [open, showInactiveAzure, azureActivities])
+
   if (!open) return null
+
+  const visibleProjects = showInactiveProjects ? (projectsWithInactive ?? catalog?.projects ?? []) : (catalog?.projects ?? [])
+  const visibleAzureActivities = showInactiveAzure ? (azureWithInactive ?? azureActivities) : azureActivities
 
   async function handleAddProject(name: string) {
     await addCatalogProject(name)
@@ -985,9 +1047,11 @@ export function CatalogManagementModal({ open, onClose, catalog, onCatalogChange
           {activeTab === 'projects' && (
             <CatalogSection
               title="Proyectos"
-              items={catalog?.projects ?? []}
+              items={visibleProjects}
               onAdd={handleAddProject}
               onRemove={handleRemoveProject}
+              showInactive={showInactiveProjects}
+              onShowInactiveChange={setShowInactiveProjects}
             />
           )}
           {activeTab === 'categories' && (
@@ -999,7 +1063,13 @@ export function CatalogManagementModal({ open, onClose, catalog, onCatalogChange
             />
           )}
           {activeTab === 'azure' && (
-            <AzureActivitySection activities={azureActivities} catalog={catalog} onChanged={onAzureActivitiesChanged} />
+            <AzureActivitySection
+              activities={visibleAzureActivities}
+              catalog={catalog}
+              onChanged={onAzureActivitiesChanged}
+              showInactive={showInactiveAzure}
+              onShowInactiveChange={setShowInactiveAzure}
+            />
           )}
         </div>
 

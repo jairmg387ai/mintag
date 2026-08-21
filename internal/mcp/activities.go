@@ -234,14 +234,14 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 
 	// --- catalog_project_remove ---
 	s.AddTool(mcp.NewTool("catalog_project_remove",
-		mcp.WithDescription("Remove a project from the TimeLog catalog."),
-		mcp.WithString("name", mcp.Required(), mcp.Description("Project name to remove")),
+		mcp.WithDescription("Deactivate (soft-delete) a project in the TimeLog catalog. Historical daily activity entries keep referencing this project name."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Project name to deactivate")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		name, err := req.RequireString("name")
 		if err != nil {
 			return errResult(err)
 		}
-		if err := st.RemoveTimelogProject(name); err != nil {
+		if err := st.DeactivateTimelogProject(ctx, name); err != nil {
 			return errResult(err)
 		}
 		return jsonResult(map[string]string{"removed": name}, nil)
@@ -366,4 +366,61 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 		}
 		return jsonResult(map[string]any{"deactivated": id}, nil)
 	})
+
+	// --- catalog_retention_get ---
+	s.AddTool(mcp.NewTool("catalog_retention_get",
+		mcp.WithDescription("Get the configured automatic catalog staleness retention windows, in days. A null value means that catalog's automatic deactivation is disabled."),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		bugDays, projectDays, err := st.GetCatalogRetentionDays(ctx)
+		if err != nil {
+			return errResult(err)
+		}
+		return jsonResult(map[string]any{
+			"bug_retention_days":     bugDays,
+			"project_retention_days": projectDays,
+		}, nil)
+	})
+
+	// --- catalog_retention_set ---
+	s.AddTool(mcp.NewTool("catalog_retention_set",
+		mcp.WithDescription("Configure automatic catalog staleness retention windows, in days. Only Bug-type Azure activities and TimeLog projects are ever auto-deactivated this way (never Task-type work items). Omit or leave a value empty to disable that catalog's automatic deactivation."),
+		mcp.WithString("bug_retention_days", mcp.Description("Days of inactivity before a Bug-type Azure activity is auto-deactivated. Omit/empty to disable.")),
+		mcp.WithString("project_retention_days", mcp.Description("Days of inactivity before a TimeLog project is auto-deactivated. Omit/empty to disable.")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		bugDays, err := parseOptionalDays(req, "bug_retention_days")
+		if err != nil {
+			return errResult(err)
+		}
+		projectDays, err := parseOptionalDays(req, "project_retention_days")
+		if err != nil {
+			return errResult(err)
+		}
+		if err := st.SetCatalogRetentionDays(ctx, bugDays, projectDays); err != nil {
+			return errResult(err)
+		}
+		bugDays, projectDays, err = st.GetCatalogRetentionDays(ctx)
+		if err != nil {
+			return errResult(err)
+		}
+		return jsonResult(map[string]any{
+			"bug_retention_days":     bugDays,
+			"project_retention_days": projectDays,
+		}, nil)
+	})
+}
+
+// parseOptionalDays reads an optional string parameter by key and parses it
+// as int. Returns (nil, nil) when the parameter is absent or empty (mirrors
+// parsePtrID in mcp.go, but for a plain *int retention-days value rather
+// than a *int64 row id). Returns (nil, err) on a non-numeric value.
+func parseOptionalDays(req mcp.CallToolRequest, key string) (*int, error) {
+	v := req.GetString(key, "")
+	if v == "" {
+		return nil, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return nil, fmt.Errorf("%s must be an integer, got %q", key, v)
+	}
+	return &n, nil
 }

@@ -35,6 +35,8 @@ var reActivityDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 //	POST   /api/activities/azure-auth/device/start
 //	POST   /api/activities/azure-auth/device/complete
 //	GET    /api/activities/azure-work-items/assigned
+//	POST   /api/activities/azure-work-items
+//	GET    /api/activities/azure-classification-nodes/{kind}
 //	GET    /api/activities/catalog
 //	POST   /api/activities/catalog/projects
 //	DELETE /api/activities/catalog/projects/{name}
@@ -50,6 +52,8 @@ var reActivityDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 //	POST   /api/activities/upload                    ?date=
 //	PATCH  /api/activities/{id}
 //	DELETE /api/activities/{id}
+//	GET    /api/settings/catalog-retention
+//	PUT    /api/settings/catalog-retention
 func registerActivityRoutes(r chi.Router, srv *Server) {
 	r.Get("/activities", srv.handleListActivities)
 	r.Post("/activities", srv.handleCreateActivity)
@@ -59,6 +63,8 @@ func registerActivityRoutes(r chi.Router, srv *Server) {
 	r.With(requireLocalRequest).Post("/activities/azure-auth/device/start", srv.handleStartAzureDeviceAuth)
 	r.With(requireLocalRequest).Post("/activities/azure-auth/device/complete", srv.handleCompleteAzureDeviceAuth)
 	r.With(requireLocalRequest).Get("/activities/azure-work-items/assigned", srv.handleListAssignedAzureWorkItems)
+	r.With(requireLocalRequest).Post("/activities/azure-work-items", srv.handleCreateAzureWorkItem)
+	r.With(requireLocalRequest).Get("/activities/azure-classification-nodes/{kind}", srv.handleGetAzureClassificationTree)
 	r.Get("/activities/catalog", srv.handleActivityCatalog)
 	r.Post("/activities/catalog/projects", srv.handleAddCatalogProject)
 	r.Delete("/activities/catalog/projects/{name}", srv.handleRemoveCatalogProject)
@@ -79,6 +85,8 @@ func registerActivityRoutes(r chi.Router, srv *Server) {
 	r.With(requireLocalRequest).Post("/activities/upload", srv.handleUploadActivities)
 	r.Patch("/activities/{id}", srv.handlePatchActivity)
 	r.With(requireLocalRequest).Delete("/activities/{id}", srv.handleDeleteActivity)
+	r.Get("/settings/catalog-retention", srv.handleGetCatalogRetention)
+	r.With(requireLocalRequest).Put("/settings/catalog-retention", srv.handleSetCatalogRetention)
 }
 
 // GET /api/activities?date=YYYY-MM-DD&status=
@@ -495,13 +503,51 @@ func sanitizePublicError(err error) string {
 	return msg
 }
 
-// GET /api/activities/catalog
+// catalogProjectEntry is the /api/activities/catalog "projects" element
+// shape. It replaced a bare []string so the frontend can tell active from
+// inactive projects apart when ?include_inactive=true is requested — see
+// handleActivityCatalog below. This is a JSON response shape change: any
+// existing frontend code expecting `projects: string[]` needs updating to
+// `projects: {name, is_active}[]`.
+type catalogProjectEntry struct {
+	Name     string `json:"name"`
+	IsActive bool   `json:"is_active"`
+}
+
+// GET /api/activities/catalog?include_inactive=true
 func (srv *Server) handleActivityCatalog(w http.ResponseWriter, r *http.Request) {
-	projects, err := srv.st.ListTimelogProjects()
+	includeInactive := r.URL.Query().Get("include_inactive") == "true"
+	ctx := r.Context()
+
+	names, err := srv.st.ListTimelogProjects(ctx, includeInactive)
 	if err != nil {
 		writeJSON(w, nil, err)
 		return
 	}
+
+	projects := make([]catalogProjectEntry, len(names))
+	if includeInactive {
+		// A second, active-only query is the simplest way to tell which of
+		// the (possibly larger) includeInactive set are still active,
+		// without widening ListTimelogProjects' return shape beyond []string.
+		activeNames, err := srv.st.ListTimelogProjects(ctx, false)
+		if err != nil {
+			writeJSON(w, nil, err)
+			return
+		}
+		active := make(map[string]bool, len(activeNames))
+		for _, n := range activeNames {
+			active[n] = true
+		}
+		for i, n := range names {
+			projects[i] = catalogProjectEntry{Name: n, IsActive: active[n]}
+		}
+	} else {
+		for i, n := range names {
+			projects[i] = catalogProjectEntry{Name: n, IsActive: true}
+		}
+	}
+
 	categories, err := srv.st.ListTimelogCategories()
 	if err != nil {
 		writeJSON(w, nil, err)
@@ -579,10 +625,17 @@ func (srv *Server) handleAddCatalogProject(w http.ResponseWriter, r *http.Reques
 }
 
 // DELETE /api/activities/catalog/projects/{name}
+// Soft-deletes (is_active=0) rather than hard-deleting, so historical
+// daily_activities.project references stay intact — see
+// DeactivateTimelogProject's doc comment.
 func (srv *Server) handleRemoveCatalogProject(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	if err := srv.st.RemoveTimelogProject(name); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if err := srv.st.DeactivateTimelogProject(r.Context(), name); err != nil {
+		status := http.StatusInternalServerError
+		if isNotFound(err) {
+			status = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), status)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -615,9 +668,10 @@ func (srv *Server) handleRemoveCatalogCategory(w http.ResponseWriter, r *http.Re
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// GET /api/activities/azure-catalog
+// GET /api/activities/azure-catalog?include_inactive=true
 func (srv *Server) handleListAzureActivities(w http.ResponseWriter, r *http.Request) {
-	activities, err := srv.st.ListAzureActivities(r.Context(), false)
+	includeInactive := r.URL.Query().Get("include_inactive") == "true"
+	activities, err := srv.st.ListAzureActivities(r.Context(), includeInactive)
 	writeJSON(w, activities, err)
 }
 
@@ -725,4 +779,37 @@ func (srv *Server) handleSetDefaultAzureActivity(w http.ResponseWriter, r *http.
 	}
 	a, err := srv.st.GetDefaultAzureActivity(ctx)
 	writeJSON(w, a, err)
+}
+
+// catalogRetentionResponse is the shared response shape for both the GET and
+// PUT catalog-retention endpoints. A nil field means that catalog's
+// automatic staleness deactivation is unset/disabled.
+type catalogRetentionResponse struct {
+	BugRetentionDays     *int `json:"bug_retention_days"`
+	ProjectRetentionDays *int `json:"project_retention_days"`
+}
+
+// GET /api/settings/catalog-retention
+func (srv *Server) handleGetCatalogRetention(w http.ResponseWriter, r *http.Request) {
+	bugDays, projectDays, err := srv.st.GetCatalogRetentionDays(r.Context())
+	writeJSON(w, catalogRetentionResponse{BugRetentionDays: bugDays, ProjectRetentionDays: projectDays}, err)
+}
+
+// PUT /api/settings/catalog-retention
+// Body: {"bug_retention_days": <int|null>, "project_retention_days": <int|null>}
+// A null (or omitted) field disables automatic deactivation for that
+// catalog; a positive integer configures its retention window in days.
+func (srv *Server) handleSetCatalogRetention(w http.ResponseWriter, r *http.Request) {
+	var body catalogRetentionResponse
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	ctx := r.Context()
+	if err := srv.st.SetCatalogRetentionDays(ctx, body.BugRetentionDays, body.ProjectRetentionDays); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	bugDays, projectDays, err := srv.st.GetCatalogRetentionDays(ctx)
+	writeJSON(w, catalogRetentionResponse{BugRetentionDays: bugDays, ProjectRetentionDays: projectDays}, err)
 }

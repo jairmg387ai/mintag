@@ -243,9 +243,9 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
               >
                 <option value="">— Seleccionar proyecto —</option>
                 {catalog.projects.map(p => (
-                  <option key={p} value={p}>{p}</option>
+                  <option key={p.name} value={p.name}>{p.name}</option>
                 ))}
-                {!catalog.projects.includes(project) && project && (
+                {!catalog.projects.some(p => p.name === project) && project && (
                   <option value={project}>{project}</option>
                 )}
               </select>

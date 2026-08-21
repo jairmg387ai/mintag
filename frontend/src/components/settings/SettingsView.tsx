@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react'
 import { Card, CardHeader } from '../ui/Card'
 import { MenuOptionsSection } from './MenuOptionsSection'
+import { CatalogRetentionSection } from './CatalogRetentionSection'
 
 interface SettingsSection {
   id: string
@@ -13,6 +14,7 @@ interface SettingsSection {
 // rewrite of this view.
 const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: 'menu-options', label: 'Secciones del menú', component: MenuOptionsSection },
+  { id: 'catalog-retention', label: 'Retención de catálogos', component: CatalogRetentionSection },
 ]
 
 export function SettingsView() {
