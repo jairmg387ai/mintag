@@ -375,6 +375,14 @@ func (s *Store) SweepStaleBugActivities(ctx context.Context, retentionDays int) 
 	return n, nil
 }
 
+// GetAzureActivity returns the catalog entry for id, or an error if none
+// exists. Public wrapper around getAzureActivity for callers outside this
+// package (e.g. internal/server's closed-work-item validation, which needs
+// to resolve an azure_activity_id to its WorkItemID before linking).
+func (s *Store) GetAzureActivity(ctx context.Context, id int64) (*AzureActivity, error) {
+	return s.getAzureActivity(ctx, id)
+}
+
 func (s *Store) getAzureActivity(ctx context.Context, id int64) (*AzureActivity, error) {
 	a := &AzureActivity{}
 	err := s.db.QueryRowContext(ctx,

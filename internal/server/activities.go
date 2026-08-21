@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"regexp"
@@ -57,6 +58,8 @@ var reActivityDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 //	DELETE /api/activities/{id}
 //	GET    /api/settings/catalog-retention
 //	PUT    /api/settings/catalog-retention
+//	GET    /api/settings/activity-validation
+//	PUT    /api/settings/activity-validation
 func registerActivityRoutes(r chi.Router, srv *Server) {
 	r.Get("/activities", srv.handleListActivities)
 	r.Post("/activities", srv.handleCreateActivity)
@@ -93,6 +96,8 @@ func registerActivityRoutes(r chi.Router, srv *Server) {
 	r.With(requireLocalRequest).Delete("/activities/{id}", srv.handleDeleteActivity)
 	r.Get("/settings/catalog-retention", srv.handleGetCatalogRetention)
 	r.With(requireLocalRequest).Put("/settings/catalog-retention", srv.handleSetCatalogRetention)
+	r.Get("/settings/activity-validation", srv.handleGetActivityValidationSettings)
+	r.With(requireLocalRequest).Put("/settings/activity-validation", srv.handleSetActivityValidationSettings)
 }
 
 // GET /api/activities?date=YYYY-MM-DD&status=
@@ -185,6 +190,15 @@ func (srv *Server) applyAzureActivityID(w http.ResponseWriter, ctx context.Conte
 	if !provided {
 		return a, nil
 	}
+	// Clearing a link (explicit null) is never blocked, even when the
+	// closed-work-item validation is on and the previously-linked WI is
+	// closed — only actively linking to a specific work item is checked.
+	if azureActivityID != nil {
+		if err := srv.rejectIfWorkItemClosed(ctx, *azureActivityID); err != nil {
+			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+			return nil, err
+		}
+	}
 	if err := srv.st.SetActivityAzureActivity(ctx, a.ID, azureActivityID); err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return nil, err
@@ -195,6 +209,41 @@ func (srv *Server) applyAzureActivityID(w http.ResponseWriter, ctx context.Conte
 		return nil, err
 	}
 	return a, nil
+}
+
+// rejectIfWorkItemClosed enforces ActivityValidationSettings.BlockClosedWorkItem:
+// when enabled, linking an activity to a catalog entry whose Azure work item
+// is currently Closed/Cerrado is rejected. This is a safety net, not a hard
+// dependency — any failure resolving the setting, the catalog row, the Azure
+// client, or the live Azure state FAILS OPEN (the link proceeds) rather than
+// blocking ordinary activity logging over an unrelated infrastructure hiccup
+// or a misconfigured/absent Azure connection. Only a confirmed Closed state
+// blocks.
+func (srv *Server) rejectIfWorkItemClosed(ctx context.Context, azureActivityID int64) error {
+	v, err := srv.st.GetActivityValidationSettings(ctx)
+	if err != nil || !v.BlockClosedWorkItem {
+		return nil
+	}
+
+	entry, err := srv.st.GetAzureActivity(ctx, azureActivityID)
+	if err != nil {
+		return nil // fail open: vanished/invalid catalog row is not this check's concern
+	}
+
+	az, err := srv.newAzureTimeLogClient(ctx)
+	if err != nil || az == nil || !az.Enabled() {
+		return nil // fail open: no configured Azure connection
+	}
+
+	items, err := az.FetchWorkItemsByIDs(ctx, []int{entry.WorkItemID})
+	if err != nil || len(items) == 0 {
+		return nil // fail open: network hiccup or the WI vanished from Azure
+	}
+
+	if azure.IsClosedState(items[0].State) {
+		return fmt.Errorf("work item %d is closed and cannot be linked to new hours", entry.WorkItemID)
+	}
+	return nil
 }
 
 // applyReferenceID sets or clears the activity's reference_id (an external
@@ -818,4 +867,30 @@ func (srv *Server) handleSetCatalogRetention(w http.ResponseWriter, r *http.Requ
 	}
 	bugDays, projectDays, err := srv.st.GetCatalogRetentionDays(ctx)
 	writeJSON(w, catalogRetentionResponse{BugRetentionDays: bugDays, ProjectRetentionDays: projectDays}, err)
+}
+
+// GET /api/settings/activity-validation
+func (srv *Server) handleGetActivityValidationSettings(w http.ResponseWriter, r *http.Request) {
+	v, err := srv.st.GetActivityValidationSettings(r.Context())
+	writeJSON(w, v, err)
+}
+
+// PUT /api/settings/activity-validation
+// Body: {"max_hours_per_entry": bool, "weekend_confirm": bool, "block_closed_work_item": bool}
+// All three toggles are written together — see
+// SetActivityValidationSettings' doc comment for why there is no partial
+// update here, unlike catalog-retention's independent nil-clears-one fields.
+func (srv *Server) handleSetActivityValidationSettings(w http.ResponseWriter, r *http.Request) {
+	var body store.ActivityValidationSettings
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	ctx := r.Context()
+	if err := srv.st.SetActivityValidationSettings(ctx, body); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	v, err := srv.st.GetActivityValidationSettings(ctx)
+	writeJSON(w, v, err)
 }

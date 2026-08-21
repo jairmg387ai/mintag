@@ -339,6 +339,11 @@ export interface CatalogRetentionSettings {
   bug_retention_days: number | null
   project_retention_days: number | null
 }
+export interface ActivityValidationSettings {
+  max_hours_per_entry: boolean
+  weekend_confirm: boolean
+  block_closed_work_item: boolean
+}
 export type TaskViewName = 'list' | 'kanban'
 export type ModalName = 'task' | 'new-task' | 'import' | 'new-project' | 'meeting' | null
 

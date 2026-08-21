@@ -2,6 +2,7 @@ import type { ComponentType } from 'react'
 import { Card, CardHeader } from '../ui/Card'
 import { MenuOptionsSection } from './MenuOptionsSection'
 import { CatalogRetentionSection } from './CatalogRetentionSection'
+import { ActivityValidationSection } from './ActivityValidationSection'
 
 interface SettingsSection {
   id: string
@@ -15,6 +16,7 @@ interface SettingsSection {
 const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: 'menu-options', label: 'Secciones del menú', component: MenuOptionsSection },
   { id: 'catalog-retention', label: 'Retención de catálogos', component: CatalogRetentionSection },
+  { id: 'activity-validation', label: 'Validaciones de actividades', component: ActivityValidationSection },
 ]
 
 export function SettingsView() {

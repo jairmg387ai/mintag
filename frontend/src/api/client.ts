@@ -17,6 +17,7 @@ import type {
   TimelogCategory,
   AzureActivity,
   CatalogRetentionSettings,
+  ActivityValidationSettings,
   AssignedAzureWorkItemsResponse,
   AzureTimeLogConfigStatus,
   AzureDeviceCodeStartResponse,
@@ -390,6 +391,14 @@ export function getCatalogRetention(): Promise<CatalogRetentionSettings> {
 
 export function updateCatalogRetention(body: CatalogRetentionSettings): Promise<CatalogRetentionSettings> {
   return request<CatalogRetentionSettings>('/api/settings/catalog-retention', { method: 'PUT', body: JSON.stringify(body) })
+}
+
+export function getActivityValidationSettings(): Promise<ActivityValidationSettings> {
+  return request<ActivityValidationSettings>('/api/settings/activity-validation')
+}
+
+export function updateActivityValidationSettings(body: ActivityValidationSettings): Promise<ActivityValidationSettings> {
+  return request<ActivityValidationSettings>('/api/settings/activity-validation', { method: 'PUT', body: JSON.stringify(body) })
 }
 
 // --- Deployment Windows ---

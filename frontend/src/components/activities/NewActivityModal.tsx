@@ -1,9 +1,31 @@
 import { useState, useEffect, useRef, type CSSProperties } from 'react'
 import { X } from 'lucide-react'
-import type { ActivityCatalog, AzureActivity } from '../../types'
-import { createActivity } from '../../api/client'
+import type { ActivityCatalog, ActivityValidationSettings, AzureActivity } from '../../types'
+import { createActivity, getActivityValidationSettings } from '../../api/client'
 import { AzureActivityCombobox } from './AzureActivityCombobox'
 import { resolveAutofill } from './activityAutofill'
+
+// Mirrors store.MaxHoursPerActivityEntry (internal/store/activity_validation.go)
+// — the cap itself is fixed, not configurable, so this is a literal, not a
+// value fetched from the backend. This is a client-side pre-check for
+// instant feedback only; the backend enforces the real rule regardless.
+const MAX_HOURS_PER_ENTRY = 8
+
+const DAY_NAMES = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado']
+
+// Computes the day of week from a YYYY-MM-DD string using LOCAL date
+// components, NOT `new Date(dateString)` directly — parsing an ISO date
+// string that way is interpreted as UTC midnight by some engines and can
+// shift the displayed weekday by one day depending on the browser's timezone.
+function dayOfWeek(dateStr: string): number {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return new Date(y, m - 1, d).getDay()
+}
+
+function isWeekendDate(dateStr: string): boolean {
+  const dow = dayOfWeek(dateStr)
+  return dow === 0 || dow === 6
+}
 
 interface NewActivityModalProps {
   open: boolean
@@ -74,6 +96,15 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
+  const [validationSettings, setValidationSettings] = useState<ActivityValidationSettings | null>(null)
+
+  // Fetched once on mount, not tied to `open` — these toggles don't change
+  // while the modal is open, and a failed fetch just leaves both client-side
+  // checks off (fail open, matching the backend's own fail-open posture for
+  // the closed-work-item check).
+  useEffect(() => {
+    getActivityValidationSettings().then(setValidationSettings).catch(() => setValidationSettings(null))
+  }, [])
 
   // Reset form when modal opens
   useEffect(() => {
@@ -121,7 +152,11 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
   function validate(): boolean {
     const errs: Record<string, string> = {}
     const h = parseFloat(hours)
-    if (!hours || isNaN(h) || h <= 0) errs.hours = 'Las horas deben ser mayores que 0'
+    if (!hours || isNaN(h) || h <= 0) {
+      errs.hours = 'Las horas deben ser mayores que 0'
+    } else if (validationSettings?.max_hours_per_entry && h > MAX_HOURS_PER_ENTRY) {
+      errs.hours = `No se permiten más de ${MAX_HOURS_PER_ENTRY} horas en un solo registro`
+    }
     if (!project.trim()) errs.project = 'El proyecto es obligatorio'
     if (!category.trim()) errs.category = 'La categoría es obligatoria'
     if (!description.trim()) errs.description = 'La descripción es obligatoria'
@@ -132,6 +167,14 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
 
   async function handleSubmit() {
     if (!validate()) return
+
+    if (validationSettings?.weekend_confirm && isWeekendDate(date)) {
+      const confirmed = window.confirm(
+        `Estás registrando horas para el ${date} (${DAY_NAMES[dayOfWeek(date)]}), un día no laboral.\n¿Deseas continuar?`
+      )
+      if (!confirmed) return
+    }
+
     setSubmitting(true)
     setSubmitError('')
 

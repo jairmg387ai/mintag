@@ -1,13 +1,20 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import type { ActivityCatalog, AzureActivity } from '../../types'
-import { createActivity } from '../../api/client'
+import type { ActivityCatalog, ActivityValidationSettings, AzureActivity } from '../../types'
+import { createActivity, getActivityValidationSettings } from '../../api/client'
 import { NewActivityModal } from './NewActivityModal'
 
 vi.mock('../../api/client', () => ({
   createActivity: vi.fn(),
+  getActivityValidationSettings: vi.fn(),
 }))
+
+const ALL_VALIDATIONS_OFF: ActivityValidationSettings = {
+  max_hours_per_entry: false,
+  weekend_confirm: false,
+  block_closed_work_item: false,
+}
 
 function buildActivity(overrides: Partial<AzureActivity> = {}): AzureActivity {
   return {
@@ -39,7 +46,7 @@ const catalog: ActivityCatalog = {
   categories: [{ id: 1, name: 'Development' }],
 }
 
-function renderModal() {
+function renderModal(defaultDate = '2026-08-19') {
   const onCreated = vi.fn()
   const onClose = vi.fn()
   render(
@@ -48,7 +55,7 @@ function renderModal() {
       onClose={onClose}
       onCreated={onCreated}
       catalog={catalog}
-      defaultDate="2026-08-19"
+      defaultDate={defaultDate}
       azureActivities={azureActivities}
     />,
   )
@@ -70,6 +77,8 @@ describe('NewActivityModal Azure activity picker', () => {
   beforeEach(() => {
     vi.mocked(createActivity).mockReset()
     vi.mocked(createActivity).mockResolvedValue({} as never)
+    vi.mocked(getActivityValidationSettings).mockReset()
+    vi.mocked(getActivityValidationSettings).mockResolvedValue(ALL_VALIDATIONS_OFF)
   })
 
   it('filters the candidate list as the user types', async () => {
@@ -118,6 +127,8 @@ describe('NewActivityModal project/category autofill', () => {
   beforeEach(() => {
     vi.mocked(createActivity).mockReset()
     vi.mocked(createActivity).mockResolvedValue({} as never)
+    vi.mocked(getActivityValidationSettings).mockReset()
+    vi.mocked(getActivityValidationSettings).mockResolvedValue(ALL_VALIDATIONS_OFF)
   })
 
   it('leaves project and category blank on open, blocking submission until a mapped work item is picked', async () => {
@@ -175,5 +186,88 @@ describe('NewActivityModal project/category autofill', () => {
 
     expect(screen.getByRole('combobox', { name: 'Proyecto *' })).toHaveValue('')
     expect(screen.getByRole('combobox', { name: 'Categoría *' })).toHaveValue('')
+  })
+})
+
+describe('NewActivityModal configurable validations', () => {
+  beforeEach(() => {
+    vi.mocked(createActivity).mockReset()
+    vi.mocked(createActivity).mockResolvedValue({} as never)
+    vi.mocked(getActivityValidationSettings).mockReset()
+  })
+
+  it('blocks hours over 8 client-side when max_hours_per_entry is enabled', async () => {
+    vi.mocked(getActivityValidationSettings).mockResolvedValue({ ...ALL_VALIDATIONS_OFF, max_hours_per_entry: true })
+    const user = userEvent.setup()
+    renderModal()
+    await waitFor(() => expect(getActivityValidationSettings).toHaveBeenCalled())
+
+    await user.type(screen.getByPlaceholderText('0.00'), '9')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Proyecto *' }), 'Project A')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Categoría *' }), 'Development')
+    await user.type(screen.getByPlaceholderText('Descripción de la actividad...'), 'Trabajo de prueba')
+    await user.click(screen.getByRole('button', { name: 'Crear actividad' }))
+
+    await waitFor(() => expect(screen.getByText('No se permiten más de 8 horas en un solo registro')).toBeInTheDocument())
+    expect(createActivity).not.toHaveBeenCalled()
+  })
+
+  it('allows hours over 8 through to the API when max_hours_per_entry is disabled', async () => {
+    vi.mocked(getActivityValidationSettings).mockResolvedValue(ALL_VALIDATIONS_OFF)
+    const user = userEvent.setup()
+    renderModal()
+    await waitFor(() => expect(getActivityValidationSettings).toHaveBeenCalled())
+
+    await user.type(screen.getByPlaceholderText('0.00'), '9')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Proyecto *' }), 'Project A')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Categoría *' }), 'Development')
+    await user.type(screen.getByPlaceholderText('Descripción de la actividad...'), 'Trabajo de prueba')
+    await user.click(screen.getByRole('button', { name: 'Crear actividad' }))
+
+    await waitFor(() => expect(createActivity).toHaveBeenCalledWith(expect.objectContaining({ hours: 9 })))
+  })
+
+  it('confirms before submitting on a weekend date when weekend_confirm is enabled, and aborts on cancel', async () => {
+    vi.mocked(getActivityValidationSettings).mockResolvedValue({ ...ALL_VALIDATIONS_OFF, weekend_confirm: true })
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const user = userEvent.setup()
+    renderModal('2026-08-22') // Saturday
+    await waitFor(() => expect(getActivityValidationSettings).toHaveBeenCalled())
+
+    await fillRequiredFields(user)
+    await user.click(screen.getByRole('button', { name: 'Crear actividad' }))
+
+    await waitFor(() => expect(confirmSpy).toHaveBeenCalled())
+    expect(createActivity).not.toHaveBeenCalled()
+    confirmSpy.mockRestore()
+  })
+
+  it('proceeds after confirming a weekend date', async () => {
+    vi.mocked(getActivityValidationSettings).mockResolvedValue({ ...ALL_VALIDATIONS_OFF, weekend_confirm: true })
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const user = userEvent.setup()
+    renderModal('2026-08-23') // Sunday
+    await waitFor(() => expect(getActivityValidationSettings).toHaveBeenCalled())
+
+    await fillRequiredFields(user)
+    await user.click(screen.getByRole('button', { name: 'Crear actividad' }))
+
+    await waitFor(() => expect(createActivity).toHaveBeenCalled())
+    confirmSpy.mockRestore()
+  })
+
+  it('never prompts for a weekday date, regardless of weekend_confirm', async () => {
+    vi.mocked(getActivityValidationSettings).mockResolvedValue({ ...ALL_VALIDATIONS_OFF, weekend_confirm: true })
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const user = userEvent.setup()
+    renderModal('2026-08-19') // Wednesday
+    await waitFor(() => expect(getActivityValidationSettings).toHaveBeenCalled())
+
+    await fillRequiredFields(user)
+    await user.click(screen.getByRole('button', { name: 'Crear actividad' }))
+
+    await waitFor(() => expect(createActivity).toHaveBeenCalled())
+    expect(confirmSpy).not.toHaveBeenCalled()
+    confirmSpy.mockRestore()
   })
 })

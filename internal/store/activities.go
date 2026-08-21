@@ -60,12 +60,30 @@ func validateActivity(date string, hours float64, project, category, registroDia
 	return nil
 }
 
+// checkMaxHoursPerEntry rejects hours exceeding MaxHoursPerActivityEntry when
+// ActivityValidationSettings.MaxHoursPerEntry is enabled. Shared by
+// CreateActivity and UpdateActivity so the two never drift; see
+// ActivityValidationSettings' doc comment for why this toggle defaults off.
+func (s *Store) checkMaxHoursPerEntry(ctx context.Context, hours float64) error {
+	v, err := s.GetActivityValidationSettings(ctx)
+	if err != nil {
+		return err
+	}
+	if v.MaxHoursPerEntry && hours > MaxHoursPerActivityEntry {
+		return fmt.Errorf("hours must not exceed %g per entry when the max-hours validation is enabled, got %v", MaxHoursPerActivityEntry, hours)
+	}
+	return nil
+}
+
 // CreateActivity inserts a new daily activity row with status="pending".
 func (s *Store) CreateActivity(ctx context.Context, date string, hours float64, project, category, registroDiario, source string) (*DailyActivity, error) {
 	if source == "" {
 		source = "manual"
 	}
 	if err := validateActivity(date, hours, project, category, registroDiario, source); err != nil {
+		return nil, err
+	}
+	if err := s.checkMaxHoursPerEntry(ctx, hours); err != nil {
 		return nil, err
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -236,6 +254,9 @@ func (s *Store) UpdateActivity(ctx context.Context, id int64, hours float64, pro
 		return nil, fmt.Errorf("activity %d cannot be edited: it has already been uploaded to Azure", id)
 	}
 	if hours > 0 {
+		if err := s.checkMaxHoursPerEntry(ctx, hours); err != nil {
+			return nil, err
+		}
 		a.Hours = hours
 	}
 	if project != "" {

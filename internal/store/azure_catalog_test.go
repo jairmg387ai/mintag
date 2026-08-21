@@ -290,6 +290,34 @@ func TestUpdateAzureActivity_ChangesOrgAndLabelOnly(t *testing.T) {
 	}
 }
 
+// TestGetAzureActivity_ReturnsRowByID verifies the public getter round-trips
+// a catalog entry by id and errors for a missing one.
+func TestGetAzureActivity_ReturnsRowByID(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	created, err := s.AddAzureActivity(ctx, "RUNT2QA", 999040, "Test WI", "Task", AzureActivityMapping{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.GetAzureActivity(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.WorkItemID != 999040 {
+		t.Errorf("expected work_item_id=999040, got %d", got.WorkItemID)
+	}
+
+	if _, err := s.GetAzureActivity(ctx, 999999); err == nil {
+		t.Fatal("expected an error for a non-existent id")
+	}
+}
+
 func TestGetDefaultAzureActivity_ReturnsTheDefaultRow(t *testing.T) {
 	s, err := OpenInMemory()
 	if err != nil {

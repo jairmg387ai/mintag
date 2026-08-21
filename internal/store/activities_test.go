@@ -32,6 +32,57 @@ func TestCreateActivity_ValidInput(t *testing.T) {
 	}
 }
 
+// TestCreateActivity_MaxHoursPerEntry_BlockedWhenEnabled verifies an entry
+// over MaxHoursPerActivityEntry is rejected once the toggle is on.
+func TestCreateActivity_MaxHoursPerEntry_BlockedWhenEnabled(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	if err := s.SetActivityValidationSettings(ctx, ActivityValidationSettings{MaxHoursPerEntry: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateActivity(ctx, "2026-06-12", 9, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo", "manual"); err == nil {
+		t.Fatal("expected an error for hours=9 with max-hours validation enabled")
+	}
+}
+
+// TestCreateActivity_MaxHoursPerEntry_BoundaryAllowed verifies exactly
+// MaxHoursPerActivityEntry (8) is allowed — the cap is inclusive.
+func TestCreateActivity_MaxHoursPerEntry_BoundaryAllowed(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	if err := s.SetActivityValidationSettings(ctx, ActivityValidationSettings{MaxHoursPerEntry: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateActivity(ctx, "2026-06-12", MaxHoursPerActivityEntry, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo", "manual"); err != nil {
+		t.Fatalf("expected hours=%g (the cap itself) to be allowed, got error: %v", MaxHoursPerActivityEntry, err)
+	}
+}
+
+// TestCreateActivity_MaxHoursPerEntry_AllowedWhenDisabled verifies hours=9
+// is allowed through when the toggle is off (the default).
+func TestCreateActivity_MaxHoursPerEntry_AllowedWhenDisabled(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	if _, err := s.CreateActivity(ctx, "2026-06-12", 9, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo", "manual"); err != nil {
+		t.Fatalf("expected hours=9 to be allowed when the validation is disabled, got error: %v", err)
+	}
+}
+
 func TestCreateActivity_DefaultSource(t *testing.T) {
 	s, err := OpenInMemory()
 	if err != nil {
@@ -318,6 +369,73 @@ func TestUpdateActivity_PendingSucceeds(t *testing.T) {
 	}
 	if updated.RegistroDiario != "Trabajo actualizado" {
 		t.Errorf("expected updated registro_diario, got %q", updated.RegistroDiario)
+	}
+}
+
+// TestUpdateActivity_MaxHoursPerEntry_BlockedWhenEnabled verifies changing
+// hours to a value over the cap is rejected once the toggle is on.
+func TestUpdateActivity_MaxHoursPerEntry_BlockedWhenEnabled(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	a, err := s.CreateActivity(ctx, "2026-06-12", 1.0, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo", "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetActivityValidationSettings(ctx, ActivityValidationSettings{MaxHoursPerEntry: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpdateActivity(ctx, a.ID, 9, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo"); err == nil {
+		t.Fatal("expected an error updating hours to 9 with max-hours validation enabled")
+	}
+}
+
+// TestUpdateActivity_MaxHoursPerEntry_BoundaryAllowed verifies updating to
+// exactly the cap (8) is allowed.
+func TestUpdateActivity_MaxHoursPerEntry_BoundaryAllowed(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	a, err := s.CreateActivity(ctx, "2026-06-12", 1.0, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo", "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetActivityValidationSettings(ctx, ActivityValidationSettings{MaxHoursPerEntry: true}); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := s.UpdateActivity(ctx, a.ID, MaxHoursPerActivityEntry, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo")
+	if err != nil {
+		t.Fatalf("expected hours=%g (the cap itself) to be allowed, got error: %v", MaxHoursPerActivityEntry, err)
+	}
+	if updated.Hours != MaxHoursPerActivityEntry {
+		t.Errorf("expected hours=%g, got %v", MaxHoursPerActivityEntry, updated.Hours)
+	}
+}
+
+// TestUpdateActivity_MaxHoursPerEntry_AllowedWhenDisabled verifies updating
+// to hours=9 is allowed through when the toggle is off (the default).
+func TestUpdateActivity_MaxHoursPerEntry_AllowedWhenDisabled(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	a, err := s.CreateActivity(ctx, "2026-06-12", 1.0, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo", "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpdateActivity(ctx, a.ID, 9, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo"); err != nil {
+		t.Fatalf("expected hours=9 to be allowed when the validation is disabled, got error: %v", err)
 	}
 }
 
