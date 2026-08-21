@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Plus, FilePlus2 } from 'lucide-react'
-import type { CreatedWorkItemResponse } from '../../types'
+import type { ActivityCatalog, CreatedWorkItemResponse } from '../../types'
+import { getActivityCatalog } from '../../api/client'
 import { useAppActions } from '../../store/AppContext'
 import { Card, CardHeader } from '../ui/Card'
 import { CreateWorkItemModal } from './CreateWorkItemModal'
@@ -12,6 +13,11 @@ export function WorkItemsView() {
   const { pushToast } = useAppActions()
   const [modalOpen, setModalOpen] = useState(false)
   const [lastResult, setLastResult] = useState<CreatedWorkItemResponse | null>(null)
+  const [catalog, setCatalog] = useState<ActivityCatalog | null>(null)
+
+  useEffect(() => {
+    getActivityCatalog().then(setCatalog).catch(() => setCatalog(null))
+  }, [])
 
   function handleCreated(result: CreatedWorkItemResponse) {
     setLastResult(result)
@@ -19,6 +25,9 @@ export function WorkItemsView() {
       pushToast(`Work item #${result.id} creado, pero no se pudo activar: ${result.activation_error}`, true)
     } else {
       pushToast(`Work item #${result.id} creado y activado`, false)
+    }
+    if (result.catalog_error) {
+      pushToast(`No se pudo registrar el work item en el catálogo: ${result.catalog_error}`, true)
     }
   }
 
@@ -49,9 +58,19 @@ export function WorkItemsView() {
                 }}
               >
                 Último creado: <strong>#{lastResult.id}</strong> — estado {lastResult.state}
+                {lastResult.azure_activity_id && (
+                  <div style={{ color: 'var(--fg2)', marginTop: 4 }}>
+                    Registrado en el catálogo de actividades.
+                  </div>
+                )}
                 {lastResult.activation_error && (
                   <div style={{ color: 'var(--block-solid)', marginTop: 4 }}>
                     No se pudo activar: {lastResult.activation_error}
+                  </div>
+                )}
+                {lastResult.catalog_error && (
+                  <div style={{ color: 'var(--block-solid)', marginTop: 4 }}>
+                    No se pudo registrar en el catálogo: {lastResult.catalog_error}
                   </div>
                 )}
               </div>
@@ -64,6 +83,7 @@ export function WorkItemsView() {
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         onCreated={handleCreated}
+        catalog={catalog}
       />
     </div>
   )

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type CSSProperties } from 'react'
 import { X } from 'lucide-react'
-import type { CreatedWorkItemResponse } from '../../types'
+import type { ActivityCatalog, CreatedWorkItemResponse } from '../../types'
 import { createAzureWorkItem } from '../../api/client'
 import { ClassificationTreePicker } from './ClassificationTreePicker'
 
@@ -8,6 +8,7 @@ interface CreateWorkItemModalProps {
   open: boolean
   onClose: () => void
   onCreated: (result: CreatedWorkItemResponse) => void
+  catalog?: ActivityCatalog | null
 }
 
 const DEFAULT_ESTIMATE = '24'
@@ -47,13 +48,15 @@ function Field({ label, children, error }: { label: string; children: React.Reac
   )
 }
 
-export function CreateWorkItemModal({ open, onClose, onCreated }: CreateWorkItemModalProps) {
+export function CreateWorkItemModal({ open, onClose, onCreated, catalog = null }: CreateWorkItemModalProps) {
   const pressedOnOverlay = useRef(false)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [areaPath, setAreaPath] = useState('')
   const [iterationPath, setIterationPath] = useState('')
   const [estimate, setEstimate] = useState(DEFAULT_ESTIMATE)
+  const [project, setProject] = useState('')
+  const [category, setCategory] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
@@ -65,6 +68,8 @@ export function CreateWorkItemModal({ open, onClose, onCreated }: CreateWorkItem
       setAreaPath('')
       setIterationPath('')
       setEstimate(DEFAULT_ESTIMATE)
+      setProject('')
+      setCategory('')
       setErrors({})
       setSubmitError('')
     }
@@ -87,12 +92,15 @@ export function CreateWorkItemModal({ open, onClose, onCreated }: CreateWorkItem
     setSubmitError('')
     try {
       const estimateValue = parseFloat(estimate)
+      const categoryId = category ? catalog?.categories.find(c => c.name === category)?.id : undefined
       const result = await createAzureWorkItem({
         title: title.trim(),
         ...(description.trim() ? { description: description.trim() } : {}),
         area_path: areaPath,
         iteration_path: iterationPath,
         ...(!isNaN(estimateValue) && estimateValue > 0 ? { original_estimate: estimateValue } : {}),
+        ...(project ? { project } : {}),
+        ...(categoryId !== undefined ? { category_id: categoryId } : {}),
       })
       onCreated(result)
       onClose()
@@ -215,6 +223,62 @@ export function CreateWorkItemModal({ open, onClose, onCreated }: CreateWorkItem
               style={selectStyle}
             />
           </Field>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <Field label="Proyecto">
+              {catalog !== null ? (
+                <select
+                  aria-label="Proyecto"
+                  style={selectStyle}
+                  value={project}
+                  onChange={e => setProject(e.target.value)}
+                >
+                  <option value="">— Sin registrar en catálogo —</option>
+                  {catalog.projects.map(p => (
+                    <option key={p.name} value={p.name}>{p.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={project}
+                  onChange={e => setProject(e.target.value)}
+                  placeholder="Nombre del proyecto (opcional)"
+                  style={selectStyle}
+                />
+              )}
+            </Field>
+
+            <Field label="Categoría">
+              {catalog !== null ? (
+                <select
+                  aria-label="Categoría"
+                  style={selectStyle}
+                  value={category}
+                  onChange={e => setCategory(e.target.value)}
+                >
+                  <option value="">— Sin registrar en catálogo —</option>
+                  {catalog.categories.map(c => (
+                    <option key={c.id} value={c.name}>{c.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={category}
+                  onChange={e => setCategory(e.target.value)}
+                  placeholder="Categoría (opcional)"
+                  style={selectStyle}
+                />
+              )}
+            </Field>
+          </div>
+
+          {(project || category) && (
+            <div style={{ font: 'var(--text-caption)', color: 'var(--fg3)', marginTop: -6, marginBottom: 14 }}>
+              Se registrará este work item en el catálogo de actividades de Azure.
+            </div>
+          )}
 
           {submitError && (
             <div

@@ -144,12 +144,16 @@ export interface CreateWorkItemInput {
   area_path: string
   iteration_path: string
   original_estimate?: number
+  project?: string
+  category_id?: number
 }
 
 export interface CreatedWorkItemResponse {
   id: number
   state: string
   activation_error?: string
+  azure_activity_id?: number
+  catalog_error?: string
 }
 
 // --- Menu Options (configurable sidebar catalog) ---

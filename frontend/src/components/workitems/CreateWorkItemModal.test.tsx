@@ -12,10 +12,15 @@ vi.mock('../../api/client', () => ({
 const areaTree = { name: 'RUNTPRO', children: [{ name: 'RNET' }] }
 const iterationTree = { name: 'RUNTPRO', children: [{ name: 'Sprint 1' }] }
 
-function renderModal() {
+const catalog = {
+  projects: [{ name: 'Mintag', is_active: true }],
+  categories: [{ id: 7, name: 'Desarrollo' }],
+}
+
+function renderModal(catalogProp: typeof catalog | null = null) {
   const onCreated = vi.fn()
   const onClose = vi.fn()
-  render(<CreateWorkItemModal open onClose={onClose} onCreated={onCreated} />)
+  render(<CreateWorkItemModal open onClose={onClose} onCreated={onCreated} catalog={catalogProp} />)
   return { onCreated, onClose }
 }
 
@@ -81,6 +86,39 @@ describe('CreateWorkItemModal', () => {
     await waitFor(() => expect(createAzureWorkItem).toHaveBeenCalledWith(
       expect.objectContaining({ description: 'some notes' }),
     ))
+  })
+
+  it('includes project and resolved category_id when both are selected from the catalog', async () => {
+    const user = userEvent.setup()
+    renderModal(catalog)
+
+    await user.type(screen.getByPlaceholderText('Título del work item'), 'Fix the thing')
+    await pickPath(user, 'Área *', 'RUNTPRO\\RNET')
+    await pickPath(user, 'Iteración *', 'RUNTPRO\\Sprint 1')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Proyecto' }), 'Mintag')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Categoría' }), 'Desarrollo')
+
+    await user.click(screen.getByRole('button', { name: 'Crear work item' }))
+
+    await waitFor(() => expect(createAzureWorkItem).toHaveBeenCalledWith(
+      expect.objectContaining({ project: 'Mintag', category_id: 7 }),
+    ))
+  })
+
+  it('omits project and category_id entirely when left unselected', async () => {
+    const user = userEvent.setup()
+    renderModal(catalog)
+
+    await user.type(screen.getByPlaceholderText('Título del work item'), 'Fix the thing')
+    await pickPath(user, 'Área *', 'RUNTPRO\\RNET')
+    await pickPath(user, 'Iteración *', 'RUNTPRO\\Sprint 1')
+
+    await user.click(screen.getByRole('button', { name: 'Crear work item' }))
+
+    await waitFor(() => expect(createAzureWorkItem).toHaveBeenCalled())
+    const payload = vi.mocked(createAzureWorkItem).mock.calls[0][0]
+    expect(payload).not.toHaveProperty('project')
+    expect(payload).not.toHaveProperty('category_id')
   })
 
   it('shows the create error without closing the modal', async () => {
