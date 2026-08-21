@@ -312,6 +312,20 @@ func (c *Client) FetchAssignedWorkItems(ctx context.Context) ([]AssignedWorkItem
 	return c.fetchWorkItemDetails(ctx, ids)
 }
 
+// FetchWorkItemsByIDs resolves current title/type/state for an arbitrary set
+// of work item ids (e.g. the local Azure activity catalog), regardless of
+// assignment or state — unlike FetchAssignedWorkItems, which is scoped to
+// @Me and open states only.
+func (c *Client) FetchWorkItemsByIDs(ctx context.Context, ids []int) ([]AssignedWorkItem, error) {
+	if strings.TrimSpace(c.cfg.Token) == "" {
+		return nil, fmt.Errorf("azure: token is not configured")
+	}
+	if len(ids) == 0 {
+		return []AssignedWorkItem{}, nil
+	}
+	return c.fetchWorkItemDetails(ctx, ids)
+}
+
 // queryAssignedWorkItemIDs runs a WIQL query for work items assigned to the
 // current identity (@Me is resolved by Azure server-side from the
 // credential) that are not in a closed/removed state, most recently changed

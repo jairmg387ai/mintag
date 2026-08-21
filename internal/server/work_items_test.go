@@ -372,6 +372,144 @@ func TestCreateAzureWorkItem_InvalidCategoryReportsNonFatalCatalogError(t *testi
 	}
 }
 
+// TestGetAzureWorkItemStates_Success verifies the ids query param is parsed
+// and forwarded, and the response carries the resolved title/type/state.
+func TestGetAzureWorkItemStates_Success(t *testing.T) {
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
+
+	var workitemsQuery string
+	azureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "connectiondata"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"authenticatedUser":{"id":"id","providerDisplayName":"Name"}}`)) //nolint:errcheck
+		case strings.Contains(r.URL.Path, "/_apis/wit/workitems"):
+			workitemsQuery = r.URL.RawQuery
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"count":2,"value":[
+				{"id":101,"fields":{"System.Title":"Fix login bug","System.WorkItemType":"Bug","System.State":"Active"}},
+				{"id":202,"fields":{"System.Title":"Add export button","System.WorkItemType":"Task","System.State":"New"}}
+			]}`)) //nolint:errcheck
+		default:
+			t.Fatalf("unexpected azure request: %s", r.URL.Path)
+		}
+	}))
+	defer azureServer.Close()
+
+	base, _ := newTestServerWithAzureRedirect(t, azureServer.URL)
+	putResp := doJSON(t, http.MethodPut, base+"/api/activities/azure-config", map[string]any{"token": "db-token", "auth_mode": "bearer"})
+	assertStatus(t, putResp, http.StatusOK)
+
+	resp := get(t, base+"/api/activities/azure-work-items/states?ids=101,202")
+	assertStatus(t, resp, http.StatusOK)
+
+	var body struct {
+		Org   string `json:"org"`
+		Items []struct {
+			ID    int    `json:"id"`
+			Title string `json:"title"`
+			Type  string `json:"type"`
+			State string `json:"state"`
+		} `json:"items"`
+	}
+	decodeJSON(t, resp, &body)
+	if !strings.Contains(workitemsQuery, "ids=101,202") {
+		t.Errorf("expected workitems query to forward both ids, got %s", workitemsQuery)
+	}
+	if len(body.Items) != 2 {
+		t.Fatalf("expected 2 items, got %+v", body.Items)
+	}
+	if body.Items[0].ID != 101 || body.Items[0].State != "Active" {
+		t.Errorf("unexpected first item: %+v", body.Items[0])
+	}
+}
+
+// TestGetAzureWorkItemStates_EmptyIDsReturnsEmptyItemsWithoutAzureCall
+// verifies a missing/empty ids param short-circuits without hitting Azure's
+// workitems endpoint (mirrors FetchWorkItemsByIDs' own empty-slice guard).
+func TestGetAzureWorkItemStates_EmptyIDsReturnsEmptyItemsWithoutAzureCall(t *testing.T) {
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
+
+	workitemsCalled := false
+	azureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "connectiondata") {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"authenticatedUser":{"id":"id","providerDisplayName":"Name"}}`)) //nolint:errcheck
+			return
+		}
+		workitemsCalled = true
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"count":0,"value":[]}`)) //nolint:errcheck
+	}))
+	defer azureServer.Close()
+
+	base, _ := newTestServerWithAzureRedirect(t, azureServer.URL)
+	putResp := doJSON(t, http.MethodPut, base+"/api/activities/azure-config", map[string]any{"token": "db-token", "auth_mode": "bearer"})
+	assertStatus(t, putResp, http.StatusOK)
+
+	resp := get(t, base+"/api/activities/azure-work-items/states")
+	assertStatus(t, resp, http.StatusOK)
+
+	var body struct {
+		Items []any `json:"items"`
+	}
+	decodeJSON(t, resp, &body)
+	if len(body.Items) != 0 {
+		t.Errorf("expected empty items, got %+v", body.Items)
+	}
+	if workitemsCalled {
+		t.Error("expected no workitems call for an empty ids param")
+	}
+}
+
+// TestGetAzureWorkItemStates_InvalidIDReturns400 verifies a non-integer id
+// in the list is rejected before any Azure call.
+func TestGetAzureWorkItemStates_InvalidIDReturns400(t *testing.T) {
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
+
+	azureCalled := false
+	azureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "connectiondata") {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"authenticatedUser":{"id":"id","providerDisplayName":"Name"}}`)) //nolint:errcheck
+			return
+		}
+		azureCalled = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer azureServer.Close()
+
+	base, _ := newTestServerWithAzureRedirect(t, azureServer.URL)
+	putResp := doJSON(t, http.MethodPut, base+"/api/activities/azure-config", map[string]any{"token": "db-token", "auth_mode": "bearer"})
+	assertStatus(t, putResp, http.StatusOK)
+	azureCalled = false // reset: the PUT above already resolved identity
+
+	resp, err := http.Get(base + "/api/activities/azure-work-items/states?ids=101,notanumber")
+	mustNoErr(t, err)
+	assertStatus(t, resp, http.StatusBadRequest)
+	if azureCalled {
+		t.Error("expected no Azure call for an invalid id")
+	}
+}
+
+// TestGetAzureWorkItemStates_NotConfigured mirrors the 503 guard already
+// used by the other azure-work-items endpoints.
+func TestGetAzureWorkItemStates_NotConfigured(t *testing.T) {
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
+	base, _ := newTestServer(t)
+
+	resp, err := http.Get(base + "/api/activities/azure-work-items/states?ids=1")
+	mustNoErr(t, err)
+	assertStatus(t, resp, http.StatusServiceUnavailable)
+}
+
 // TestGetAzureClassificationTree_Success verifies the tree passthrough and
 // that an invalid kind is rejected with 400 before any Azure call.
 func TestGetAzureClassificationTree_Success(t *testing.T) {

@@ -325,6 +325,15 @@ export function fetchClassificationTree(kind: 'areas' | 'iterations'): Promise<C
   return request<ClassificationNode>(`/api/activities/azure-classification-nodes/${kind}`)
 }
 
+// fetchAzureWorkItemStates resolves current title/type/state for an
+// arbitrary set of work item ids (e.g. the local Azure activity catalog).
+// Manual/opt-in — callers decide when to hit Azure, this never runs on its own.
+export function fetchAzureWorkItemStates(ids: number[]): Promise<AssignedAzureWorkItemsResponse> {
+  if (ids.length === 0) return Promise.resolve({ org: '', items: [] })
+  const qs = new URLSearchParams({ ids: ids.join(',') })
+  return request<AssignedAzureWorkItemsResponse>(`/api/activities/azure-work-items/states?${qs}`)
+}
+
 // exportActivities downloads the .xlsx export for [from, to] (inclusive) and
 // triggers a browser download using the filename the server sent via
 // Content-Disposition, falling back to a locally built name if that header

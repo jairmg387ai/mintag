@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -113,6 +115,48 @@ func (srv *Server) registerAzureWorkItemCatalogEntry(ctx context.Context, az *az
 		return
 	}
 	resp["azure_activity_id"] = a.ID
+}
+
+// GET /api/activities/azure-work-items/states?ids=1,2,3
+// Resolves current title/type/state for an arbitrary set of work item ids
+// (e.g. the local Azure activity catalog) — a manual, opt-in refresh, not
+// something the frontend polls automatically.
+func (srv *Server) handleGetAzureWorkItemStates(w http.ResponseWriter, r *http.Request) {
+	az, err := srv.newAzureTimeLogClient(r.Context())
+	if err != nil {
+		writeJSON(w, nil, err)
+		return
+	}
+	if az == nil || !az.Enabled() {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Azure TimeLog token is not configured"}) //nolint:errcheck
+		return
+	}
+
+	raw := strings.TrimSpace(r.URL.Query().Get("ids"))
+	var ids []int
+	if raw != "" {
+		for _, part := range strings.Split(raw, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			id, convErr := strconv.Atoi(part)
+			if convErr != nil {
+				http.Error(w, fmt.Sprintf("invalid work item id %q", part), http.StatusBadRequest)
+				return
+			}
+			ids = append(ids, id)
+		}
+	}
+
+	items, err := az.FetchWorkItemsByIDs(r.Context(), ids)
+	if err != nil {
+		http.Error(w, sanitizePublicError(err), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, map[string]any{"org": az.Config().Org, "items": items}, nil)
 }
 
 // GET /api/activities/azure-classification-nodes/{kind}

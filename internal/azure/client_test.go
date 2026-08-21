@@ -644,6 +644,120 @@ func TestFetchAssignedWorkItems_WiqlErrorStatus(t *testing.T) {
 	}
 }
 
+func TestFetchWorkItemsByIDs_Success(t *testing.T) {
+	var workitemsQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/_apis/wit/workitems") {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		workitemsQuery = r.URL.RawQuery
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"count":2,"value":[
+			{"id":101,"fields":{"System.Title":"Fix login bug","System.WorkItemType":"Bug","System.State":"Active"}},
+			{"id":202,"fields":{"System.Title":"Add export button","System.WorkItemType":"Task","System.State":"New"}}
+		]}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+
+	items, err := c.FetchWorkItemsByIDs(context.Background(), []int{101, 202})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(workitemsQuery, "ids=101,202") {
+		t.Errorf("expected workitems query to batch both ids, got %s", workitemsQuery)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+	if items[0] != (AssignedWorkItem{ID: 101, Title: "Fix login bug", Type: "Bug", State: "Active"}) {
+		t.Errorf("unexpected first item: %+v", items[0])
+	}
+	if items[1] != (AssignedWorkItem{ID: 202, Title: "Add export button", Type: "Task", State: "New"}) {
+		t.Errorf("unexpected second item: %+v", items[1])
+	}
+}
+
+func TestFetchWorkItemsByIDs_ChunksAtAzureLimit(t *testing.T) {
+	var detailBatches []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		detailBatches = append(detailBatches, r.URL.Query().Get("ids"))
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"count":0,"value":[]}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+
+	ids := make([]int, 201)
+	for i := range ids {
+		ids[i] = i + 1
+	}
+	if _, err := c.FetchWorkItemsByIDs(context.Background(), ids); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(detailBatches) != 2 {
+		t.Fatalf("expected 2 detail fetches, got %d (%v)", len(detailBatches), detailBatches)
+	}
+	if got := len(strings.Split(detailBatches[0], ",")); got != 200 {
+		t.Errorf("expected first detail batch to contain 200 ids, got %d", got)
+	}
+	if got := len(strings.Split(detailBatches[1], ",")); got != 1 {
+		t.Errorf("expected second detail batch to contain 1 id, got %d", got)
+	}
+}
+
+func TestFetchWorkItemsByIDs_EmptyIDsSkipsHTTPCall(t *testing.T) {
+	callMade := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callMade = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+
+	items, err := c.FetchWorkItemsByIDs(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(items) != 0 {
+		t.Errorf("expected empty result, got %v", items)
+	}
+	if callMade {
+		t.Error("HTTP call should not be made for an empty id list")
+	}
+}
+
+func TestFetchWorkItemsByIDs_NoTokenNoHTTPCall(t *testing.T) {
+	callMade := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callMade = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := &Client{cfg: Config{Token: ""}, http: &http.Client{Transport: redirectToServer(srv.URL)}}
+
+	_, err := c.FetchWorkItemsByIDs(context.Background(), []int{1})
+	if err == nil {
+		t.Error("expected error when token is empty")
+	}
+	if callMade {
+		t.Error("HTTP call should not be made when token is empty")
+	}
+}
+
 func TestNewClientFromEnv_TeamProjectDefault(t *testing.T) {
 	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "test-pat")
 	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
