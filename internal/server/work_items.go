@@ -156,7 +156,7 @@ func (srv *Server) handleGetAzureWorkItemStates(w http.ResponseWriter, r *http.R
 		http.Error(w, sanitizePublicError(err), http.StatusBadGateway)
 		return
 	}
-	writeJSON(w, map[string]any{"org": az.Config().Org, "items": items}, nil)
+	writeJSON(w, map[string]any{"org": az.Config().Org, "team_project": az.Config().TeamProject, "items": items}, nil)
 }
 
 // azureWorkItemID parses the {id} path param shared by the close/recreate

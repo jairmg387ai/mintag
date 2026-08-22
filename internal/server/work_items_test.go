@@ -409,8 +409,9 @@ func TestGetAzureWorkItemStates_Success(t *testing.T) {
 	assertStatus(t, resp, http.StatusOK)
 
 	var body struct {
-		Org   string `json:"org"`
-		Items []struct {
+		Org         string `json:"org"`
+		TeamProject string `json:"team_project"`
+		Items       []struct {
 			ID    int    `json:"id"`
 			Title string `json:"title"`
 			Type  string `json:"type"`
@@ -426,6 +427,9 @@ func TestGetAzureWorkItemStates_Success(t *testing.T) {
 	}
 	if body.Items[0].ID != 101 || body.Items[0].State != "Active" {
 		t.Errorf("unexpected first item: %+v", body.Items[0])
+	}
+	if body.TeamProject != "RUNTPRO" {
+		t.Errorf("expected default team_project=RUNTPRO, got %q", body.TeamProject)
 	}
 }
 

@@ -1,7 +1,15 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { getActivityCatalog, listAzureActivities, fetchAzureWorkItemStates, closeAzureWorkItem, recreateAzureWorkItem } from '../../api/client'
+import {
+  getActivityCatalog,
+  listAzureActivities,
+  fetchAzureWorkItemStates,
+  closeAzureWorkItem,
+  recreateAzureWorkItem,
+  listAssignedAzureWorkItems,
+  addAzureActivity,
+} from '../../api/client'
 import { WorkItemsView } from './WorkItemsView'
 
 vi.mock('../../api/client', () => ({
@@ -10,6 +18,8 @@ vi.mock('../../api/client', () => ({
   fetchAzureWorkItemStates: vi.fn(),
   closeAzureWorkItem: vi.fn(),
   recreateAzureWorkItem: vi.fn(),
+  listAssignedAzureWorkItems: vi.fn(),
+  addAzureActivity: vi.fn(),
 }))
 
 const pushToast = vi.fn()
@@ -44,6 +54,8 @@ describe('WorkItemsView', () => {
     vi.mocked(fetchAzureWorkItemStates).mockReset()
     vi.mocked(closeAzureWorkItem).mockReset()
     vi.mocked(recreateAzureWorkItem).mockReset()
+    vi.mocked(listAssignedAzureWorkItems).mockReset()
+    vi.mocked(addAzureActivity).mockReset()
     vi.mocked(getActivityCatalog).mockResolvedValue(catalog)
   })
 
@@ -175,5 +187,139 @@ describe('WorkItemsView', () => {
     expect(listAzureActivities).toHaveBeenCalledTimes(2)
 
     confirmSpy.mockRestore()
+  })
+
+  it('renders an Azure DevOps link per row only after a states refresh has resolved org/team_project', async () => {
+    vi.mocked(listAzureActivities).mockResolvedValue(oneActivity)
+    vi.mocked(fetchAzureWorkItemStates).mockResolvedValue({
+      org: 'ORG', team_project: 'RUNTPRO',
+      items: [{ id: 101, title: 'Fix login bug', type: 'Bug', state: 'Active' }],
+    })
+    const user = userEvent.setup()
+    render(<WorkItemsView />)
+    await screen.findByText('101')
+
+    expect(screen.queryByTitle(/abrir en azure devops/i)).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /refrescar estados/i }))
+
+    const link = await screen.findByTitle(/abrir en azure devops/i)
+    expect(link).toHaveAttribute('href', 'https://dev.azure.com/ORG/RUNTPRO/_workitems/edit/101')
+    expect(link).toHaveAttribute('target', '_blank')
+  })
+
+  it('filters hide bugs, tasks, and closed rows independently, leaving unknown-state rows visible', async () => {
+    vi.mocked(listAzureActivities).mockResolvedValue([
+      { ...oneActivity[0], id: 1, work_item_id: 101, work_item_type: 'Bug', label: 'Bug row' },
+      { ...oneActivity[0], id: 2, work_item_id: 202, work_item_type: 'Task', label: 'Task row' },
+      { ...oneActivity[0], id: 3, work_item_id: 303, work_item_type: 'Task', label: 'Closed task row' },
+    ])
+    vi.mocked(fetchAzureWorkItemStates).mockResolvedValue({
+      org: 'ORG', team_project: 'RUNTPRO',
+      items: [
+        { id: 202, title: 'Task row', type: 'Task', state: 'Active' },
+        { id: 303, title: 'Closed task row', type: 'Task', state: 'Closed' },
+        // 101 deliberately absent — unknown state, must never be hidden by "Ocultar cerrados".
+      ],
+    })
+    const user = userEvent.setup()
+    render(<WorkItemsView />)
+    await screen.findByText('Bug row')
+    await user.click(screen.getByRole('button', { name: /refrescar estados/i }))
+    await screen.findByText('Closed')
+
+    await user.click(screen.getByRole('checkbox', { name: /ocultar bugs/i }))
+    expect(screen.queryByText('Bug row')).not.toBeInTheDocument()
+    expect(screen.getByText('Task row')).toBeInTheDocument()
+    await user.click(screen.getByRole('checkbox', { name: /ocultar bugs/i }))
+
+    await user.click(screen.getByRole('checkbox', { name: /ocultar tasks/i }))
+    expect(screen.getByText('Bug row')).toBeInTheDocument()
+    expect(screen.queryByText('Task row')).not.toBeInTheDocument()
+    expect(screen.queryByText('Closed task row')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('checkbox', { name: /ocultar tasks/i }))
+
+    await user.click(screen.getByRole('checkbox', { name: /ocultar cerrados/i }))
+    expect(screen.getByText('Bug row')).toBeInTheDocument()
+    expect(screen.getByText('Task row')).toBeInTheDocument()
+    expect(screen.queryByText('Closed task row')).not.toBeInTheDocument()
+  })
+
+  it('shows a distinct message when filters hide every row, versus an empty catalog', async () => {
+    vi.mocked(listAzureActivities).mockResolvedValue([{ ...oneActivity[0], work_item_type: 'Bug' }])
+    const user = userEvent.setup()
+    render(<WorkItemsView />)
+    await screen.findByText('101')
+
+    await user.click(screen.getByRole('checkbox', { name: /ocultar bugs/i }))
+
+    expect(await screen.findByText(/ningún work item coincide con los filtros/i)).toBeInTheDocument()
+    expect(screen.queryByText(/no hay work items registrados en el catálogo todavía/i)).not.toBeInTheDocument()
+  })
+
+  it('sync-assigned lists assigned-but-not-catalogued items, excluding already-catalogued ones', async () => {
+    vi.mocked(listAzureActivities).mockResolvedValue(oneActivity) // work_item_id 101 already catalogued
+    vi.mocked(listAssignedAzureWorkItems).mockResolvedValue({
+      org: 'ORG',
+      items: [
+        { id: 101, title: 'Fix login bug', type: 'Bug', state: 'Active' },
+        { id: 505, title: 'New assigned task', type: 'Task', state: 'New' },
+      ],
+    })
+    const user = userEvent.setup()
+    render(<WorkItemsView />)
+    await screen.findByText('101')
+
+    await user.click(screen.getByRole('button', { name: /sincronizar asignados/i }))
+
+    const pendingSection = screen.getByText('Asignados en Azure sin catalogar').closest('.card') as HTMLElement
+    expect(await within(pendingSection).findByText('New assigned task')).toBeInTheDocument()
+    expect(within(pendingSection).queryByText('Fix login bug')).not.toBeInTheDocument()
+  })
+
+  it('sync-assigned shows an all-caught-up message when nothing is pending', async () => {
+    vi.mocked(listAzureActivities).mockResolvedValue(oneActivity)
+    vi.mocked(listAssignedAzureWorkItems).mockResolvedValue({
+      org: 'ORG',
+      items: [{ id: 101, title: 'Fix login bug', type: 'Bug', state: 'Active' }],
+    })
+    const user = userEvent.setup()
+    render(<WorkItemsView />)
+    await screen.findByText('101')
+
+    await user.click(screen.getByRole('button', { name: /sincronizar asignados/i }))
+
+    expect(await screen.findByText(/todo al día/i)).toBeInTheDocument()
+  })
+
+  it('adding a pending assigned item calls addAzureActivity with the right payload and removes it from the pending list', async () => {
+    vi.mocked(listAzureActivities)
+      .mockResolvedValueOnce(oneActivity)
+      .mockResolvedValueOnce([...oneActivity, { ...oneActivity[0], id: 2, work_item_id: 505, label: 'New assigned task', work_item_type: 'Task' }])
+    vi.mocked(listAssignedAzureWorkItems).mockResolvedValue({
+      org: 'ORG',
+      items: [
+        { id: 101, title: 'Fix login bug', type: 'Bug', state: 'Active' },
+        { id: 505, title: 'New assigned task', type: 'Task', state: 'New' },
+      ],
+    })
+    vi.mocked(addAzureActivity).mockResolvedValue({
+      id: 2, org: 'ORG', work_item_id: 505, label: 'New assigned task', work_item_type: 'Task', is_active: true, is_default: false,
+    })
+    const user = userEvent.setup()
+    render(<WorkItemsView />)
+    await screen.findByText('101')
+
+    await user.click(screen.getByRole('button', { name: /sincronizar asignados/i }))
+    const pendingSection = screen.getByText('Asignados en Azure sin catalogar').closest('.card') as HTMLElement
+    await within(pendingSection).findByText('New assigned task')
+
+    await user.click(within(pendingSection).getByRole('button', { name: /agregar/i }))
+
+    expect(addAzureActivity).toHaveBeenCalledWith({ org: 'ORG', work_item_id: 505, label: 'New assigned task', work_item_type: 'Task' })
+    // The item leaves the pending section (and, via the refreshed catalog
+    // fetch, shows up in the main table instead — see the second
+    // listAzureActivities mock above).
+    await waitFor(() => expect(within(pendingSection).queryByText('New assigned task')).not.toBeInTheDocument())
   })
 })

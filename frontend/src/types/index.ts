@@ -285,6 +285,9 @@ export interface AssignedAzureWorkItem {
 
 export interface AssignedAzureWorkItemsResponse {
   org: string
+  // Only present on the azure-work-items/states response (the assigned-list
+  // endpoint doesn't return it) — optional so both endpoints share one type.
+  team_project?: string
   items: AssignedAzureWorkItem[]
 }
 

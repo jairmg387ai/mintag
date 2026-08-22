@@ -1,11 +1,26 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, FilePlus2, RefreshCw } from 'lucide-react'
+import { Plus, FilePlus2, RefreshCw, ExternalLink, UserPlus } from 'lucide-react'
 import type { ActivityCatalog, AzureActivity, AssignedAzureWorkItem, CreatedWorkItemResponse } from '../../types'
-import { getActivityCatalog, listAzureActivities, fetchAzureWorkItemStates, closeAzureWorkItem, recreateAzureWorkItem } from '../../api/client'
+import {
+  getActivityCatalog,
+  listAzureActivities,
+  fetchAzureWorkItemStates,
+  closeAzureWorkItem,
+  recreateAzureWorkItem,
+  listAssignedAzureWorkItems,
+  addAzureActivity,
+} from '../../api/client'
 import { useAppActions } from '../../store/AppContext'
 import { Card, CardHeader } from '../ui/Card'
 import { CreateWorkItemModal } from './CreateWorkItemModal'
 import { AzureWorkItemStateBadge } from './AzureWorkItemStateBadge'
+
+// isClosedAzureState mirrors azure.IsClosedState (Go) for the subset of
+// state strings the frontend needs to reason about — shared by the "hide
+// closed" filter and the Close/Recreate row-disable logic below.
+function isClosedAzureState(state: string | undefined): boolean {
+  return state === 'Closed' || state === 'Cerrado'
+}
 
 // WorkItemsView creates Azure DevOps work items and lists the ones already
 // registered in the local azure_activities catalog. mintag does not persist
@@ -23,6 +38,17 @@ export function WorkItemsView() {
   const [liveStates, setLiveStates] = useState<Record<number, AssignedAzureWorkItem>>({})
   const [statesLoading, setStatesLoading] = useState(false)
   const [rowBusy, setRowBusy] = useState<Record<number, boolean>>({})
+  // org/team_project are only known once a states refresh has run at least
+  // once — until then we omit the "open in Azure DevOps" link rather than
+  // guess at a fallback org/project.
+  const [azureLinkBase, setAzureLinkBase] = useState<{ org: string; teamProject: string } | null>(null)
+  const [hideClosed, setHideClosed] = useState(false)
+  const [hideBugs, setHideBugs] = useState(false)
+  const [hideTasks, setHideTasks] = useState(false)
+  const [pendingAssigned, setPendingAssigned] = useState<AssignedAzureWorkItem[] | null>(null)
+  const [assignedOrg, setAssignedOrg] = useState('')
+  const [syncingAssigned, setSyncingAssigned] = useState(false)
+  const [addingWorkItemId, setAddingWorkItemId] = useState<number | null>(null)
 
   const loadAzureActivities = useCallback(() => {
     setActivitiesLoading(true)
@@ -46,14 +72,48 @@ export function WorkItemsView() {
     setStatesLoading(true)
     try {
       const ids = azureActivities.map(a => a.work_item_id)
-      const { items } = await fetchAzureWorkItemStates(ids)
+      const { items, org, team_project } = await fetchAzureWorkItemStates(ids)
       const byId: Record<number, AssignedAzureWorkItem> = {}
       for (const item of items) byId[item.id] = item
       setLiveStates(byId)
+      if (org && team_project) setAzureLinkBase({ org, teamProject: team_project })
     } catch (e: unknown) {
       pushToast(e instanceof Error ? e.message : 'No se pudo refrescar el estado de los work items', true)
     } finally {
       setStatesLoading(false)
+    }
+  }
+
+  // syncAssigned discovers work items assigned to the current identity in
+  // Azure that aren't in the local catalog yet, so they can be added with
+  // one click instead of typed in by hand (mirrors the coworker reference
+  // implementation's syncAssignedWorkItems, but only proposes — the actual
+  // catalog write happens per-item via handleAddAssigned below).
+  async function syncAssigned() {
+    setSyncingAssigned(true)
+    try {
+      const { org, items } = await listAssignedAzureWorkItems()
+      setAssignedOrg(org)
+      const knownIds = new Set(azureActivities.map(a => a.work_item_id))
+      setPendingAssigned(items.filter(item => !knownIds.has(item.id)))
+    } catch (e: unknown) {
+      pushToast(e instanceof Error ? e.message : 'No se pudo sincronizar los work items asignados', true)
+    } finally {
+      setSyncingAssigned(false)
+    }
+  }
+
+  async function handleAddAssigned(item: AssignedAzureWorkItem) {
+    setAddingWorkItemId(item.id)
+    try {
+      await addAzureActivity({ org: assignedOrg, work_item_id: item.id, label: item.title, work_item_type: item.type })
+      setPendingAssigned(prev => (prev ? prev.filter(p => p.id !== item.id) : prev))
+      loadAzureActivities()
+      pushToast(`Work item ${item.id} agregado al catálogo.`, false)
+    } catch (e: unknown) {
+      pushToast(e instanceof Error ? e.message : 'No se pudo agregar el work item al catálogo', true)
+    } finally {
+      setAddingWorkItemId(null)
     }
   }
 
@@ -188,79 +248,188 @@ export function WorkItemsView() {
             Work Items registrados
           </CardHeader>
           <div style={{ padding: 18 }}>
-            {activitiesLoading ? (
-              <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--fg3)', font: 'var(--text-body)' }}>
-                Cargando work items...
+            {azureActivities.length > 0 && (
+              <div style={{ display: 'flex', gap: 16, marginBottom: 14, flexWrap: 'wrap' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, font: 'var(--text-sm)', color: 'var(--fg2)' }}>
+                  <input type="checkbox" checked={hideClosed} onChange={e => setHideClosed(e.target.checked)} />
+                  Ocultar cerrados
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, font: 'var(--text-sm)', color: 'var(--fg2)' }}>
+                  <input type="checkbox" checked={hideBugs} onChange={e => setHideBugs(e.target.checked)} />
+                  Ocultar bugs
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, font: 'var(--text-sm)', color: 'var(--fg2)' }}>
+                  <input type="checkbox" checked={hideTasks} onChange={e => setHideTasks(e.target.checked)} />
+                  Ocultar tasks
+                </label>
               </div>
-            ) : azureActivities.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--fg3)', font: 'var(--text-body)' }}>
-                No hay work items registrados en el catálogo todavía.
+            )}
+            {(() => {
+              const visibleActivities = azureActivities.filter(a => {
+                if (hideBugs && a.work_item_type === 'Bug') return false
+                if (hideTasks && a.work_item_type === 'Task') return false
+                // A row whose state hasn't been fetched yet is never hidden
+                // by this filter — unknown is not "closed".
+                if (hideClosed && isClosedAzureState(liveStates[a.work_item_id]?.state)) return false
+                return true
+              })
+
+              if (activitiesLoading) {
+                return (
+                  <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--fg3)', font: 'var(--text-body)' }}>
+                    Cargando work items...
+                  </div>
+                )
+              }
+              if (azureActivities.length === 0) {
+                return (
+                  <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--fg3)', font: 'var(--text-body)' }}>
+                    No hay work items registrados en el catálogo todavía.
+                  </div>
+                )
+              }
+              if (visibleActivities.length === 0) {
+                return (
+                  <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--fg3)', font: 'var(--text-body)' }}>
+                    Ningún work item coincide con los filtros seleccionados.
+                  </div>
+                )
+              }
+              return (
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="mt-table">
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>LABEL</th>
+                        <th>TIPO</th>
+                        <th>PROYECTO</th>
+                        <th>CATEGORÍA</th>
+                        <th>PREDETERMINADO</th>
+                        <th>ESTADO</th>
+                        <th>ACCIONES</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleActivities.map(a => {
+                        // Close/Recreate only apply to Tasks — mirrors the
+                        // coworker reference implementation's isBug exclusion;
+                        // Bugs have no such action here either.
+                        const isTask = a.work_item_type === 'Task'
+                        const closedAlready = isClosedAzureState(liveStates[a.work_item_id]?.state)
+                        const busy = !!rowBusy[a.work_item_id]
+                        return (
+                          <tr key={a.id}>
+                            <td style={{ font: 'var(--text-mono)', color: 'var(--fg1)' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                {a.work_item_id}
+                                {azureLinkBase && (
+                                  <a
+                                    href={`https://dev.azure.com/${azureLinkBase.org}/${azureLinkBase.teamProject}/_workitems/edit/${a.work_item_id}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    title="Abrir en Azure DevOps"
+                                    style={{ color: 'var(--fg3)', display: 'inline-flex' }}
+                                  >
+                                    <ExternalLink size={13} strokeWidth={1.75} />
+                                  </a>
+                                )}
+                              </div>
+                            </td>
+                            <td style={{ color: 'var(--fg1)' }}>{a.label}</td>
+                            <td style={{ color: 'var(--fg2)' }}>{a.work_item_type || '—'}</td>
+                            <td style={{ color: 'var(--fg2)' }}>{a.project || '—'}</td>
+                            <td style={{ color: 'var(--fg2)' }}>{categoryName(a.category_id)}</td>
+                            <td style={{ color: 'var(--fg2)' }}>{a.is_default ? 'Sí' : '—'}</td>
+                            <td>
+                              {liveStates[a.work_item_id]
+                                ? <AzureWorkItemStateBadge state={liveStates[a.work_item_id].state} />
+                                : <span style={{ color: 'var(--fg3)' }}>—</span>}
+                            </td>
+                            <td>
+                              {isTask ? (
+                                <div style={{ display: 'flex', gap: 6 }}>
+                                  <button
+                                    className="btn btn-ghost btn-sm"
+                                    disabled={busy || closedAlready}
+                                    onClick={() => handleClose(a.work_item_id, a.label)}
+                                  >
+                                    Cerrar
+                                  </button>
+                                  <button
+                                    className="btn btn-ghost btn-sm"
+                                    disabled={busy || closedAlready}
+                                    onClick={() => handleRecreate(a.work_item_id, a.label)}
+                                  >
+                                    Recrear
+                                  </button>
+                                </div>
+                              ) : (
+                                <span style={{ color: 'var(--fg3)' }}>—</span>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            })()}
+          </div>
+        </Card>
+
+        <Card>
+          <CardHeader
+            icon={<UserPlus size={16} strokeWidth={1.75} />}
+            right={
+              <button
+                onClick={syncAssigned}
+                className="btn btn-secondary btn-sm"
+                disabled={syncingAssigned}
+              >
+                {syncingAssigned ? 'Sincronizando...' : 'Sincronizar asignados'}
+              </button>
+            }
+          >
+            Asignados en Azure sin catalogar
+          </CardHeader>
+          <div style={{ padding: 18 }}>
+            {pendingAssigned === null ? (
+              <div style={{ textAlign: 'center', padding: '12px 0', color: 'var(--fg3)', font: 'var(--text-body)' }}>
+                Sincroniza para ver los work items que Azure ya te tiene asignados y que aún no están en tu catálogo.
+              </div>
+            ) : pendingAssigned.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '12px 0', color: 'var(--fg3)', font: 'var(--text-body)' }}>
+                Todo al día: todos tus work items asignados ya están en el catálogo.
               </div>
             ) : (
-              <div style={{ overflowX: 'auto' }}>
-                <table className="mt-table">
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th>LABEL</th>
-                      <th>TIPO</th>
-                      <th>PROYECTO</th>
-                      <th>CATEGORÍA</th>
-                      <th>PREDETERMINADO</th>
-                      <th>ESTADO</th>
-                      <th>ACCIONES</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {azureActivities.map(a => {
-                      // Close/Recreate only apply to Tasks — mirrors the
-                      // coworker reference implementation's isBug exclusion;
-                      // Bugs have no such action here either.
-                      const isTask = a.work_item_type === 'Task'
-                      const closedAlready = liveStates[a.work_item_id]?.state
-                        ? liveStates[a.work_item_id].state === 'Closed' || liveStates[a.work_item_id].state === 'Cerrado'
-                        : false
-                      const busy = !!rowBusy[a.work_item_id]
-                      return (
-                        <tr key={a.id}>
-                          <td style={{ font: 'var(--text-mono)', color: 'var(--fg1)' }}>{a.work_item_id}</td>
-                          <td style={{ color: 'var(--fg1)' }}>{a.label}</td>
-                          <td style={{ color: 'var(--fg2)' }}>{a.work_item_type || '—'}</td>
-                          <td style={{ color: 'var(--fg2)' }}>{a.project || '—'}</td>
-                          <td style={{ color: 'var(--fg2)' }}>{categoryName(a.category_id)}</td>
-                          <td style={{ color: 'var(--fg2)' }}>{a.is_default ? 'Sí' : '—'}</td>
-                          <td>
-                            {liveStates[a.work_item_id]
-                              ? <AzureWorkItemStateBadge state={liveStates[a.work_item_id].state} />
-                              : <span style={{ color: 'var(--fg3)' }}>—</span>}
-                          </td>
-                          <td>
-                            {isTask ? (
-                              <div style={{ display: 'flex', gap: 6 }}>
-                                <button
-                                  className="btn btn-ghost btn-sm"
-                                  disabled={busy || closedAlready}
-                                  onClick={() => handleClose(a.work_item_id, a.label)}
-                                >
-                                  Cerrar
-                                </button>
-                                <button
-                                  className="btn btn-ghost btn-sm"
-                                  disabled={busy || closedAlready}
-                                  onClick={() => handleRecreate(a.work_item_id, a.label)}
-                                >
-                                  Recrear
-                                </button>
-                              </div>
-                            ) : (
-                              <span style={{ color: 'var(--fg3)' }}>—</span>
-                            )}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {pendingAssigned.map(item => (
+                  <div
+                    key={item.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      padding: '8px 10px',
+                      borderRadius: 'var(--radius-md)',
+                      border: '1px solid var(--border)',
+                      background: 'var(--bg-sunken)',
+                    }}
+                  >
+                    <span style={{ font: 'var(--text-mono)', color: 'var(--fg1)' }}>#{item.id}</span>
+                    <span style={{ flex: 1, color: 'var(--fg1)', font: 'var(--text-sm)' }}>{item.title}</span>
+                    <span style={{ color: 'var(--fg3)', font: 'var(--text-caption)' }}>{item.type}</span>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      disabled={addingWorkItemId === item.id}
+                      onClick={() => handleAddAssigned(item)}
+                    >
+                      {addingWorkItemId === item.id ? 'Agregando...' : 'Agregar'}
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
           </div>
