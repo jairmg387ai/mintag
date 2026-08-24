@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Plus, FilePlus2, RefreshCw, ExternalLink, UserPlus } from 'lucide-react'
+import { useState, useEffect, useCallback, type CSSProperties } from 'react'
+import { Plus, FilePlus2, RefreshCw, ExternalLink, UserPlus, Pencil, Check, X, Star, Trash2, Search, ChevronLeft, ChevronRight } from 'lucide-react'
 import type { ActivityCatalog, AzureActivity, AssignedAzureWorkItem, CreatedWorkItemResponse } from '../../types'
 import {
   getActivityCatalog,
@@ -9,11 +9,30 @@ import {
   recreateAzureWorkItem,
   listAssignedAzureWorkItems,
   addAzureActivity,
+  updateAzureActivity,
+  deactivateAzureActivity,
+  setDefaultAzureActivity,
 } from '../../api/client'
+import { friendlyCatalogErrorMessage } from '../activities/azureActivity'
 import { useAppActions } from '../../store/AppContext'
 import { Card, CardHeader } from '../ui/Card'
 import { CreateWorkItemModal } from './CreateWorkItemModal'
 import { AzureWorkItemStateBadge } from './AzureWorkItemStateBadge'
+
+const PAGE_SIZE = 20
+
+const inputStyle: CSSProperties = {
+  width: '100%',
+  padding: '6px 8px',
+  border: '1px solid var(--border-strong)',
+  borderRadius: 'var(--radius-md)',
+  font: 'var(--text-body)',
+  fontSize: '0.9em',
+  color: 'var(--fg1)',
+  background: 'var(--bg-sunken)',
+  outline: 'none',
+  boxSizing: 'border-box',
+}
 
 // isClosedAzureState mirrors azure.IsClosedState (Go) for the subset of
 // state strings the frontend needs to reason about — shared by the "hide
@@ -22,12 +41,12 @@ function isClosedAzureState(state: string | undefined): boolean {
   return state === 'Closed' || state === 'Cerrado'
 }
 
-// WorkItemsView creates Azure DevOps work items and lists the ones already
-// registered in the local azure_activities catalog. mintag does not persist
-// work items itself — the table below reflects the catalog (see
-// CatalogManagementModal for CRUD on it) plus an opt-in live-state refresh
-// against Azure; it is not a full sync/history of every work item ever
-// touched.
+// WorkItemsView creates Azure DevOps work items and is the single place to
+// manage the local azure_activities catalog (add/edit/deactivate/default),
+// plus an opt-in live-state refresh against Azure; it is not a full
+// sync/history of every work item ever touched. CatalogManagementModal used
+// to own a second, overlapping "Work items de Azure" tab for the same
+// catalog — that tab was removed so this table is the only place left.
 export function WorkItemsView() {
   const { pushToast } = useAppActions()
   const [modalOpen, setModalOpen] = useState(false)
@@ -45,14 +64,42 @@ export function WorkItemsView() {
   const [hideClosed, setHideClosed] = useState(false)
   const [hideBugs, setHideBugs] = useState(false)
   const [hideTasks, setHideTasks] = useState(false)
+  const [showInactive, setShowInactive] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [page, setPage] = useState(1)
   const [pendingAssigned, setPendingAssigned] = useState<AssignedAzureWorkItem[] | null>(null)
   const [assignedOrg, setAssignedOrg] = useState('')
   const [syncingAssigned, setSyncingAssigned] = useState(false)
   const [addingWorkItemId, setAddingWorkItemId] = useState<number | null>(null)
 
-  const loadAzureActivities = useCallback(() => {
+  // Manual add — mirrors the row the removed CatalogManagementModal "Work
+  // items de Azure" tab used to offer, for work items that never show up in
+  // "Sincronizar asignados" (e.g. registering someone else's work item).
+  const [manualOpen, setManualOpen] = useState(false)
+  const [manualOrg, setManualOrg] = useState('')
+  const [manualWorkItemId, setManualWorkItemId] = useState('')
+  const [manualLabel, setManualLabel] = useState('')
+  const [manualWorkItemType, setManualWorkItemType] = useState('')
+  const [manualProject, setManualProject] = useState('')
+  const [manualCategory, setManualCategory] = useState('')
+  const [manualAdding, setManualAdding] = useState(false)
+  const [manualError, setManualError] = useState('')
+
+  // Catalog edit / default / deactivate — same actions the removed modal tab
+  // had, keyed by azure_activity id (not work_item_id, which rowBusy above
+  // already keys the Close/Recreate Azure mutations by).
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editOrg, setEditOrg] = useState('')
+  const [editLabel, setEditLabel] = useState('')
+  const [editWorkItemType, setEditWorkItemType] = useState('')
+  const [editProject, setEditProject] = useState('')
+  const [editCategory, setEditCategory] = useState('')
+  const [catalogBusyId, setCatalogBusyId] = useState<number | null>(null)
+  const [catalogError, setCatalogError] = useState('')
+
+  const loadAzureActivities = useCallback((includeInactive: boolean) => {
     setActivitiesLoading(true)
-    listAzureActivities(false)
+    listAzureActivities(includeInactive)
       .then(setAzureActivities)
       .catch(() => setAzureActivities([]))
       .finally(() => setActivitiesLoading(false))
@@ -60,8 +107,16 @@ export function WorkItemsView() {
 
   useEffect(() => {
     getActivityCatalog().then(setCatalog).catch(() => setCatalog(null))
-    loadAzureActivities()
-  }, [loadAzureActivities])
+  }, [])
+
+  useEffect(() => {
+    loadAzureActivities(showInactive)
+  }, [loadAzureActivities, showInactive])
+
+  // Any filter/search change invalidates the current page.
+  useEffect(() => {
+    setPage(1)
+  }, [searchQuery, hideClosed, hideBugs, hideTasks, showInactive])
 
   function categoryName(categoryId: AzureActivity['category_id']): string {
     if (!categoryId || !catalog) return '—'
@@ -108,12 +163,112 @@ export function WorkItemsView() {
     try {
       await addAzureActivity({ org: assignedOrg, work_item_id: item.id, label: item.title, work_item_type: item.type })
       setPendingAssigned(prev => (prev ? prev.filter(p => p.id !== item.id) : prev))
-      loadAzureActivities()
+      loadAzureActivities(showInactive)
       pushToast(`Work item ${item.id} agregado al catálogo.`, false)
     } catch (e: unknown) {
       pushToast(e instanceof Error ? e.message : 'No se pudo agregar el work item al catálogo', true)
     } finally {
       setAddingWorkItemId(null)
+    }
+  }
+
+  async function handleManualAdd() {
+    const wid = parseInt(manualWorkItemId, 10)
+    if (!manualOrg.trim() || !manualLabel.trim() || !manualWorkItemId.trim() || isNaN(wid)) {
+      setManualError('La organización, el ID del work item y la etiqueta son obligatorios')
+      return
+    }
+    setManualAdding(true)
+    setManualError('')
+    try {
+      await addAzureActivity({
+        org: manualOrg.trim(),
+        work_item_id: wid,
+        label: manualLabel.trim(),
+        work_item_type: manualWorkItemType || undefined,
+        project: manualProject || undefined,
+        category_id: manualCategory ? Number(manualCategory) : undefined,
+      })
+      setManualOrg('')
+      setManualWorkItemId('')
+      setManualLabel('')
+      setManualWorkItemType('')
+      setManualProject('')
+      setManualCategory('')
+      loadAzureActivities(showInactive)
+    } catch (e: unknown) {
+      setManualError(friendlyCatalogErrorMessage(e, 'No se pudo agregar el work item'))
+    } finally {
+      setManualAdding(false)
+    }
+  }
+
+  function startEdit(a: AzureActivity) {
+    setEditingId(a.id)
+    setEditOrg(a.org)
+    setEditLabel(a.label)
+    setEditWorkItemType(a.work_item_type ?? '')
+    setEditProject(a.project ?? '')
+    setEditCategory(a.category_id != null ? String(a.category_id) : '')
+    setCatalogError('')
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setCatalogError('')
+  }
+
+  // updateAzureActivity is a full replace: project/category_id are always
+  // sent (empty string / '' -> null), never omitted, so an unedited field
+  // isn't silently cleared by relying on "undefined drops the key" like the
+  // manual-add call above does — that behavior only applies to inserts.
+  async function saveEdit(id: number) {
+    if (!editOrg.trim() || !editLabel.trim()) {
+      setCatalogError('La organización y la etiqueta son obligatorias')
+      return
+    }
+    setCatalogBusyId(id)
+    setCatalogError('')
+    try {
+      await updateAzureActivity(id, {
+        org: editOrg.trim(),
+        label: editLabel.trim(),
+        work_item_type: editWorkItemType,
+        project: editProject.trim() || null,
+        category_id: editCategory ? Number(editCategory) : null,
+      })
+      setEditingId(null)
+      loadAzureActivities(showInactive)
+    } catch (e: unknown) {
+      setCatalogError(friendlyCatalogErrorMessage(e, 'No se pudo actualizar el work item'))
+    } finally {
+      setCatalogBusyId(null)
+    }
+  }
+
+  async function handleSetDefault(id: number) {
+    setCatalogBusyId(id)
+    setCatalogError('')
+    try {
+      await setDefaultAzureActivity(id)
+      loadAzureActivities(showInactive)
+    } catch (e: unknown) {
+      setCatalogError(friendlyCatalogErrorMessage(e, 'No se pudo definir el work item predeterminado'))
+    } finally {
+      setCatalogBusyId(null)
+    }
+  }
+
+  async function handleDeactivate(id: number) {
+    setCatalogBusyId(id)
+    setCatalogError('')
+    try {
+      await deactivateAzureActivity(id)
+      loadAzureActivities(showInactive)
+    } catch (e: unknown) {
+      setCatalogError(friendlyCatalogErrorMessage(e, 'No se pudo desactivar el work item'))
+    } finally {
+      setCatalogBusyId(null)
     }
   }
 
@@ -162,7 +317,7 @@ export function WorkItemsView() {
       if (result.catalog_error) {
         pushToast(`No se pudo reasignar el catálogo al nuevo work item: ${result.catalog_error}`, true)
       }
-      loadAzureActivities()
+      loadAzureActivities(showInactive)
     } catch (e: unknown) {
       pushToast(e instanceof Error ? e.message : 'No se pudo recrear el work item', true)
     } finally {
@@ -181,7 +336,7 @@ export function WorkItemsView() {
       pushToast(`No se pudo registrar el work item en el catálogo: ${result.catalog_error}`, true)
     }
     if (result.azure_activity_id) {
-      loadAzureActivities()
+      loadAzureActivities(showInactive)
     }
   }
 
@@ -248,8 +403,126 @@ export function WorkItemsView() {
             Work Items registrados
           </CardHeader>
           <div style={{ padding: 18 }}>
+            {/* Manual add */}
+            <div style={{ marginBottom: 14 }}>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setManualOpen(v => !v)}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: manualOpen ? 8 : 0 }}
+              >
+                <Plus size={14} strokeWidth={1.75} />
+                {manualOpen ? 'Ocultar alta manual' : 'Agregar manualmente'}
+              </button>
+
+              {manualOpen && (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                  <input
+                    type="text"
+                    value={manualOrg}
+                    onChange={e => setManualOrg(e.target.value)}
+                    placeholder="Organización (ej. RUNT2PSW)"
+                    style={{ ...inputStyle, flex: '1 1 140px' }}
+                    disabled={manualAdding}
+                  />
+                  <input
+                    type="number"
+                    value={manualWorkItemId}
+                    onChange={e => setManualWorkItemId(e.target.value)}
+                    placeholder="ID del work item"
+                    style={{ ...inputStyle, flex: '1 1 120px' }}
+                    disabled={manualAdding}
+                  />
+                  <input
+                    type="text"
+                    value={manualLabel}
+                    onChange={e => setManualLabel(e.target.value)}
+                    placeholder="Etiqueta"
+                    style={{ ...inputStyle, flex: '1 1 160px' }}
+                    disabled={manualAdding}
+                  />
+                  <select
+                    aria-label="Tipo de work item"
+                    value={manualWorkItemType}
+                    onChange={e => setManualWorkItemType(e.target.value)}
+                    style={{ ...inputStyle, flex: '0 1 120px' }}
+                    disabled={manualAdding}
+                  >
+                    <option value="">Sin tipo</option>
+                    <option value="Bug">Bug</option>
+                    <option value="Task">Task</option>
+                  </select>
+                  {catalog !== null ? (
+                    <select
+                      aria-label="Proyecto"
+                      value={manualProject}
+                      onChange={e => setManualProject(e.target.value)}
+                      style={{ ...inputStyle, flex: '0 1 140px' }}
+                      disabled={manualAdding}
+                    >
+                      <option value="">Sin proyecto</option>
+                      {catalog.projects.map(p => (
+                        <option key={p.name} value={p.name}>{p.name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={manualProject}
+                      onChange={e => setManualProject(e.target.value)}
+                      placeholder="Proyecto (opcional)"
+                      style={{ ...inputStyle, flex: '1 1 140px' }}
+                      disabled={manualAdding}
+                    />
+                  )}
+                  <select
+                    aria-label="Categoría"
+                    value={manualCategory}
+                    onChange={e => setManualCategory(e.target.value)}
+                    style={{ ...inputStyle, flex: '0 1 140px' }}
+                    disabled={manualAdding}
+                  >
+                    <option value="">Sin categoría</option>
+                    {(catalog?.categories ?? []).map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={handleManualAdd}
+                    disabled={manualAdding || !manualOrg.trim() || !manualWorkItemId.trim() || !manualLabel.trim()}
+                    aria-label="Agregar work item"
+                  >
+                    <Plus size={14} strokeWidth={1.75} />
+                  </button>
+                </div>
+              )}
+
+              {manualOpen && manualError && (
+                <div style={{ font: 'var(--text-caption)', color: 'var(--block-solid)', marginTop: 8 }}>
+                  {manualError}
+                </div>
+              )}
+            </div>
+
+            {catalogError && (
+              <div style={{ font: 'var(--text-caption)', color: 'var(--block-solid)', marginBottom: 10 }}>
+                {catalogError}
+              </div>
+            )}
+
             {azureActivities.length > 0 && (
-              <div style={{ display: 'flex', gap: 16, marginBottom: 14, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: 16, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+                <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 180 }}>
+                  <Search size={14} strokeWidth={1.75} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--fg3)' }} />
+                  <input
+                    type="search"
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    placeholder="Buscar por ID, etiqueta, tipo, proyecto o categoría..."
+                    aria-label="Buscar work items registrados"
+                    style={{ ...inputStyle, paddingLeft: 28 }}
+                  />
+                </div>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, font: 'var(--text-sm)', color: 'var(--fg2)' }}>
                   <input type="checkbox" checked={hideClosed} onChange={e => setHideClosed(e.target.checked)} />
                   Ocultar cerrados
@@ -262,15 +535,31 @@ export function WorkItemsView() {
                   <input type="checkbox" checked={hideTasks} onChange={e => setHideTasks(e.target.checked)} />
                   Ocultar tasks
                 </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, font: 'var(--text-sm)', color: 'var(--fg2)' }}>
+                  <input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} />
+                  Mostrar inactivos
+                </label>
               </div>
             )}
             {(() => {
+              const normalizedSearch = searchQuery.trim().toLowerCase()
               const visibleActivities = azureActivities.filter(a => {
                 if (hideBugs && a.work_item_type === 'Bug') return false
                 if (hideTasks && a.work_item_type === 'Task') return false
                 // A row whose state hasn't been fetched yet is never hidden
                 // by this filter — unknown is not "closed".
                 if (hideClosed && isClosedAzureState(liveStates[a.work_item_id]?.state)) return false
+                if (normalizedSearch) {
+                  const haystack = [
+                    String(a.work_item_id),
+                    a.org,
+                    a.label,
+                    a.work_item_type,
+                    a.project ?? '',
+                    categoryName(a.category_id),
+                  ].join(' ').toLowerCase()
+                  if (!haystack.includes(normalizedSearch)) return false
+                }
                 return true
               })
 
@@ -295,85 +584,284 @@ export function WorkItemsView() {
                   </div>
                 )
               }
+
+              const totalPages = Math.max(1, Math.ceil(visibleActivities.length / PAGE_SIZE))
+              const currentPage = Math.min(page, totalPages)
+              const pageStart = (currentPage - 1) * PAGE_SIZE
+              const pagedActivities = visibleActivities.slice(pageStart, pageStart + PAGE_SIZE)
+
               return (
-                <div style={{ overflowX: 'auto' }}>
-                  <table className="mt-table">
-                    <thead>
-                      <tr>
-                        <th>ID</th>
-                        <th>LABEL</th>
-                        <th>TIPO</th>
-                        <th>PROYECTO</th>
-                        <th>CATEGORÍA</th>
-                        <th>PREDETERMINADO</th>
-                        <th>ESTADO</th>
-                        <th>ACCIONES</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {visibleActivities.map(a => {
-                        // Close/Recreate only apply to Tasks — mirrors the
-                        // coworker reference implementation's isBug exclusion;
-                        // Bugs have no such action here either.
-                        const isTask = a.work_item_type === 'Task'
-                        const closedAlready = isClosedAzureState(liveStates[a.work_item_id]?.state)
-                        const busy = !!rowBusy[a.work_item_id]
-                        return (
-                          <tr key={a.id}>
-                            <td style={{ font: 'var(--text-mono)', color: 'var(--fg1)' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                {a.work_item_id}
-                                {azureLinkBase && (
-                                  <a
-                                    href={`https://dev.azure.com/${azureLinkBase.org}/${azureLinkBase.teamProject}/_workitems/edit/${a.work_item_id}`}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    title="Abrir en Azure DevOps"
-                                    style={{ color: 'var(--fg3)', display: 'inline-flex' }}
-                                  >
-                                    <ExternalLink size={13} strokeWidth={1.75} />
-                                  </a>
-                                )}
-                              </div>
-                            </td>
-                            <td style={{ color: 'var(--fg1)' }}>{a.label}</td>
-                            <td style={{ color: 'var(--fg2)' }}>{a.work_item_type || '—'}</td>
-                            <td style={{ color: 'var(--fg2)' }}>{a.project || '—'}</td>
-                            <td style={{ color: 'var(--fg2)' }}>{categoryName(a.category_id)}</td>
-                            <td style={{ color: 'var(--fg2)' }}>{a.is_default ? 'Sí' : '—'}</td>
-                            <td>
-                              {liveStates[a.work_item_id]
-                                ? <AzureWorkItemStateBadge state={liveStates[a.work_item_id].state} />
-                                : <span style={{ color: 'var(--fg3)' }}>—</span>}
-                            </td>
-                            <td>
-                              {isTask ? (
-                                <div style={{ display: 'flex', gap: 6 }}>
-                                  <button
-                                    className="btn btn-ghost btn-sm"
-                                    disabled={busy || closedAlready}
-                                    onClick={() => handleClose(a.work_item_id, a.label)}
-                                  >
-                                    Cerrar
-                                  </button>
-                                  <button
-                                    className="btn btn-ghost btn-sm"
-                                    disabled={busy || closedAlready}
-                                    onClick={() => handleRecreate(a.work_item_id, a.label)}
-                                  >
-                                    Recrear
-                                  </button>
+                <>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="mt-table">
+                      <thead>
+                        <tr>
+                          <th>ID</th>
+                          <th>ORG</th>
+                          <th>LABEL</th>
+                          <th>TIPO</th>
+                          <th>PROYECTO</th>
+                          <th>CATEGORÍA</th>
+                          <th>PREDETERMINADO</th>
+                          <th>ESTADO</th>
+                          <th>CATÁLOGO</th>
+                          <th>AZURE</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pagedActivities.map(a => {
+                          // Close/Recreate only apply to Tasks — mirrors the
+                          // coworker reference implementation's isBug exclusion;
+                          // Bugs have no such action here either.
+                          const isTask = a.work_item_type === 'Task'
+                          const closedAlready = isClosedAzureState(liveStates[a.work_item_id]?.state)
+                          const busy = !!rowBusy[a.work_item_id]
+                          const isEditing = editingId === a.id
+                          const catalogBusy = catalogBusyId === a.id
+
+                          return (
+                            <tr key={a.id} style={{ opacity: a.is_active ? 1 : 0.55 }}>
+                              <td style={{ font: 'var(--text-mono)', color: 'var(--fg1)' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  {a.work_item_id}
+                                  {azureLinkBase && (
+                                    <a
+                                      href={`https://dev.azure.com/${azureLinkBase.org}/${azureLinkBase.teamProject}/_workitems/edit/${a.work_item_id}`}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      title="Abrir en Azure DevOps"
+                                      style={{ color: 'var(--fg3)', display: 'inline-flex' }}
+                                    >
+                                      <ExternalLink size={13} strokeWidth={1.75} />
+                                    </a>
+                                  )}
                                 </div>
+                              </td>
+                              {isEditing ? (
+                                <>
+                                  <td>
+                                    <input
+                                      type="text"
+                                      value={editOrg}
+                                      onChange={e => setEditOrg(e.target.value)}
+                                      style={{ ...inputStyle, minWidth: 100 }}
+                                      disabled={catalogBusy}
+                                    />
+                                  </td>
+                                  <td>
+                                    <input
+                                      type="text"
+                                      value={editLabel}
+                                      onChange={e => setEditLabel(e.target.value)}
+                                      style={{ ...inputStyle, minWidth: 140 }}
+                                      disabled={catalogBusy}
+                                    />
+                                  </td>
+                                  <td>
+                                    <select
+                                      aria-label="Tipo de work item"
+                                      value={editWorkItemType}
+                                      onChange={e => setEditWorkItemType(e.target.value)}
+                                      style={{ ...inputStyle, minWidth: 100 }}
+                                      disabled={catalogBusy}
+                                    >
+                                      <option value="">Sin tipo</option>
+                                      <option value="Bug">Bug</option>
+                                      <option value="Task">Task</option>
+                                    </select>
+                                  </td>
+                                  <td>
+                                    {catalog !== null ? (
+                                      <select
+                                        aria-label="Proyecto"
+                                        value={editProject}
+                                        onChange={e => setEditProject(e.target.value)}
+                                        style={{ ...inputStyle, minWidth: 120 }}
+                                        disabled={catalogBusy}
+                                      >
+                                        <option value="">Sin proyecto</option>
+                                        {catalog.projects.map(p => (
+                                          <option key={p.name} value={p.name}>{p.name}</option>
+                                        ))}
+                                        {editProject && !catalog.projects.some(p => p.name === editProject) && (
+                                          <option value={editProject}>{editProject}</option>
+                                        )}
+                                      </select>
+                                    ) : (
+                                      <input
+                                        type="text"
+                                        value={editProject}
+                                        onChange={e => setEditProject(e.target.value)}
+                                        placeholder="Proyecto (opcional)"
+                                        style={{ ...inputStyle, minWidth: 120 }}
+                                        disabled={catalogBusy}
+                                      />
+                                    )}
+                                  </td>
+                                  <td>
+                                    <select
+                                      aria-label="Categoría"
+                                      value={editCategory}
+                                      onChange={e => setEditCategory(e.target.value)}
+                                      style={{ ...inputStyle, minWidth: 120 }}
+                                      disabled={catalogBusy}
+                                    >
+                                      <option value="">Sin categoría</option>
+                                      {(catalog?.categories ?? []).map(c => (
+                                        <option key={c.id} value={c.id}>{c.name}</option>
+                                      ))}
+                                      {/* Existence-only validation on the backend: a
+                                          stored category_id can dangle once a category
+                                          is hard-deleted. Keep it selectable/visible
+                                          instead of silently collapsing it to "Sin
+                                          categoría" and clearing it on save. */}
+                                      {editCategory && !(catalog?.categories ?? []).some(c => String(c.id) === editCategory) && (
+                                        <option value={editCategory}>{`Categoría desconocida (#${editCategory})`}</option>
+                                      )}
+                                    </select>
+                                  </td>
+                                </>
                               ) : (
-                                <span style={{ color: 'var(--fg3)' }}>—</span>
+                                <>
+                                  <td style={{ color: 'var(--fg2)' }}>{a.org}</td>
+                                  <td style={{ color: 'var(--fg1)' }}>
+                                    {a.label}
+                                    {!a.is_active && (
+                                      <span className="chip chip-todo" style={{ fontSize: '0.7em', marginLeft: 6 }}>Inactivo</span>
+                                    )}
+                                  </td>
+                                  <td style={{ color: 'var(--fg2)' }}>{a.work_item_type || '—'}</td>
+                                  <td style={{ color: 'var(--fg2)' }}>{a.project || '—'}</td>
+                                  <td style={{ color: 'var(--fg2)' }}>{categoryName(a.category_id)}</td>
+                                </>
                               )}
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                              <td style={{ color: 'var(--fg2)' }}>
+                                {a.is_default ? (
+                                  <span className="chip chip-done" style={{ fontSize: '0.75em' }}>Predeterminada</span>
+                                ) : '—'}
+                              </td>
+                              <td>
+                                {liveStates[a.work_item_id]
+                                  ? <AzureWorkItemStateBadge state={liveStates[a.work_item_id].state} />
+                                  : <span style={{ color: 'var(--fg3)' }}>—</span>}
+                              </td>
+                              <td>
+                                {isEditing ? (
+                                  <div style={{ display: 'flex', gap: 4 }}>
+                                    <button
+                                      className="btn btn-ghost btn-sm"
+                                      onClick={() => saveEdit(a.id)}
+                                      disabled={catalogBusy}
+                                      title="Guardar"
+                                      aria-label={`Guardar ${a.label}`}
+                                      style={{ padding: '2px 4px' }}
+                                    >
+                                      <Check size={13} strokeWidth={1.75} />
+                                    </button>
+                                    <button
+                                      className="btn btn-ghost btn-sm"
+                                      onClick={cancelEdit}
+                                      disabled={catalogBusy}
+                                      title="Cancelar"
+                                      aria-label={`Cancelar edición de ${a.label}`}
+                                      style={{ padding: '2px 4px' }}
+                                    >
+                                      <X size={13} strokeWidth={1.75} />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div style={{ display: 'flex', gap: 4 }}>
+                                    {!a.is_default && (
+                                      <button
+                                        className="btn btn-ghost btn-sm"
+                                        onClick={() => handleSetDefault(a.id)}
+                                        disabled={catalogBusy}
+                                        title="Definir como predeterminado"
+                                        aria-label={`Definir ${a.label} como predeterminado`}
+                                        style={{ padding: '2px 4px' }}
+                                      >
+                                        <Star size={13} strokeWidth={1.75} />
+                                      </button>
+                                    )}
+                                    <button
+                                      className="btn btn-ghost btn-sm"
+                                      onClick={() => startEdit(a)}
+                                      disabled={catalogBusy}
+                                      title="Editar"
+                                      aria-label={`Editar ${a.label}`}
+                                      style={{ padding: '2px 4px' }}
+                                    >
+                                      <Pencil size={13} strokeWidth={1.75} />
+                                    </button>
+                                    <button
+                                      className="btn btn-ghost btn-sm"
+                                      onClick={() => handleDeactivate(a.id)}
+                                      disabled={catalogBusy || a.is_default || !a.is_active}
+                                      title={!a.is_active ? 'Ya está inactivo' : a.is_default ? 'Primero define otro work item como predeterminado' : 'Desactivar'}
+                                      aria-label={`Desactivar ${a.label}`}
+                                      style={{ padding: '2px 4px' }}
+                                    >
+                                      <Trash2 size={13} strokeWidth={1.75} />
+                                    </button>
+                                  </div>
+                                )}
+                              </td>
+                              <td>
+                                {isTask ? (
+                                  <div style={{ display: 'flex', gap: 6 }}>
+                                    <button
+                                      className="btn btn-ghost btn-sm"
+                                      disabled={busy || closedAlready || isEditing}
+                                      onClick={() => handleClose(a.work_item_id, a.label)}
+                                    >
+                                      Cerrar
+                                    </button>
+                                    <button
+                                      className="btn btn-ghost btn-sm"
+                                      disabled={busy || closedAlready || isEditing}
+                                      onClick={() => handleRecreate(a.work_item_id, a.label)}
+                                    >
+                                      Recrear
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span style={{ color: 'var(--fg3)' }}>—</span>
+                                )}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {totalPages > 1 && (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, marginTop: 12 }}>
+                      <span style={{ font: 'var(--text-caption)', color: 'var(--fg3)' }}>
+                        {pageStart + 1}–{Math.min(pageStart + PAGE_SIZE, visibleActivities.length)} de {visibleActivities.length}
+                      </span>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => setPage(p => Math.max(1, p - 1))}
+                        disabled={currentPage <= 1}
+                        aria-label="Página anterior"
+                      >
+                        <ChevronLeft size={14} strokeWidth={1.75} />
+                      </button>
+                      <span style={{ font: 'var(--text-caption)', color: 'var(--fg2)' }}>
+                        {currentPage} / {totalPages}
+                      </span>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                        disabled={currentPage >= totalPages}
+                        aria-label="Página siguiente"
+                      >
+                        <ChevronRight size={14} strokeWidth={1.75} />
+                      </button>
+                    </div>
+                  )}
+                </>
               )
             })()}
           </div>

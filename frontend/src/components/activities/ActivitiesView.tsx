@@ -693,8 +693,6 @@ export function ActivitiesView() {
         onCatalogChanged={() => {
           getActivityCatalog().then(setCatalog).catch(() => setCatalog(null))
         }}
-        azureActivities={azureActivities}
-        onAzureActivitiesChanged={refreshAzureActivities}
       />
 
       <ActivityDetailModal
