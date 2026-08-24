@@ -141,6 +141,35 @@ func TestRemoveCatalogProject_DeactivatesAndReturns404WhenUnknown(t *testing.T) 
 	notFoundResp.Body.Close()
 }
 
+// TestRemoveCatalogProject_NameWithParensAndSpaces guards against a real
+// regression: a name with parentheses alongside percent-encoded spaces (e.g.
+// "MT 10 (Escuelas ZD)") makes Go's net/url populate r.URL.RawPath, which chi
+// prefers over r.URL.Path for route matching — so chi.URLParam hands back the
+// still percent-encoded segment unless the handler unescapes it itself. A
+// plain single-word-with-space name (as in the test above) never triggers
+// this, since RawPath stays empty for it — hence the separate case.
+func TestRemoveCatalogProject_NameWithParensAndSpaces(t *testing.T) {
+	base, st := newTestServer(t)
+	ctx := context.Background()
+
+	const name = "MT 10 (Escuelas ZD)"
+	if err := st.AddTimelogProject(name); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := doJSON(t, http.MethodDelete, base+"/api/activities/catalog/projects/MT%2010%20(Escuelas%20ZD)", nil)
+	assertStatus(t, resp, http.StatusNoContent)
+	resp.Body.Close()
+
+	activeNames, err := st.ListTimelogProjects(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsName(activeNames, name) {
+		t.Fatalf("expected %q excluded from the active listing after delete, got %v", name, activeNames)
+	}
+}
+
 func containsName(names []string, target string) bool {
 	for _, n := range names {
 		if n == target {

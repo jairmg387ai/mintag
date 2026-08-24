@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -684,7 +685,15 @@ func (srv *Server) handleAddCatalogProject(w http.ResponseWriter, r *http.Reques
 // daily_activities.project references stay intact — see
 // DeactivateTimelogProject's doc comment.
 func (srv *Server) handleRemoveCatalogProject(w http.ResponseWriter, r *http.Request) {
-	name := chi.URLParam(r, "name")
+	// chi routes on r.URL.RawPath when set (e.g. names with spaces/parens
+	// that the client had to percent-encode), so URLParam can hand back the
+	// still-escaped segment instead of the decoded name — unescape before
+	// looking it up or the lookup 404s on any name needing encoding.
+	name, err := url.PathUnescape(chi.URLParam(r, "name"))
+	if err != nil {
+		http.Error(w, "invalid project name", http.StatusBadRequest)
+		return
+	}
 	if err := srv.st.DeactivateTimelogProject(r.Context(), name); err != nil {
 		status := http.StatusInternalServerError
 		if isNotFound(err) {
@@ -715,7 +724,11 @@ func (srv *Server) handleAddCatalogCategory(w http.ResponseWriter, r *http.Reque
 
 // DELETE /api/activities/catalog/categories/{name}
 func (srv *Server) handleRemoveCatalogCategory(w http.ResponseWriter, r *http.Request) {
-	name := chi.URLParam(r, "name")
+	name, err := url.PathUnescape(chi.URLParam(r, "name"))
+	if err != nil {
+		http.Error(w, "invalid category name", http.StatusBadRequest)
+		return
+	}
 	if err := srv.st.RemoveTimelogCategory(name); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
