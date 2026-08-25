@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, type CSSProperties } from 'react'
-import { Plus, FilePlus2, RefreshCw, ExternalLink, UserPlus, Pencil, Check, X, Star, Trash2, RotateCcw, Search, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Plus, FilePlus2, RefreshCw, ExternalLink, UserPlus, Pencil, Check, X, Star, Trash2, RotateCcw, Search, ChevronLeft, ChevronRight, Bug, ListTodo } from 'lucide-react'
 import type { ActivityCatalog, AzureActivity, AssignedAzureWorkItem, CreatedWorkItemResponse } from '../../types'
 import {
   getActivityCatalog,
@@ -634,10 +634,8 @@ export function WorkItemsView() {
                           <th>ID</th>
                           <th>ORG</th>
                           <th>LABEL</th>
-                          <th>TIPO</th>
                           <th>PROYECTO</th>
                           <th>CATEGORÍA</th>
-                          <th>PREDETERMINADO</th>
                           <th>ESTADO</th>
                           <th>CATÁLOGO</th>
                           <th>AZURE</th>
@@ -658,6 +656,23 @@ export function WorkItemsView() {
                             <tr key={a.id} style={{ opacity: a.is_active ? 1 : 0.55 }}>
                               <td style={{ font: 'var(--text-mono)', color: 'var(--fg1)' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  {isEditing ? (
+                                    <select
+                                      aria-label="Tipo de work item"
+                                      value={editWorkItemType}
+                                      onChange={e => setEditWorkItemType(e.target.value)}
+                                      style={{ ...inputStyle, width: 76, padding: '2px 4px', fontSize: '0.8em' }}
+                                      disabled={catalogBusy}
+                                    >
+                                      <option value="">Sin tipo</option>
+                                      <option value="Bug">Bug</option>
+                                      <option value="Task">Task</option>
+                                    </select>
+                                  ) : a.work_item_type === 'Bug' ? (
+                                    <Bug size={14} strokeWidth={1.75} style={{ color: 'var(--block-solid)', flexShrink: 0 }} aria-label="Bug" />
+                                  ) : a.work_item_type === 'Task' ? (
+                                    <ListTodo size={14} strokeWidth={1.75} style={{ color: 'var(--fg3)', flexShrink: 0 }} aria-label="Task" />
+                                  ) : null}
                                   {a.work_item_id}
                                   {azureLinkBase && (
                                     <a
@@ -691,19 +706,6 @@ export function WorkItemsView() {
                                       style={{ ...inputStyle, minWidth: 140 }}
                                       disabled={catalogBusy}
                                     />
-                                  </td>
-                                  <td>
-                                    <select
-                                      aria-label="Tipo de work item"
-                                      value={editWorkItemType}
-                                      onChange={e => setEditWorkItemType(e.target.value)}
-                                      style={{ ...inputStyle, minWidth: 100 }}
-                                      disabled={catalogBusy}
-                                    >
-                                      <option value="">Sin tipo</option>
-                                      <option value="Bug">Bug</option>
-                                      <option value="Task">Task</option>
-                                    </select>
                                   </td>
                                   <td>
                                     {catalog !== null ? (
@@ -765,16 +767,10 @@ export function WorkItemsView() {
                                       <span className="chip chip-todo" style={{ fontSize: '0.7em', marginLeft: 6 }}>Inactivo</span>
                                     )}
                                   </td>
-                                  <td style={{ color: 'var(--fg2)' }}>{a.work_item_type || '—'}</td>
                                   <td style={{ color: 'var(--fg2)' }}>{a.project || '—'}</td>
                                   <td style={{ color: 'var(--fg2)' }}>{categoryName(a.category_id)}</td>
                                 </>
                               )}
-                              <td style={{ color: 'var(--fg2)' }}>
-                                {a.is_default ? (
-                                  <span className="chip chip-done" style={{ fontSize: '0.75em' }}>Predeterminada</span>
-                                ) : '—'}
-                              </td>
                               <td>
                                 {knownState(a)
                                   ? <AzureWorkItemStateBadge state={knownState(a)!} />
@@ -806,7 +802,15 @@ export function WorkItemsView() {
                                   </div>
                                 ) : (
                                   <div style={{ display: 'flex', gap: 4 }}>
-                                    {!a.is_default && (
+                                    {a.is_default ? (
+                                      <span
+                                        title="Predeterminado"
+                                        aria-label={`${a.label} es el predeterminado`}
+                                        style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 4px', color: 'var(--prog-solid)' }}
+                                      >
+                                        <Star size={13} strokeWidth={1.75} fill="currentColor" />
+                                      </span>
+                                    ) : (
                                       <button
                                         className="btn btn-ghost btn-sm"
                                         onClick={() => handleSetDefault(a.id)}
