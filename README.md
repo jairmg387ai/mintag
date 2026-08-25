@@ -155,6 +155,17 @@ Open `http://localhost:5173` for live-reload during UI development.
 | `make dev-api` | `go run ./cmd/mintag serve` |
 | `make dev-web` | `npm run dev` inside `frontend/` |
 
+### Releasing
+
+Releases are cut by pushing a semver tag — GoReleaser then builds `mintag.exe`, zips it, generates checksums, and publishes a GitHub release with an auto-generated changelog from commit messages (so keep using [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `refactor:`, etc.).
+
+```bash
+git tag -a v0.1.0 -m "v0.1.0"
+git push origin v0.1.0
+```
+
+This triggers `.github/workflows/release.yml`, which runs `go test`/`go vet` and then `goreleaser release --clean` (config in `.goreleaser.yaml`). The build embeds the tag into the binary — check it with `mintag.exe version`.
+
 ---
 
 ## MCP Integration

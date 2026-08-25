@@ -1,11 +1,18 @@
+import { useEffect, useState } from 'react'
 import { Plus, Settings } from 'lucide-react'
 import { useAppState, useAppActions } from '../../store/AppContext'
 import { Avatar } from '../shared/Avatar'
 import { NAV_ITEMS } from './navItems'
+import { getVersion } from '../../api/client'
 
 export function Sidebar() {
   const { currentView, projects, activeProject, menuOptions, azureConfig } = useAppState()
   const { setView, setActiveProject, openModal } = useAppActions()
+
+  const [version, setVersion] = useState('')
+  useEffect(() => {
+    getVersion().then(r => setVersion(r.version)).catch(() => {})
+  }, [])
 
   // Fail open: an empty menuOptions list (fetch hasn't resolved yet, or the
   // request failed) must never produce an unusable, empty sidebar — render
@@ -73,7 +80,7 @@ export function Sidebar() {
         <Avatar name={workspaceName} size={32} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="who">{workspaceName}</div>
-          <div className="role">Personal</div>
+          <div className="role">Personal{version ? ` · v${version}` : ''}</div>
         </div>
         <button
           className="sb-item"

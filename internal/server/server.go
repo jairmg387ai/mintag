@@ -24,6 +24,9 @@ type Server struct {
 	st                    *store.Store
 	newAzureTimeLogClient func(context.Context) (*azure.Client, error)
 	newAzureOAuthClient   func(context.Context, azure.OAuthConfig) *azure.DeviceAuthClient
+	// Version is the running mintag build version, set by main() after New().
+	// Left empty in tests, where handleVersion falls back to "dev".
+	Version string
 }
 
 func New(st *store.Store) *Server {
@@ -46,6 +49,7 @@ func (srv *Server) Handler() http.Handler {
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/stats", srv.handleStats)
 		r.Get("/search", srv.handleSearch)
+		r.Get("/version", srv.handleVersion)
 
 		r.Route("/projects", func(r chi.Router) {
 			r.Get("/", srv.handleListProjects)
@@ -85,6 +89,16 @@ func (srv *Server) Handler() http.Handler {
 func (srv *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	stats, err := srv.st.GetStats()
 	writeJSON(w, stats, err)
+}
+
+// --- Version ---
+
+func (srv *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
+	v := srv.Version
+	if v == "" {
+		v = "dev"
+	}
+	writeJSON(w, map[string]string{"version": v}, nil)
 }
 
 // --- Search ---

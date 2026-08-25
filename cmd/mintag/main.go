@@ -16,6 +16,9 @@ import (
 	"github.com/Gentleman-Programming/mintag/internal/store"
 )
 
+// version is set at build time via -ldflags "-X main.version=..." (see .goreleaser.yaml).
+var version = "dev"
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
@@ -32,6 +35,8 @@ func main() {
 		runSkills(os.Args[2:])
 	case "setup":
 		runSetup(os.Args[2:])
+	case "version", "--version", "-v":
+		fmt.Println("mintag " + version)
 	default:
 		usage()
 	}
@@ -47,6 +52,7 @@ func runServe(dbPath string) {
 	defer st.Close()
 
 	srv := server.New(st)
+	srv.Version = version
 	addr := host + ":" + port
 	displayHost := host
 	if displayHost == "127.0.0.1" || displayHost == "::1" {
@@ -167,10 +173,11 @@ func usage() {
 	fmt.Fprint(os.Stderr, `mintag — Meeting Task Tracker
 
 Commands:
-  mintag serve   Start the web portal (default port 7430)
-  mintag mcp     Start MCP stdio server for Claude integration
-  mintag skills  List or install bundled AI skills
-  mintag setup   Configure MCP integration for an AI agent (claude, opencode, gemini)
+  mintag serve    Start the web portal (default port 7430)
+  mintag mcp      Start MCP stdio server for Claude integration
+  mintag skills   List or install bundled AI skills
+  mintag setup    Configure MCP integration for an AI agent (claude, opencode, gemini)
+  mintag version  Print the mintag version
 
 Environment:
   MINTAG_DB     Path to SQLite database (default: ~/.mintag/mintag.db)

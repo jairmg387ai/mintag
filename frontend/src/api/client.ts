@@ -91,6 +91,10 @@ export function getStats(): Promise<Stats> {
   return request<Stats>('/api/stats')
 }
 
+export function getVersion(): Promise<{ version: string }> {
+  return request<{ version: string }>('/api/version')
+}
+
 export function search(q: string): Promise<SearchResult[]> {
   return request<SearchResult[]>(`/api/search?q=${encodeURIComponent(q)}`)
 }
