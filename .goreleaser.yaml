@@ -4,6 +4,7 @@ project_name: mintag
 
 before:
   hooks:
+    - make frontend-install
     - make frontend-build
 
 builds:
