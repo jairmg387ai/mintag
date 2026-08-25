@@ -274,6 +274,7 @@ export interface AzureActivity {
   is_default: boolean
   project?: string | null
   category_id?: number | null
+  last_known_state?: string
 }
 
 export interface AssignedAzureWorkItem {

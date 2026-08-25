@@ -433,6 +433,53 @@ func TestGetAzureWorkItemStates_Success(t *testing.T) {
 	}
 }
 
+// TestGetAzureWorkItemStates_PersistsLiveStateAndType verifies a states
+// refresh writes the fetched state/type back into the local azure_activities
+// catalog entry for each work item id that has one, so the portal has a
+// "last known" state/type on load without needing another manual refresh.
+func TestGetAzureWorkItemStates_PersistsLiveStateAndType(t *testing.T) {
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
+
+	azureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "connectiondata"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"authenticatedUser":{"id":"id","providerDisplayName":"Name"}}`)) //nolint:errcheck
+		case strings.Contains(r.URL.Path, "/_apis/wit/workitems"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"count":1,"value":[
+				{"id":303,"fields":{"System.Title":"Reclassified item","System.WorkItemType":"Bug","System.State":"Closed"}}
+			]}`)) //nolint:errcheck
+		default:
+			t.Fatalf("unexpected azure request: %s", r.URL.Path)
+		}
+	}))
+	defer azureServer.Close()
+
+	base, st := newTestServerWithAzureRedirect(t, azureServer.URL)
+	putResp := doJSON(t, http.MethodPut, base+"/api/activities/azure-config", map[string]any{"token": "db-token", "auth_mode": "bearer"})
+	assertStatus(t, putResp, http.StatusOK)
+
+	ctx := context.Background()
+	added, err := st.AddAzureActivity(ctx, "RUNT2QA", 303, "Reclassified item", "Task", store.AzureActivityMapping{})
+	mustNoErr(t, err)
+
+	resp := get(t, base+"/api/activities/azure-work-items/states?ids=303")
+	assertStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	updated, err := st.GetAzureActivity(ctx, added.ID)
+	mustNoErr(t, err)
+	if updated.LastKnownState != "Closed" {
+		t.Errorf("expected last_known_state=%q persisted, got %q", "Closed", updated.LastKnownState)
+	}
+	if updated.WorkItemType != "Bug" {
+		t.Errorf("expected work_item_type synced to %q, got %q", "Bug", updated.WorkItemType)
+	}
+}
+
 // TestGetAzureWorkItemStates_EmptyIDsReturnsEmptyItemsWithoutAzureCall
 // verifies a missing/empty ids param short-circuits without hitting Azure's
 // workitems endpoint (mirrors FetchWorkItemsByIDs' own empty-slice guard).

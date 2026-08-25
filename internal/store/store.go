@@ -398,6 +398,14 @@ func (s *Store) migrateActivities() error {
 	if err := s.addColumnIfMissing("azure_activities", "last_used_at", "last_used_at TEXT"); err != nil {
 		return err
 	}
+	// last_known_state caches the Azure work item state (e.g. "Active",
+	// "Closed") from the most recent manual "Refrescar estados" call (see
+	// SyncAzureActivityLiveState in azure_catalog.go), so the portal shows a
+	// state on load instead of "—" every time until the user refreshes again.
+	// Nullable TEXT, same addColumnIfMissing convention as created_at above.
+	if err := s.addColumnIfMissing("azure_activities", "last_known_state", "last_known_state TEXT"); err != nil {
+		return err
+	}
 	// backfillCreatedAt for azure_activities runs after seedDefaultAzureActivity
 	// below (not here) — seeding inserts a row without created_at set, and
 	// running backfill before that insert would miss it for a full migrate()

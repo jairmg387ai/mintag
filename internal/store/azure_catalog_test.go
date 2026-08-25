@@ -740,3 +740,91 @@ func TestUpdateAzureActivity_MappingRejectsUnknownCategoryID(t *testing.T) {
 		t.Fatal("expected error for unknown category_id")
 	}
 }
+
+// TestSyncAzureActivityLiveState_UpdatesStateAndType verifies a live-state
+// sync writes both last_known_state and work_item_type (when a non-blank
+// type is supplied), reflected back through ListAzureActivities.
+func TestSyncAzureActivityLiveState_UpdatesStateAndType(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999020, "To Sync", "Task", AzureActivityMapping{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.SyncAzureActivityLiveState(ctx, a.WorkItemID, "Active", "Bug"); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := s.ListAzureActivities(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *AzureActivity
+	for _, item := range all {
+		if item.ID == a.ID {
+			found = item
+		}
+	}
+	if found == nil {
+		t.Fatal("expected activity present")
+	}
+	if found.LastKnownState != "Active" {
+		t.Errorf("expected last_known_state=%q, got %q", "Active", found.LastKnownState)
+	}
+	if found.WorkItemType != "Bug" {
+		t.Errorf("expected work_item_type updated to %q, got %q", "Bug", found.WorkItemType)
+	}
+}
+
+// TestSyncAzureActivityLiveState_BlankTypeDoesNotClearStoredType verifies a
+// blank workItemType leaves the previously stored type untouched, only
+// updating last_known_state.
+func TestSyncAzureActivityLiveState_BlankTypeDoesNotClearStoredType(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999021, "To Sync", "Task", AzureActivityMapping{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.SyncAzureActivityLiveState(ctx, a.WorkItemID, "Closed", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := s.GetAzureActivity(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.LastKnownState != "Closed" {
+		t.Errorf("expected last_known_state=%q, got %q", "Closed", updated.LastKnownState)
+	}
+	if updated.WorkItemType != "Task" {
+		t.Errorf("expected work_item_type left as %q, got %q", "Task", updated.WorkItemType)
+	}
+}
+
+// TestSyncAzureActivityLiveState_UnknownWorkItemIDIsNotAnError verifies
+// syncing a work item id that has no matching catalog entry is a silent
+// no-op, mirroring TouchAzureActivityLastUsed's convention.
+func TestSyncAzureActivityLiveState_UnknownWorkItemIDIsNotAnError(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	if err := s.SyncAzureActivityLiveState(context.Background(), 999999, "Active", "Task"); err != nil {
+		t.Fatalf("expected no error syncing an uncataloged work item id, got %v", err)
+	}
+}

@@ -72,6 +72,8 @@ export function WorkItemsView() {
   const [assignedOrg, setAssignedOrg] = useState('')
   const [syncingAssigned, setSyncingAssigned] = useState(false)
   const [addingWorkItemId, setAddingWorkItemId] = useState<number | null>(null)
+  const [assignedSearchQuery, setAssignedSearchQuery] = useState('')
+  const [assignedPage, setAssignedPage] = useState(1)
 
   // Manual add — mirrors the row the removed CatalogManagementModal "Work
   // items de Azure" tab used to offer, for work items that never show up in
@@ -119,9 +121,23 @@ export function WorkItemsView() {
     setPage(1)
   }, [searchQuery, hideClosed, hideBugs, hideTasks, showInactive])
 
+  // A new search or a fresh sync (new pendingAssigned list) invalidates the
+  // current page of the "Asignados sin catalogar" list.
+  useEffect(() => {
+    setAssignedPage(1)
+  }, [assignedSearchQuery, pendingAssigned])
+
   function categoryName(categoryId: AzureActivity['category_id']): string {
     if (!categoryId || !catalog) return '—'
     return catalog.categories.find(c => c.id === categoryId)?.name ?? '—'
+  }
+
+  // knownState prefers this session's live refresh (liveStates) over the
+  // catalog's persisted last_known_state from a previous refresh, so a
+  // manual "Refrescar estados" always wins, but the portal still shows a
+  // state on load instead of "—" every time before the user refreshes again.
+  function knownState(a: AzureActivity): string | undefined {
+    return liveStates[a.work_item_id]?.state ?? (a.last_known_state || undefined)
   }
 
   async function refreshStates() {
@@ -133,6 +149,11 @@ export function WorkItemsView() {
       for (const item of items) byId[item.id] = item
       setLiveStates(byId)
       if (org && team_project) setAzureLinkBase({ org, teamProject: team_project })
+      // The backend persists each item's live state/type into the catalog
+      // (see SyncAzureActivityLiveState) — reload so a work item reclassified
+      // in Azure (e.g. Bug -> Task) picks up its corrected type here too,
+      // not just its state.
+      loadAzureActivities(showInactive)
     } catch (e: unknown) {
       pushToast(e instanceof Error ? e.message : 'No se pudo refrescar el estado de los work items', true)
     } finally {
@@ -562,7 +583,7 @@ export function WorkItemsView() {
                 if (hideTasks && a.work_item_type === 'Task') return false
                 // A row whose state hasn't been fetched yet is never hidden
                 // by this filter — unknown is not "closed".
-                if (hideClosed && isClosedAzureState(liveStates[a.work_item_id]?.state)) return false
+                if (hideClosed && isClosedAzureState(knownState(a))) return false
                 if (normalizedSearch) {
                   const haystack = [
                     String(a.work_item_id),
@@ -628,7 +649,7 @@ export function WorkItemsView() {
                           // coworker reference implementation's isBug exclusion;
                           // Bugs have no such action here either.
                           const isTask = a.work_item_type === 'Task'
-                          const closedAlready = isClosedAzureState(liveStates[a.work_item_id]?.state)
+                          const closedAlready = isClosedAzureState(knownState(a))
                           const busy = !!rowBusy[a.work_item_id]
                           const isEditing = editingId === a.id
                           const catalogBusy = catalogBusyId === a.id
@@ -755,8 +776,8 @@ export function WorkItemsView() {
                                 ) : '—'}
                               </td>
                               <td>
-                                {liveStates[a.work_item_id]
-                                  ? <AzureWorkItemStateBadge state={liveStates[a.work_item_id].state} />
+                                {knownState(a)
+                                  ? <AzureWorkItemStateBadge state={knownState(a)!} />
                                   : <span style={{ color: 'var(--fg3)' }}>—</span>}
                               </td>
                               <td>
@@ -917,35 +938,98 @@ export function WorkItemsView() {
               <div style={{ textAlign: 'center', padding: '12px 0', color: 'var(--fg3)', font: 'var(--text-body)' }}>
                 Todo al día: todos tus work items asignados ya están en el catálogo.
               </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {pendingAssigned.map(item => (
-                  <div
-                    key={item.id}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 10,
-                      padding: '8px 10px',
-                      borderRadius: 'var(--radius-md)',
-                      border: '1px solid var(--border)',
-                      background: 'var(--bg-sunken)',
-                    }}
-                  >
-                    <span style={{ font: 'var(--text-mono)', color: 'var(--fg1)' }}>#{item.id}</span>
-                    <span style={{ flex: 1, color: 'var(--fg1)', font: 'var(--text-sm)' }}>{item.title}</span>
-                    <span style={{ color: 'var(--fg3)', font: 'var(--text-caption)' }}>{item.type}</span>
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      disabled={addingWorkItemId === item.id}
-                      onClick={() => handleAddAssigned(item)}
-                    >
-                      {addingWorkItemId === item.id ? 'Agregando...' : 'Agregar'}
-                    </button>
+            ) : (() => {
+              const normalizedAssignedSearch = assignedSearchQuery.trim().toLowerCase()
+              const visibleAssigned = normalizedAssignedSearch
+                ? pendingAssigned.filter(item =>
+                    [String(item.id), item.title, item.type].join(' ').toLowerCase().includes(normalizedAssignedSearch),
+                  )
+                : pendingAssigned
+
+              if (visibleAssigned.length === 0) {
+                return (
+                  <div style={{ textAlign: 'center', padding: '12px 0', color: 'var(--fg3)', font: 'var(--text-body)' }}>
+                    Ningún work item asignado coincide con la búsqueda.
                   </div>
-                ))}
-              </div>
-            )}
+                )
+              }
+
+              const totalAssignedPages = Math.max(1, Math.ceil(visibleAssigned.length / PAGE_SIZE))
+              const currentAssignedPage = Math.min(assignedPage, totalAssignedPages)
+              const assignedPageStart = (currentAssignedPage - 1) * PAGE_SIZE
+              const pagedAssigned = visibleAssigned.slice(assignedPageStart, assignedPageStart + PAGE_SIZE)
+
+              return (
+                <>
+                  <div style={{ position: 'relative', marginBottom: 12 }}>
+                    <Search size={14} strokeWidth={1.75} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--fg3)' }} />
+                    <input
+                      type="search"
+                      value={assignedSearchQuery}
+                      onChange={e => setAssignedSearchQuery(e.target.value)}
+                      placeholder="Buscar por ID, título o tipo..."
+                      aria-label="Buscar work items asignados sin catalogar"
+                      style={{ ...inputStyle, paddingLeft: 28 }}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {pagedAssigned.map(item => (
+                      <div
+                        key={item.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          padding: '8px 10px',
+                          borderRadius: 'var(--radius-md)',
+                          border: '1px solid var(--border)',
+                          background: 'var(--bg-sunken)',
+                        }}
+                      >
+                        <span style={{ font: 'var(--text-mono)', color: 'var(--fg1)' }}>#{item.id}</span>
+                        <span style={{ flex: 1, color: 'var(--fg1)', font: 'var(--text-sm)' }}>{item.title}</span>
+                        <span style={{ color: 'var(--fg3)', font: 'var(--text-caption)' }}>{item.type}</span>
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          disabled={addingWorkItemId === item.id}
+                          onClick={() => handleAddAssigned(item)}
+                        >
+                          {addingWorkItemId === item.id ? 'Agregando...' : 'Agregar'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  {totalAssignedPages > 1 && (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, marginTop: 12 }}>
+                      <span style={{ font: 'var(--text-caption)', color: 'var(--fg3)' }}>
+                        {assignedPageStart + 1}–{Math.min(assignedPageStart + PAGE_SIZE, visibleAssigned.length)} de {visibleAssigned.length}
+                      </span>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => setAssignedPage(p => Math.max(1, p - 1))}
+                        disabled={currentAssignedPage <= 1}
+                        aria-label="Página anterior de asignados"
+                      >
+                        <ChevronLeft size={14} strokeWidth={1.75} />
+                      </button>
+                      <span style={{ font: 'var(--text-caption)', color: 'var(--fg2)' }}>
+                        {currentAssignedPage} / {totalAssignedPages}
+                      </span>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => setAssignedPage(p => Math.min(totalAssignedPages, p + 1))}
+                        disabled={currentAssignedPage >= totalAssignedPages}
+                        aria-label="Página siguiente de asignados"
+                      >
+                        <ChevronRight size={14} strokeWidth={1.75} />
+                      </button>
+                    </div>
+                  )}
+                </>
+              )
+            })()}
           </div>
         </Card>
       </div>

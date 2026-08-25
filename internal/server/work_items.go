@@ -156,6 +156,14 @@ func (srv *Server) handleGetAzureWorkItemStates(w http.ResponseWriter, r *http.R
 		http.Error(w, sanitizePublicError(err), http.StatusBadGateway)
 		return
 	}
+	// Persist each item's live state/type into the local catalog so the
+	// portal has a "last known" value to show on load without requiring this
+	// manual refresh every time — see SyncAzureActivityLiveState's doc
+	// comment. Best-effort: a write failure here must never turn an
+	// otherwise-successful Azure fetch into an error response.
+	for _, item := range items {
+		_ = srv.st.SyncAzureActivityLiveState(r.Context(), item.ID, item.State, item.Type)
+	}
 	writeJSON(w, map[string]any{"org": az.Config().Org, "team_project": az.Config().TeamProject, "items": items}, nil)
 }
 
