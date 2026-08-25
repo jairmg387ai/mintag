@@ -14,7 +14,7 @@ const iterationTree = { name: 'RUNTPRO', children: [{ name: 'Sprint 1' }] }
 
 const catalog = {
   projects: [{ name: 'Mintag', is_active: true }],
-  categories: [{ id: 7, name: 'Desarrollo' }],
+  categories: [{ id: 7, name: 'Desarrollo', is_active: true }],
 }
 
 function renderModal(catalogProp: typeof catalog | null = null) {

@@ -8,8 +8,8 @@ const catalog: ActivityCatalog = {
     { name: 'Beta', is_active: true },
   ],
   categories: [
-    { id: 1, name: 'Bug' },
-    { id: 2, name: 'Feature' },
+    { id: 1, name: 'Bug', is_active: true },
+    { id: 2, name: 'Feature', is_active: true },
   ],
 }
 

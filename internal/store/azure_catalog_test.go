@@ -262,6 +262,48 @@ func TestListAzureActivities_ExcludesInactiveUnlessRequested(t *testing.T) {
 	}
 }
 
+// TestReactivateAzureActivity_FlipsInactiveBackToActive verifies
+// ReactivateAzureActivity undoes DeactivateAzureActivity, and that an
+// unknown id returns a "not found"-style error.
+func TestReactivateAzureActivity_FlipsInactiveBackToActive(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	extra, err := s.AddAzureActivity(ctx, "RUNT2QA", 999005, "To Reactivate", "", AzureActivityMapping{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeactivateAzureActivity(ctx, extra.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.ReactivateAzureActivity(ctx, extra.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	activeOnly, err := s.ListAzureActivities(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, a := range activeOnly {
+		if a.ID == extra.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected activity %d active again after reactivation", extra.ID)
+	}
+
+	if err := s.ReactivateAzureActivity(ctx, 999999); err == nil {
+		t.Error("expected error for a non-existent catalog id")
+	}
+}
+
 func TestUpdateAzureActivity_ChangesOrgAndLabelOnly(t *testing.T) {
 	s, err := OpenInMemory()
 	if err != nil {
@@ -494,7 +536,7 @@ func TestAddAzureActivity_MappingRoundTrip_BothSet(t *testing.T) {
 	defer s.Close()
 
 	ctx := context.Background()
-	cats, err := s.ListTimelogCategories()
+	cats, err := s.ListTimelogCategories(ctx, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -549,7 +591,7 @@ func TestAddAzureActivity_MappingRoundTrip_CategoryOnly(t *testing.T) {
 	defer s.Close()
 
 	ctx := context.Background()
-	cats, err := s.ListTimelogCategories()
+	cats, err := s.ListTimelogCategories(ctx, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -650,7 +692,7 @@ func TestUpdateAzureActivity_MappingRoundTrip_ReplacesMapping(t *testing.T) {
 	defer s.Close()
 
 	ctx := context.Background()
-	cats, err := s.ListTimelogCategories()
+	cats, err := s.ListTimelogCategories(ctx, false)
 	if err != nil {
 		t.Fatal(err)
 	}

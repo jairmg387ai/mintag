@@ -36,7 +36,7 @@ const azureActivities: AzureActivity[] = [
 
 const catalog: ActivityCatalog = {
   projects: [{ name: 'Project A', is_active: true }],
-  categories: [{ id: 1, name: 'Development' }],
+  categories: [{ id: 1, name: 'Development', is_active: true }],
 }
 
 const activity: DailyActivity = {

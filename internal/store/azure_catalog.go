@@ -46,8 +46,8 @@ type AzureActivity struct {
 // mapping carried by an AzureActivity. Project is free text (nil or blank
 // after TrimSpace normalizes to NULL); CategoryID, when non-nil, must
 // reference an existing row in timelog_categories (existence-only check —
-// timelog_categories has no is_active column, categories are hard-deleted via
-// RemoveTimelogCategory).
+// a deactivated category, see DeactivateTimelogCategory in catalog.go, still
+// exists as a row and remains a valid mapping target).
 type AzureActivityMapping struct {
 	Project    *string
 	CategoryID *int64
@@ -67,11 +67,10 @@ func normalizedProject(p *string) *string {
 }
 
 // validateMapping performs an existence-only check on m.CategoryID against
-// timelog_categories. There is no is_active column on that table (categories
-// are hard-deleted by RemoveTimelogCategory), so — unlike the azure_activities
-// is_active check used elsewhere in this file — a dangling category_id can
-// only mean "never existed" or "was deleted since", both surfaced the same
-// way. A nil CategoryID is always valid (no mapping).
+// timelog_categories — unlike the azure_activities is_active check used
+// elsewhere in this file, this does not reject an inactive (soft-deleted)
+// category, only a genuinely missing one, for backward compatibility. A nil
+// CategoryID is always valid (no mapping).
 func (s *Store) validateMapping(ctx context.Context, m AzureActivityMapping) error {
 	if m.CategoryID == nil {
 		return nil
@@ -317,6 +316,22 @@ func (s *Store) DeactivateAzureActivity(ctx context.Context, id int64) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// ReactivateAzureActivity flips a previously soft-deleted entry back to
+// is_active=1, undoing DeactivateAzureActivity. Unlike Deactivate, this never
+// conflicts with the is_default invariant (reactivating cannot create a
+// second default), so no transactional guard is needed. Returns a
+// "not found"-style error when id isn't in the catalog (RowsAffected==0).
+func (s *Store) ReactivateAzureActivity(ctx context.Context, id int64) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE azure_activities SET is_active = 1 WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("azure activity not found: %d", id)
+	}
+	return nil
 }
 
 // TouchAzureActivityLastUsed sets last_used_at = now (UTC, RFC3339) for the

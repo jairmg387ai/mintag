@@ -13,7 +13,7 @@ func TestAddTimelogCategory_PersistsDescription(t *testing.T) {
 
 	mustNoErr(t, s.AddTimelogCategory("Testing Category", "A useful description"))
 
-	cats, err := s.ListTimelogCategories()
+	cats, err := s.ListTimelogCategories(context.Background(), false)
 	mustNoErr(t, err)
 	found := false
 	for _, c := range cats {
@@ -29,22 +29,22 @@ func TestAddTimelogCategory_PersistsDescription(t *testing.T) {
 	}
 }
 
-// TestUpdateTimelogCategoryDescription_UpdatesExistingCategory verifies the
-// description of an existing category can be changed and the returned row
-// reflects the new value.
-func TestUpdateTimelogCategoryDescription_UpdatesExistingCategory(t *testing.T) {
+// TestUpdateTimelogCategory_UpdatesExistingCategory verifies the name and
+// description of an existing category can be changed together and the
+// returned row reflects the new values.
+func TestUpdateTimelogCategory_UpdatesExistingCategory(t *testing.T) {
 	s := openTestDB(t)
 	ctx := context.Background()
 	mustNoErr(t, s.seedCatalogs())
 
-	cats, err := s.ListTimelogCategories()
+	cats, err := s.ListTimelogCategories(ctx, false)
 	mustNoErr(t, err)
 	if len(cats) == 0 {
 		t.Fatal("expected seeded categories")
 	}
 	target := cats[0]
 
-	updated, err := s.UpdateTimelogCategoryDescription(ctx, target.ID, "New description")
+	updated, err := s.UpdateTimelogCategory(ctx, target.ID, "New Name", "New description")
 	mustNoErr(t, err)
 	if updated == nil {
 		t.Fatal("expected updated category, got nil")
@@ -52,30 +52,55 @@ func TestUpdateTimelogCategoryDescription_UpdatesExistingCategory(t *testing.T) 
 	if updated.ID != target.ID {
 		t.Fatalf("expected id=%d, got %d", target.ID, updated.ID)
 	}
+	if updated.Name != "New Name" {
+		t.Fatalf("expected name=%q, got %q", "New Name", updated.Name)
+	}
 	if updated.Description != "New description" {
 		t.Fatalf("expected description=%q, got %q", "New description", updated.Description)
 	}
 
 	// Verify the change is persisted, not just reflected in the return value.
-	reread, err := s.ListTimelogCategories()
+	reread, err := s.ListTimelogCategories(ctx, false)
 	mustNoErr(t, err)
 	for _, c := range reread {
-		if c.ID == target.ID && c.Description != "New description" {
-			t.Fatalf("expected persisted description=%q, got %q", "New description", c.Description)
+		if c.ID == target.ID {
+			if c.Name != "New Name" {
+				t.Fatalf("expected persisted name=%q, got %q", "New Name", c.Name)
+			}
+			if c.Description != "New description" {
+				t.Fatalf("expected persisted description=%q, got %q", "New description", c.Description)
+			}
 		}
 	}
 }
 
-// TestUpdateTimelogCategoryDescription_UnknownIDReturnsError verifies the
-// package's not-found convention: an update against a nonexistent category id
-// surfaces as an error, not a silent no-op.
-func TestUpdateTimelogCategoryDescription_UnknownIDReturnsError(t *testing.T) {
+// TestUpdateTimelogCategory_UnknownIDReturnsError verifies the package's
+// not-found convention: an update against a nonexistent category id surfaces
+// as an error, not a silent no-op.
+func TestUpdateTimelogCategory_UnknownIDReturnsError(t *testing.T) {
 	s := openTestDB(t)
 	ctx := context.Background()
 	mustNoErr(t, s.seedCatalogs())
 
-	if _, err := s.UpdateTimelogCategoryDescription(ctx, 999999, "does not matter"); err == nil {
+	if _, err := s.UpdateTimelogCategory(ctx, 999999, "New Name", "does not matter"); err == nil {
 		t.Fatal("expected error for unknown category id")
+	}
+}
+
+// TestUpdateTimelogCategory_EmptyNameReturnsError verifies name is required.
+func TestUpdateTimelogCategory_EmptyNameReturnsError(t *testing.T) {
+	s := openTestDB(t)
+	ctx := context.Background()
+	mustNoErr(t, s.seedCatalogs())
+
+	cats, err := s.ListTimelogCategories(ctx, false)
+	mustNoErr(t, err)
+	if len(cats) == 0 {
+		t.Fatal("expected seeded categories")
+	}
+
+	if _, err := s.UpdateTimelogCategory(ctx, cats[0].ID, "   ", "description"); err == nil {
+		t.Fatal("expected error for empty name")
 	}
 }
 
@@ -87,7 +112,7 @@ func TestSeedCategoriesTable_ParsesPipeDelimitedDescriptions(t *testing.T) {
 	s := openTestDB(t)
 	mustNoErr(t, s.seedCatalogs())
 
-	cats, err := s.ListTimelogCategories()
+	cats, err := s.ListTimelogCategories(context.Background(), false)
 	mustNoErr(t, err)
 
 	byName := make(map[string]string, len(cats))
@@ -121,7 +146,7 @@ func TestSeedCategoriesTable_NonDestructiveToEditedDescriptions(t *testing.T) {
 	ctx := context.Background()
 	mustNoErr(t, s.seedCatalogs())
 
-	cats, err := s.ListTimelogCategories()
+	cats, err := s.ListTimelogCategories(ctx, false)
 	mustNoErr(t, err)
 
 	var target TimelogCategory
@@ -136,14 +161,14 @@ func TestSeedCategoriesTable_NonDestructiveToEditedDescriptions(t *testing.T) {
 		t.Fatal("expected seeded category \"Bridge\"")
 	}
 
-	_, err = s.UpdateTimelogCategoryDescription(ctx, target.ID, "user-edited description")
+	_, err = s.UpdateTimelogCategory(ctx, target.ID, target.Name, "user-edited description")
 	mustNoErr(t, err)
 
 	// Simulate what happens on a second Open(): the seeding entrypoint runs
 	// again against a DB that already has this category.
 	mustNoErr(t, s.seedCatalogs())
 
-	reread, err := s.ListTimelogCategories()
+	reread, err := s.ListTimelogCategories(ctx, false)
 	mustNoErr(t, err)
 	for _, c := range reread {
 		if c.Name == "Bridge" && c.Description != "user-edited description" {

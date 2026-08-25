@@ -29,7 +29,7 @@ vi.mock('../../store/AppContext', () => ({
 
 const catalog = {
   projects: [{ name: 'Mintag', is_active: true }],
-  categories: [{ id: 7, name: 'Desarrollo' }],
+  categories: [{ id: 7, name: 'Desarrollo', is_active: true }],
 }
 
 const oneActivity = [

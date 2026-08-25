@@ -43,7 +43,7 @@ func TestSeedCatalogs_Idempotent(t *testing.T) {
 		t.Errorf("expected %d projects after re-seed, got %d", initialCount, len(projects2))
 	}
 
-	categories, err := s.ListTimelogCategories()
+	categories, err := s.ListTimelogCategories(ctx, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,6 +161,89 @@ func TestDeactivateTimelogProject_NotFound(t *testing.T) {
 	}
 }
 
+// TestRenameTimelogProject_RenamesEntry verifies a rename updates the
+// catalog entry's name in place, preserving is_active.
+func TestRenameTimelogProject_RenamesEntry(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	if err := s.AddTimelogProject("Old Name"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RenameTimelogProject(ctx, "Old Name", "New Name"); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := s.ListTimelogProjects(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contains(all, "Old Name") {
+		t.Error("expected Old Name gone after rename")
+	}
+	if !contains(all, "New Name") {
+		t.Error("expected New Name present after rename")
+	}
+}
+
+// TestRenameTimelogProject_NotFound verifies renaming an unknown project name
+// returns a "not found"-style error.
+func TestRenameTimelogProject_NotFound(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	err = s.RenameTimelogProject(context.Background(), "Does Not Exist", "New Name")
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected 'not found' error, got %v", err)
+	}
+}
+
+// TestRenameTimelogProject_RejectsEmptyName verifies a blank/whitespace-only
+// new name is rejected instead of silently renaming to "".
+func TestRenameTimelogProject_RejectsEmptyName(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	if err := s.AddTimelogProject("Some Project"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RenameTimelogProject(context.Background(), "Some Project", "   "); err == nil {
+		t.Fatal("expected error renaming to a blank name")
+	}
+}
+
+// TestRenameTimelogProject_RejectsDuplicateName verifies renaming to a name
+// already taken by another project is rejected rather than violating the
+// table's UNIQUE constraint.
+func TestRenameTimelogProject_RejectsDuplicateName(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	if err := s.AddTimelogProject("Project A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddTimelogProject("Project B"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RenameTimelogProject(ctx, "Project A", "Project B"); err == nil {
+		t.Fatal("expected error renaming to an already-taken name")
+	}
+}
+
 // TestTouchTimelogProjectLastUsed_UnknownProjectIsNotAnError verifies
 // touching a project name that was never added to the catalog (project is
 // plain free TEXT on daily_activities, not a FK) is a silent no-op.
@@ -261,7 +344,7 @@ func TestListTimelogCategories_OrderedAlphabetically(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cats, err := s.ListTimelogCategories()
+	cats, err := s.ListTimelogCategories(context.Background(), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,5 +352,148 @@ func TestListTimelogCategories_OrderedAlphabetically(t *testing.T) {
 		if cats[i].Name < cats[i-1].Name {
 			t.Errorf("categories not ordered at index %d: %q before %q", i, cats[i-1].Name, cats[i].Name)
 		}
+	}
+}
+
+// TestListTimelogCategories_ExcludesInactiveUnlessRequested verifies the
+// includeInactive parameter filters is_active=0 rows by default, mirroring
+// TestListTimelogProjects_ExcludesInactiveUnlessRequested.
+func TestListTimelogCategories_ExcludesInactiveUnlessRequested(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	if err := s.AddTimelogCategory("Active Category", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddTimelogCategory("Inactive Category", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeactivateTimelogCategory(ctx, "Inactive Category"); err != nil {
+		t.Fatal(err)
+	}
+
+	activeOnly, err := s.ListTimelogCategories(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range activeOnly {
+		if c.Name == "Inactive Category" {
+			t.Errorf("expected Inactive Category excluded by default, got %v", activeOnly)
+		}
+	}
+
+	all, err := s.ListTimelogCategories(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, c := range all {
+		if c.Name == "Inactive Category" {
+			found = true
+			if c.IsActive {
+				t.Errorf("expected Inactive Category to have is_active=false")
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected Inactive Category included with includeInactive=true, got %v", all)
+	}
+}
+
+// TestDeactivateTimelogCategory_NotFound verifies deactivating an unknown
+// category name returns a "not found"-style error, mirroring
+// TestDeactivateTimelogProject_NotFound.
+func TestDeactivateTimelogCategory_NotFound(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	err = s.DeactivateTimelogCategory(context.Background(), "Does Not Exist")
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected 'not found' error, got %v", err)
+	}
+}
+
+// TestReactivateTimelogProject_FlipsInactiveBackToActive verifies
+// ReactivateTimelogProject undoes DeactivateTimelogProject, and that an
+// unknown name returns a "not found"-style error.
+func TestReactivateTimelogProject_FlipsInactiveBackToActive(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	if err := s.AddTimelogProject("Toggle Project"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeactivateTimelogProject(ctx, "Toggle Project"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.ReactivateTimelogProject(ctx, "Toggle Project"); err != nil {
+		t.Fatal(err)
+	}
+
+	activeOnly, err := s.ListTimelogProjects(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(activeOnly, "Toggle Project") {
+		t.Errorf("expected Toggle Project active again, got %v", activeOnly)
+	}
+
+	err = s.ReactivateTimelogProject(ctx, "Does Not Exist")
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected 'not found' error, got %v", err)
+	}
+}
+
+// TestReactivateTimelogCategory_FlipsInactiveBackToActive verifies
+// ReactivateTimelogCategory undoes DeactivateTimelogCategory, and that an
+// unknown name returns a "not found"-style error.
+func TestReactivateTimelogCategory_FlipsInactiveBackToActive(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	if err := s.AddTimelogCategory("Toggle Category", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeactivateTimelogCategory(ctx, "Toggle Category"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.ReactivateTimelogCategory(ctx, "Toggle Category"); err != nil {
+		t.Fatal(err)
+	}
+
+	activeOnly, err := s.ListTimelogCategories(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, c := range activeOnly {
+		if c.Name == "Toggle Category" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected Toggle Category active again, got %v", activeOnly)
+	}
+
+	err = s.ReactivateTimelogCategory(ctx, "Does Not Exist")
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected 'not found' error, got %v", err)
 	}
 }

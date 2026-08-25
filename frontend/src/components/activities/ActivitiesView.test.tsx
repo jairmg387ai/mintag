@@ -43,7 +43,7 @@ vi.mock('../../store/AppContext', () => ({
   useAppActions: () => ({ setAzureConfig: vi.fn() }),
 }))
 
-const catalog = { projects: [{ name: 'Mintag', is_active: true }], categories: [{ id: 1, name: 'Dev' }] }
+const catalog = { projects: [{ name: 'Mintag', is_active: true }], categories: [{ id: 1, name: 'Dev', is_active: true }] }
 const azureConfig = { configured: false, auth_mode: 'bearer' as const, source: 'env' }
 
 let nextActivityId = 1

@@ -326,6 +326,7 @@ export interface TimelogCategory {
   id: number
   name: string
   description?: string
+  is_active: boolean
 }
 
 export interface CatalogProject {

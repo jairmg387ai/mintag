@@ -42,18 +42,22 @@ var reActivityDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 //	POST   /api/activities/azure-work-items/{id}/close
 //	POST   /api/activities/azure-work-items/{id}/recreate
 //	GET    /api/activities/azure-classification-nodes/{kind}
-//	GET    /api/activities/catalog
+//	GET    /api/activities/catalog                    ?include_inactive=true
 //	POST   /api/activities/catalog/projects
 //	DELETE /api/activities/catalog/projects/{name}
+//	POST   /api/activities/catalog/projects/{name}/reactivate
+//	PATCH  /api/activities/catalog/projects/{name}
 //	POST   /api/activities/catalog/categories
 //	DELETE /api/activities/catalog/categories/{name}
-//	PUT    /api/activities/catalog/categories/{id}/description
+//	POST   /api/activities/catalog/categories/{name}/reactivate
+//	PATCH  /api/activities/catalog/categories/{id}
 //	GET    /api/activities/export                    ?from=&to=
 //	GET    /api/activities/azure-catalog
 //	POST   /api/activities/azure-catalog
 //	PATCH  /api/activities/azure-catalog/{id}
 //	DELETE /api/activities/azure-catalog/{id}
 //	POST   /api/activities/azure-catalog/{id}/default
+//	POST   /api/activities/azure-catalog/{id}/reactivate
 //	POST   /api/activities/upload                    ?date=
 //	PATCH  /api/activities/{id}
 //	DELETE /api/activities/{id}
@@ -78,9 +82,12 @@ func registerActivityRoutes(r chi.Router, srv *Server) {
 	r.Get("/activities/catalog", srv.handleActivityCatalog)
 	r.Post("/activities/catalog/projects", srv.handleAddCatalogProject)
 	r.Delete("/activities/catalog/projects/{name}", srv.handleRemoveCatalogProject)
+	r.Post("/activities/catalog/projects/{name}/reactivate", srv.handleReactivateCatalogProject)
+	r.Patch("/activities/catalog/projects/{name}", srv.handleRenameCatalogProject)
 	r.Post("/activities/catalog/categories", srv.handleAddCatalogCategory)
 	r.Delete("/activities/catalog/categories/{name}", srv.handleRemoveCatalogCategory)
-	r.Put("/activities/catalog/categories/{id}/description", srv.handleUpdateCatalogCategoryDescription)
+	r.Post("/activities/catalog/categories/{name}/reactivate", srv.handleReactivateCatalogCategory)
+	r.Patch("/activities/catalog/categories/{id}", srv.handleUpdateCatalogCategory)
 	r.Get("/activities/export", srv.handleExportActivities)
 	// azure-catalog routes are grouped here, before /activities/{id}, to
 	// match the reading order of /activities/catalog and /activities/upload
@@ -92,6 +99,7 @@ func registerActivityRoutes(r chi.Router, srv *Server) {
 	r.With(requireLocalRequest).Patch("/activities/azure-catalog/{id}", srv.handleUpdateAzureActivity)
 	r.With(requireLocalRequest).Delete("/activities/azure-catalog/{id}", srv.handleDeactivateAzureActivity)
 	r.With(requireLocalRequest).Post("/activities/azure-catalog/{id}/default", srv.handleSetDefaultAzureActivity)
+	r.With(requireLocalRequest).Post("/activities/azure-catalog/{id}/reactivate", srv.handleReactivateAzureActivity)
 	r.With(requireLocalRequest).Post("/activities/upload", srv.handleUploadActivities)
 	r.Patch("/activities/{id}", srv.handlePatchActivity)
 	r.With(requireLocalRequest).Delete("/activities/{id}", srv.handleDeleteActivity)
@@ -604,7 +612,7 @@ func (srv *Server) handleActivityCatalog(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	categories, err := srv.st.ListTimelogCategories()
+	categories, err := srv.st.ListTimelogCategories(ctx, includeInactive)
 	if err != nil {
 		writeJSON(w, nil, err)
 		return
@@ -616,15 +624,19 @@ func (srv *Server) handleActivityCatalog(w http.ResponseWriter, r *http.Request)
 	}, nil)
 }
 
-// PUT /api/activities/catalog/categories/{id}/description
-// Body: {"description": "..."}
-func (srv *Server) handleUpdateCatalogCategoryDescription(w http.ResponseWriter, r *http.Request) {
+// PATCH /api/activities/catalog/categories/{id}
+// Body: {"name": "...", "description": "..."}
+// Despite the verb, this is a full replace, not a partial update: name is
+// required (see UpdateTimelogCategory), mirroring handleUpdateAzureActivity's
+// PATCH-but-full-replace contract above.
+func (srv *Server) handleUpdateCatalogCategory(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r, "id")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	var body struct {
+		Name        string `json:"name"`
 		Description string `json:"description"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -632,7 +644,7 @@ func (srv *Server) handleUpdateCatalogCategoryDescription(w http.ResponseWriter,
 		return
 	}
 
-	c, err := srv.st.UpdateTimelogCategoryDescription(r.Context(), id, body.Description)
+	c, err := srv.st.UpdateTimelogCategory(r.Context(), id, body.Name, body.Description)
 	if err != nil {
 		status := http.StatusUnprocessableEntity
 		if isNotFound(err) {
@@ -705,6 +717,50 @@ func (srv *Server) handleRemoveCatalogProject(w http.ResponseWriter, r *http.Req
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// POST /api/activities/catalog/projects/{name}/reactivate
+func (srv *Server) handleReactivateCatalogProject(w http.ResponseWriter, r *http.Request) {
+	name, err := url.PathUnescape(chi.URLParam(r, "name"))
+	if err != nil {
+		http.Error(w, "invalid project name", http.StatusBadRequest)
+		return
+	}
+	if err := srv.st.ReactivateTimelogProject(r.Context(), name); err != nil {
+		status := http.StatusInternalServerError
+		if isNotFound(err) {
+			status = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// PATCH /api/activities/catalog/projects/{name}
+// Body: {"name": "new name"}
+func (srv *Server) handleRenameCatalogProject(w http.ResponseWriter, r *http.Request) {
+	name, err := url.PathUnescape(chi.URLParam(r, "name"))
+	if err != nil {
+		http.Error(w, "invalid project name", http.StatusBadRequest)
+		return
+	}
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := srv.st.RenameTimelogProject(r.Context(), name, body.Name); err != nil {
+		status := http.StatusUnprocessableEntity
+		if isNotFound(err) {
+			status = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	writeJSON(w, map[string]string{"name": strings.TrimSpace(body.Name)}, nil)
+}
+
 // POST /api/activities/catalog/categories
 func (srv *Server) handleAddCatalogCategory(w http.ResponseWriter, r *http.Request) {
 	var body struct {
@@ -723,14 +779,39 @@ func (srv *Server) handleAddCatalogCategory(w http.ResponseWriter, r *http.Reque
 }
 
 // DELETE /api/activities/catalog/categories/{name}
+// Soft-deletes (is_active=0) rather than hard-deleting, so historical
+// daily_activities.category references and any azure_activities.category_id
+// mapping stay intact — see DeactivateTimelogCategory's doc comment.
 func (srv *Server) handleRemoveCatalogCategory(w http.ResponseWriter, r *http.Request) {
 	name, err := url.PathUnescape(chi.URLParam(r, "name"))
 	if err != nil {
 		http.Error(w, "invalid category name", http.StatusBadRequest)
 		return
 	}
-	if err := srv.st.RemoveTimelogCategory(name); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if err := srv.st.DeactivateTimelogCategory(r.Context(), name); err != nil {
+		status := http.StatusInternalServerError
+		if isNotFound(err) {
+			status = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// POST /api/activities/catalog/categories/{name}/reactivate
+func (srv *Server) handleReactivateCatalogCategory(w http.ResponseWriter, r *http.Request) {
+	name, err := url.PathUnescape(chi.URLParam(r, "name"))
+	if err != nil {
+		http.Error(w, "invalid category name", http.StatusBadRequest)
+		return
+	}
+	if err := srv.st.ReactivateTimelogCategory(r.Context(), name); err != nil {
+		status := http.StatusInternalServerError
+		if isNotFound(err) {
+			status = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), status)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -819,6 +900,24 @@ func (srv *Server) handleDeactivateAzureActivity(w http.ResponseWriter, r *http.
 		return
 	}
 	if err := srv.st.DeactivateAzureActivity(r.Context(), id); err != nil {
+		status := http.StatusUnprocessableEntity
+		if isNotFound(err) {
+			status = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// POST /api/activities/azure-catalog/{id}/reactivate
+func (srv *Server) handleReactivateAzureActivity(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := srv.st.ReactivateAzureActivity(r.Context(), id); err != nil {
 		status := http.StatusUnprocessableEntity
 		if isNotFound(err) {
 			status = http.StatusNotFound

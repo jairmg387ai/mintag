@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"database/sql"
 	"embed"
 	"fmt"
 	"strings"
@@ -118,12 +119,20 @@ type TimelogCategory struct {
 	ID          int64  `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	IsActive    bool   `json:"is_active"`
 }
 
-// ListTimelogCategories returns all categories in the catalog, ordered
-// alphabetically by name.
-func (s *Store) ListTimelogCategories() ([]TimelogCategory, error) {
-	rows, err := s.db.Query(`SELECT id, name, COALESCE(description, '') FROM timelog_categories ORDER BY name ASC`)
+// ListTimelogCategories returns categories in the catalog, ordered
+// alphabetically by name. Soft-deleted (is_active=0) entries are excluded
+// unless includeInactive is true, mirroring ListTimelogProjects above.
+func (s *Store) ListTimelogCategories(ctx context.Context, includeInactive bool) ([]TimelogCategory, error) {
+	query := `SELECT id, name, COALESCE(description, ''), is_active FROM timelog_categories`
+	if !includeInactive {
+		query += ` WHERE is_active = 1`
+	}
+	query += ` ORDER BY name ASC`
+
+	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +140,7 @@ func (s *Store) ListTimelogCategories() ([]TimelogCategory, error) {
 	out := make([]TimelogCategory, 0)
 	for rows.Next() {
 		var c TimelogCategory
-		if err := rows.Scan(&c.ID, &c.Name, &c.Description); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Description, &c.IsActive); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -166,6 +175,58 @@ func (s *Store) DeactivateTimelogProject(ctx context.Context, name string) error
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return fmt.Errorf("timelog project not found: %q", name)
+	}
+	return nil
+}
+
+// ReactivateTimelogProject flips a previously soft-deleted project back to
+// is_active=1, undoing DeactivateTimelogProject. Returns a "not found"-style
+// error when name isn't in the catalog (RowsAffected==0), mirroring
+// DeactivateTimelogProject's not-found style.
+func (s *Store) ReactivateTimelogProject(ctx context.Context, name string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE timelog_projects SET is_active = 1 WHERE name = ?`, name)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("timelog project not found: %q", name)
+	}
+	return nil
+}
+
+// RenameTimelogProject renames a project in the catalog. Unlike
+// DeactivateTimelogProject, this does NOT retroactively repoint historical
+// daily_activities.project references — project is plain free TEXT, not a FK
+// (see DeactivateTimelogProject's doc comment) — so activities already logged
+// under oldName keep showing oldName after the rename; only newly logged
+// activities pick up newName via the catalog dropdown. Returns a "not
+// found"-style error when oldName isn't in the catalog, and a distinct error
+// when newName is already taken by another project (the table's UNIQUE
+// constraint on name would otherwise surface as an opaque driver error).
+func (s *Store) RenameTimelogProject(ctx context.Context, oldName, newName string) error {
+	newName = strings.TrimSpace(newName)
+	if newName == "" {
+		return fmt.Errorf("project name cannot be empty")
+	}
+	if newName == oldName {
+		return nil
+	}
+
+	var exists int
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM timelog_projects WHERE name = ?`, newName).Scan(&exists)
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if err == nil {
+		return fmt.Errorf("a project named %q already exists", newName)
+	}
+
+	res, err := s.db.ExecContext(ctx, `UPDATE timelog_projects SET name = ? WHERE name = ?`, newName, oldName)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("timelog project not found: %q", oldName)
 	}
 	return nil
 }
@@ -220,18 +281,51 @@ func (s *Store) AddTimelogCategory(name, description string) error {
 	return err
 }
 
-// RemoveTimelogCategory deletes a category from the catalog by name.
-func (s *Store) RemoveTimelogCategory(name string) error {
-	_, err := s.db.Exec(`DELETE FROM timelog_categories WHERE name = ?`, name)
-	return err
+// DeactivateTimelogCategory soft-deletes a category from the catalog by name
+// (is_active=0), preserving any historical daily_activities.category string
+// references and any azure_activities.category_id mapping that still points
+// at it (validateMapping in azure_catalog.go is existence-only, so a
+// deactivated category remains a valid mapping target). Replaces the former
+// RemoveTimelogCategory hard delete, mirroring DeactivateTimelogProject
+// exactly. Returns a "not found"-style error when name isn't in the catalog
+// (RowsAffected==0).
+func (s *Store) DeactivateTimelogCategory(ctx context.Context, name string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE timelog_categories SET is_active = 0 WHERE name = ?`, name)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("timelog category not found: %q", name)
+	}
+	return nil
 }
 
-// UpdateTimelogCategoryDescription updates an existing category's
-// description and returns the updated row. RowsAffected==0 means the id
+// ReactivateTimelogCategory flips a previously soft-deleted category back to
+// is_active=1, undoing DeactivateTimelogCategory. Returns a "not found"-style
+// error when name isn't in the catalog (RowsAffected==0).
+func (s *Store) ReactivateTimelogCategory(ctx context.Context, name string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE timelog_categories SET is_active = 1 WHERE name = ?`, name)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("timelog category not found: %q", name)
+	}
+	return nil
+}
+
+// UpdateTimelogCategory renames and updates the description of an existing
+// category in one full-replace update (same spirit as UpdateAzureActivity in
+// azure_catalog.go) and returns the updated row. name must be non-empty;
+// both name and description are trimmed. RowsAffected==0 means the id
 // doesn't exist.
-func (s *Store) UpdateTimelogCategoryDescription(ctx context.Context, id int64, description string) (*TimelogCategory, error) {
+func (s *Store) UpdateTimelogCategory(ctx context.Context, id int64, name, description string) (*TimelogCategory, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, fmt.Errorf("category name cannot be empty")
+	}
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE timelog_categories SET description = ? WHERE id = ?`, strings.TrimSpace(description), id,
+		`UPDATE timelog_categories SET name = ?, description = ? WHERE id = ?`, name, strings.TrimSpace(description), id,
 	)
 	if err != nil {
 		return nil, err
@@ -242,8 +336,8 @@ func (s *Store) UpdateTimelogCategoryDescription(ctx context.Context, id int64, 
 
 	var c TimelogCategory
 	err = s.db.QueryRowContext(ctx,
-		`SELECT id, name, COALESCE(description, '') FROM timelog_categories WHERE id = ?`, id,
-	).Scan(&c.ID, &c.Name, &c.Description)
+		`SELECT id, name, COALESCE(description, ''), is_active FROM timelog_categories WHERE id = ?`, id,
+	).Scan(&c.ID, &c.Name, &c.Description, &c.IsActive)
 	if err != nil {
 		return nil, err
 	}

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, type CSSProperties } from 'react'
-import { Plus, FilePlus2, RefreshCw, ExternalLink, UserPlus, Pencil, Check, X, Star, Trash2, Search, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Plus, FilePlus2, RefreshCw, ExternalLink, UserPlus, Pencil, Check, X, Star, Trash2, RotateCcw, Search, ChevronLeft, ChevronRight } from 'lucide-react'
 import type { ActivityCatalog, AzureActivity, AssignedAzureWorkItem, CreatedWorkItemResponse } from '../../types'
 import {
   getActivityCatalog,
@@ -11,6 +11,7 @@ import {
   addAzureActivity,
   updateAzureActivity,
   deactivateAzureActivity,
+  reactivateAzureActivity,
   setDefaultAzureActivity,
 } from '../../api/client'
 import { friendlyCatalogErrorMessage } from '../activities/azureActivity'
@@ -267,6 +268,19 @@ export function WorkItemsView() {
       loadAzureActivities(showInactive)
     } catch (e: unknown) {
       setCatalogError(friendlyCatalogErrorMessage(e, 'No se pudo desactivar el work item'))
+    } finally {
+      setCatalogBusyId(null)
+    }
+  }
+
+  async function handleReactivate(id: number) {
+    setCatalogBusyId(id)
+    setCatalogError('')
+    try {
+      await reactivateAzureActivity(id)
+      loadAzureActivities(showInactive)
+    } catch (e: unknown) {
+      setCatalogError(friendlyCatalogErrorMessage(e, 'No se pudo reactivar el work item'))
     } finally {
       setCatalogBusyId(null)
     }
@@ -803,6 +817,18 @@ export function WorkItemsView() {
                                     >
                                       <Trash2 size={13} strokeWidth={1.75} />
                                     </button>
+                                    {!a.is_active && (
+                                      <button
+                                        className="btn btn-ghost btn-sm"
+                                        onClick={() => handleReactivate(a.id)}
+                                        disabled={catalogBusy}
+                                        title="Reactivar"
+                                        aria-label={`Reactivar ${a.label}`}
+                                        style={{ padding: '2px 4px' }}
+                                      >
+                                        <RotateCcw size={13} strokeWidth={1.75} />
+                                      </button>
+                                    )}
                                   </div>
                                 )}
                               </td>

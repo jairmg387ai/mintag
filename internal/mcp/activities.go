@@ -15,8 +15,9 @@ import (
 
 // registerActivityTools registers the daily-activity MCP tools: activity_log,
 // activity_list, activity_approve, activity_upload, the timelog_projects/
-// timelog_categories catalog tools, and the azure_activities catalog tools
-// (catalog_azure_activity_add/list/set_default/remove).
+// timelog_categories catalog tools (including reactivate counterparts for
+// each soft-delete), and the azure_activities catalog tools
+// (catalog_azure_activity_add/list/set_default/remove/reactivate).
 func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 
 	// --- activity_log ---
@@ -247,6 +248,21 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 		return jsonResult(map[string]string{"removed": name}, nil)
 	})
 
+	// --- catalog_project_reactivate ---
+	s.AddTool(mcp.NewTool("catalog_project_reactivate",
+		mcp.WithDescription("Reactivate a previously deactivated project in the TimeLog catalog."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Project name to reactivate")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		name, err := req.RequireString("name")
+		if err != nil {
+			return errResult(err)
+		}
+		if err := st.ReactivateTimelogProject(ctx, name); err != nil {
+			return errResult(err)
+		}
+		return jsonResult(map[string]string{"reactivated": name}, nil)
+	})
+
 	// --- catalog_category_add ---
 	s.AddTool(mcp.NewTool("catalog_category_add",
 		mcp.WithDescription("Add a new category to the TimeLog catalog."),
@@ -266,17 +282,32 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 
 	// --- catalog_category_remove ---
 	s.AddTool(mcp.NewTool("catalog_category_remove",
-		mcp.WithDescription("Remove a category from the TimeLog catalog."),
-		mcp.WithString("name", mcp.Required(), mcp.Description("Category name to remove")),
+		mcp.WithDescription("Deactivate (soft-delete) a category in the TimeLog catalog. Historical daily activity entries keep referencing this category name."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Category name to deactivate")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		name, err := req.RequireString("name")
 		if err != nil {
 			return errResult(err)
 		}
-		if err := st.RemoveTimelogCategory(name); err != nil {
+		if err := st.DeactivateTimelogCategory(ctx, name); err != nil {
 			return errResult(err)
 		}
 		return jsonResult(map[string]string{"removed": name}, nil)
+	})
+
+	// --- catalog_category_reactivate ---
+	s.AddTool(mcp.NewTool("catalog_category_reactivate",
+		mcp.WithDescription("Reactivate a previously deactivated category in the TimeLog catalog."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Category name to reactivate")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		name, err := req.RequireString("name")
+		if err != nil {
+			return errResult(err)
+		}
+		if err := st.ReactivateTimelogCategory(ctx, name); err != nil {
+			return errResult(err)
+		}
+		return jsonResult(map[string]string{"reactivated": name}, nil)
 	})
 
 	// --- catalog_azure_activity_add ---
@@ -365,6 +396,25 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 			return errResult(err)
 		}
 		return jsonResult(map[string]any{"deactivated": id}, nil)
+	})
+
+	// --- catalog_azure_activity_reactivate ---
+	s.AddTool(mcp.NewTool("catalog_azure_activity_reactivate",
+		mcp.WithDescription("Reactivate a previously deactivated Azure activity in the catalog."),
+		mcp.WithString("id", mcp.Required(), mcp.Description("Azure activity ID to reactivate")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		idStr, err := req.RequireString("id")
+		if err != nil {
+			return errResult(err)
+		}
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			return errResult(fmt.Errorf("id must be an integer, got %q", idStr))
+		}
+		if err := st.ReactivateAzureActivity(ctx, id); err != nil {
+			return errResult(err)
+		}
+		return jsonResult(map[string]any{"reactivated": id}, nil)
 	})
 
 	// --- catalog_retention_get ---

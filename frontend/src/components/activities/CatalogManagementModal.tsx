@@ -1,12 +1,15 @@
 import { useEffect, useState, useRef, type CSSProperties } from 'react'
-import { X, Trash2, Plus } from 'lucide-react'
+import { X, Trash2, Plus, RotateCcw, Pencil, Check, Search } from 'lucide-react'
 import type { ActivityCatalog, CatalogProject, TimelogCategory } from '../../types'
 import {
   addCatalogProject,
   removeCatalogProject,
+  reactivateTimelogProject,
+  renameCatalogProject,
   addCatalogCategory,
   removeCatalogCategory,
-  updateCatalogCategoryDescription,
+  reactivateCatalogCategory,
+  updateCatalogCategory,
   getActivityCatalog,
 } from '../../api/client'
 
@@ -34,6 +37,8 @@ function CatalogSection({
   items,
   onAdd,
   onRemove,
+  onReactivate,
+  onRename,
   showInactive,
   onShowInactiveChange,
 }: {
@@ -41,13 +46,20 @@ function CatalogSection({
   items: CatalogProject[]
   onAdd: (name: string) => Promise<void>
   onRemove: (name: string) => Promise<void>
+  onReactivate: (name: string) => Promise<void>
+  onRename: (oldName: string, newName: string) => Promise<void>
   showInactive: boolean
   onShowInactiveChange: (value: boolean) => void
 }) {
   const [newName, setNewName] = useState('')
   const [adding, setAdding] = useState(false)
   const [error, setError] = useState('')
-  const [removing, setRemoving] = useState<Record<string, boolean>>({})
+  const [busy, setBusy] = useState<Record<string, boolean>>({})
+  const [searchQuery, setSearchQuery] = useState('')
+
+  const [editingName, setEditingName] = useState<string | null>(null)
+  const [editValue, setEditValue] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
 
   async function handleAdd() {
     const name = newName.trim()
@@ -65,15 +77,63 @@ function CatalogSection({
   }
 
   async function handleRemove(name: string) {
-    setRemoving(prev => ({ ...prev, [name]: true }))
+    setBusy(prev => ({ ...prev, [name]: true }))
     try {
       await onRemove(name)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'No se pudo eliminar el registro')
     } finally {
-      setRemoving(prev => ({ ...prev, [name]: false }))
+      setBusy(prev => ({ ...prev, [name]: false }))
     }
   }
+
+  async function handleReactivate(name: string) {
+    setBusy(prev => ({ ...prev, [name]: true }))
+    try {
+      await onReactivate(name)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'No se pudo reactivar el registro')
+    } finally {
+      setBusy(prev => ({ ...prev, [name]: false }))
+    }
+  }
+
+  function startEdit(name: string) {
+    setEditingName(name)
+    setEditValue(name)
+    setError('')
+  }
+
+  function cancelEdit() {
+    setEditingName(null)
+  }
+
+  async function saveEdit(oldName: string) {
+    const name = editValue.trim()
+    if (!name) {
+      setError('El nombre no puede estar vacío')
+      return
+    }
+    if (name === oldName) {
+      setEditingName(null)
+      return
+    }
+    setSavingEdit(true)
+    setError('')
+    try {
+      await onRename(oldName, name)
+      setEditingName(null)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'No se pudo renombrar el registro')
+    } finally {
+      setSavingEdit(false)
+    }
+  }
+
+  const normalizedSearch = searchQuery.trim().toLowerCase()
+  const visibleItems = normalizedSearch
+    ? items.filter(item => item.name.toLowerCase().includes(normalizedSearch))
+    : items
 
   return (
     <div>
@@ -104,6 +164,18 @@ function CatalogSection({
         </div>
       )}
 
+      <div style={{ position: 'relative', marginBottom: 10 }}>
+        <Search size={14} strokeWidth={1.75} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--fg3)' }} />
+        <input
+          type="search"
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          placeholder={`Buscar ${title.toLowerCase()}...`}
+          aria-label={`Buscar ${title.toLowerCase()}`}
+          style={{ ...inputStyle, paddingLeft: 28 }}
+        />
+      </div>
+
       <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, cursor: 'pointer' }}>
         <input
           type="checkbox"
@@ -115,43 +187,104 @@ function CatalogSection({
 
       {/* Item list */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 360, overflowY: 'auto' }}>
-        {items.length === 0 ? (
+        {visibleItems.length === 0 ? (
           <div style={{ font: 'var(--text-caption)', color: 'var(--fg3)', padding: '8px 0' }}>
             Sin registros
           </div>
         ) : (
-          items.map(item => (
-            <div
-              key={item.name}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                padding: '6px 10px',
-                background: 'var(--bg-sunken)',
-                borderRadius: 'var(--radius-md)',
-                border: '1px solid var(--border)',
-                opacity: item.is_active ? 1 : 0.55,
-              }}
-            >
-              <span style={{ flex: 1, font: 'var(--text-body)', color: 'var(--fg1)', fontSize: '0.9em' }}>
-                {item.name}
-              </span>
-              {!item.is_active && (
-                <span className="chip chip-todo" style={{ fontSize: '0.7em' }}>Inactivo</span>
-              )}
-              <button
-                className="btn btn-ghost btn-sm"
-                onClick={() => handleRemove(item.name)}
-                disabled={removing[item.name] || !item.is_active}
-                title={item.is_active ? `Eliminar ${item.name}` : `${item.name} ya está inactivo`}
-                aria-label={`Eliminar ${item.name}`}
-                style={{ padding: '2px 4px' }}
+          visibleItems.map(item => {
+            const isEditing = editingName === item.name
+            return (
+              <div
+                key={item.name}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '6px 10px',
+                  background: 'var(--bg-sunken)',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border)',
+                  opacity: item.is_active ? 1 : 0.55,
+                }}
               >
-                <Trash2 size={13} strokeWidth={1.75} />
-              </button>
-            </div>
-          ))
+                {isEditing ? (
+                  <>
+                    <input
+                      type="text"
+                      aria-label={`Nombre de ${item.name}`}
+                      value={editValue}
+                      onChange={e => setEditValue(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') saveEdit(item.name) }}
+                      style={{ ...inputStyle, fontSize: '0.9em', padding: '4px 8px', flex: 1 }}
+                      disabled={savingEdit}
+                      autoFocus
+                    />
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => saveEdit(item.name)}
+                      disabled={savingEdit}
+                      title="Guardar"
+                      aria-label={`Guardar ${item.name}`}
+                      style={{ padding: '2px 4px' }}
+                    >
+                      <Check size={13} strokeWidth={1.75} />
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={cancelEdit}
+                      disabled={savingEdit}
+                      title="Cancelar"
+                      aria-label={`Cancelar edición de ${item.name}`}
+                      style={{ padding: '2px 4px' }}
+                    >
+                      <X size={13} strokeWidth={1.75} />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ flex: 1, font: 'var(--text-body)', color: 'var(--fg1)', fontSize: '0.9em' }}>
+                      {item.name}
+                    </span>
+                    {!item.is_active && (
+                      <span className="chip chip-todo" style={{ fontSize: '0.7em' }}>Inactivo</span>
+                    )}
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => startEdit(item.name)}
+                      title="Editar"
+                      aria-label={`Editar ${item.name}`}
+                      style={{ padding: '2px 4px' }}
+                    >
+                      <Pencil size={13} strokeWidth={1.75} />
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => handleRemove(item.name)}
+                      disabled={busy[item.name] || !item.is_active}
+                      title={item.is_active ? `Eliminar ${item.name}` : `${item.name} ya está inactivo`}
+                      aria-label={`Eliminar ${item.name}`}
+                      style={{ padding: '2px 4px' }}
+                    >
+                      <Trash2 size={13} strokeWidth={1.75} />
+                    </button>
+                    {!item.is_active && (
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => handleReactivate(item.name)}
+                        disabled={busy[item.name]}
+                        title={`Reactivar ${item.name}`}
+                        aria-label={`Reactivar ${item.name}`}
+                        style={{ padding: '2px 4px' }}
+                      >
+                        <RotateCcw size={13} strokeWidth={1.75} />
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            )
+          })
         )}
       </div>
     </div>
@@ -162,20 +295,30 @@ function CategorySection({
   categories,
   onAdd,
   onRemove,
-  onDescriptionSaved,
+  onReactivate,
+  onSaved,
+  showInactive,
+  onShowInactiveChange,
 }: {
   categories: TimelogCategory[]
   onAdd: (name: string, description: string) => Promise<void>
   onRemove: (name: string) => Promise<void>
-  onDescriptionSaved: () => void
+  onReactivate: (name: string) => Promise<void>
+  onSaved: () => void
+  showInactive: boolean
+  onShowInactiveChange: (value: boolean) => void
 }) {
   const [newName, setNewName] = useState('')
   const [newDescription, setNewDescription] = useState('')
   const [adding, setAdding] = useState(false)
   const [error, setError] = useState('')
-  const [removing, setRemoving] = useState<Record<string, boolean>>({})
-  const [descDrafts, setDescDrafts] = useState<Record<number, string>>({})
-  const [savingDescription, setSavingDescription] = useState<Record<number, boolean>>({})
+  const [busy, setBusy] = useState<Record<string, boolean>>({})
+  const [searchQuery, setSearchQuery] = useState('')
+
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editDescription, setEditDescription] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
 
   async function handleAdd() {
     const name = newName.trim()
@@ -193,45 +336,65 @@ function CategorySection({
     }
   }
 
-  async function handleDescriptionBlur(category: TimelogCategory) {
-    const draft = descDrafts[category.id]
-    if (draft === undefined) return
-    const trimmed = draft.trim()
-    if (trimmed === (category.description ?? '')) {
-      setDescDrafts(prev => {
-        const next = { ...prev }
-        delete next[category.id]
-        return next
-      })
+  function startEdit(category: TimelogCategory) {
+    setEditingId(category.id)
+    setEditName(category.name)
+    setEditDescription(category.description ?? '')
+    setError('')
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+  }
+
+  async function saveEdit(category: TimelogCategory) {
+    const name = editName.trim()
+    if (!name) {
+      setError('El nombre no puede estar vacío')
       return
     }
-    setSavingDescription(prev => ({ ...prev, [category.id]: true }))
+    setSavingEdit(true)
     setError('')
     try {
-      await updateCatalogCategoryDescription(category.id, trimmed)
-      setDescDrafts(prev => {
-        const next = { ...prev }
-        delete next[category.id]
-        return next
-      })
-      onDescriptionSaved()
+      await updateCatalogCategory(category.id, name, editDescription.trim())
+      setEditingId(null)
+      onSaved()
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'No se pudo guardar la descripción')
+      setError(e instanceof Error ? e.message : 'No se pudo guardar la categoría')
     } finally {
-      setSavingDescription(prev => ({ ...prev, [category.id]: false }))
+      setSavingEdit(false)
     }
   }
 
   async function handleRemove(name: string) {
-    setRemoving(prev => ({ ...prev, [name]: true }))
+    setBusy(prev => ({ ...prev, [name]: true }))
     try {
       await onRemove(name)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'No se pudo eliminar el registro')
     } finally {
-      setRemoving(prev => ({ ...prev, [name]: false }))
+      setBusy(prev => ({ ...prev, [name]: false }))
     }
   }
+
+  async function handleReactivate(name: string) {
+    setBusy(prev => ({ ...prev, [name]: true }))
+    try {
+      await onReactivate(name)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'No se pudo reactivar el registro')
+    } finally {
+      setBusy(prev => ({ ...prev, [name]: false }))
+    }
+  }
+
+  const normalizedSearch = searchQuery.trim().toLowerCase()
+  const visibleCategories = normalizedSearch
+    ? categories.filter(c =>
+        c.name.toLowerCase().includes(normalizedSearch) ||
+        (c.description ?? '').toLowerCase().includes(normalizedSearch),
+      )
+    : categories
 
   return (
     <div>
@@ -271,14 +434,36 @@ function CategorySection({
         </div>
       )}
 
+      <div style={{ position: 'relative', marginBottom: 10 }}>
+        <Search size={14} strokeWidth={1.75} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--fg3)' }} />
+        <input
+          type="search"
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          placeholder="Buscar categorías..."
+          aria-label="Buscar categorías"
+          style={{ ...inputStyle, paddingLeft: 28 }}
+        />
+      </div>
+
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, cursor: 'pointer' }}>
+        <input
+          type="checkbox"
+          checked={showInactive}
+          onChange={e => onShowInactiveChange(e.target.checked)}
+        />
+        <span style={{ font: 'var(--text-caption)', color: 'var(--fg3)' }}>Mostrar inactivos</span>
+      </label>
+
       {/* Item list */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 360, overflowY: 'auto' }}>
-        {categories.length === 0 ? (
+        {visibleCategories.length === 0 ? (
           <div style={{ font: 'var(--text-caption)', color: 'var(--fg3)', padding: '8px 0' }}>
             Sin registros
           </div>
         ) : (
-          categories.map(c => {
+          visibleCategories.map(c => {
+            const isEditing = editingId === c.id
             return (
               <div
                 key={c.id}
@@ -290,34 +475,100 @@ function CategorySection({
                   background: 'var(--bg-sunken)',
                   borderRadius: 'var(--radius-md)',
                   border: '1px solid var(--border)',
+                  opacity: c.is_active ? 1 : 0.55,
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ flex: 1, font: 'var(--text-body)', color: 'var(--fg1)', fontSize: '0.9em' }}>
-                    {c.name}
-                  </span>
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => handleRemove(c.name)}
-                    disabled={removing[c.name]}
-                    title={`Eliminar ${c.name}`}
-                    aria-label={`Eliminar ${c.name}`}
-                    style={{ padding: '2px 4px' }}
-                  >
-                    <Trash2 size={13} strokeWidth={1.75} />
-                  </button>
-                </div>
-                <input
-                  type="text"
-                  aria-label={`Descripción de ${c.name}`}
-                  value={descDrafts[c.id] ?? c.description ?? ''}
-                  onChange={e => setDescDrafts(prev => ({ ...prev, [c.id]: e.target.value }))}
-                  onBlur={() => handleDescriptionBlur(c)}
-                  onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-                  placeholder="Descripción..."
-                  disabled={!!savingDescription[c.id]}
-                  style={{ ...inputStyle, fontSize: '0.85em', padding: '4px 8px' }}
-                />
+                {isEditing ? (
+                  <>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <input
+                        type="text"
+                        aria-label={`Nombre de ${c.name}`}
+                        value={editName}
+                        onChange={e => setEditName(e.target.value)}
+                        style={{ ...inputStyle, fontSize: '0.85em', padding: '4px 8px', flex: 1 }}
+                        disabled={savingEdit}
+                      />
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => saveEdit(c)}
+                        disabled={savingEdit}
+                        title="Guardar"
+                        aria-label={`Guardar ${c.name}`}
+                        style={{ padding: '2px 4px' }}
+                      >
+                        <Check size={13} strokeWidth={1.75} />
+                      </button>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={cancelEdit}
+                        disabled={savingEdit}
+                        title="Cancelar"
+                        aria-label={`Cancelar edición de ${c.name}`}
+                        style={{ padding: '2px 4px' }}
+                      >
+                        <X size={13} strokeWidth={1.75} />
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      aria-label={`Descripción de ${c.name}`}
+                      value={editDescription}
+                      onChange={e => setEditDescription(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') saveEdit(c) }}
+                      placeholder="Descripción..."
+                      disabled={savingEdit}
+                      style={{ ...inputStyle, fontSize: '0.85em', padding: '4px 8px' }}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ flex: 1, font: 'var(--text-body)', color: 'var(--fg1)', fontSize: '0.9em' }}>
+                        {c.name}
+                      </span>
+                      {!c.is_active && (
+                        <span className="chip chip-todo" style={{ fontSize: '0.7em' }}>Inactivo</span>
+                      )}
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => startEdit(c)}
+                        title="Editar"
+                        aria-label={`Editar ${c.name}`}
+                        style={{ padding: '2px 4px' }}
+                      >
+                        <Pencil size={13} strokeWidth={1.75} />
+                      </button>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => handleRemove(c.name)}
+                        disabled={busy[c.name] || !c.is_active}
+                        title={c.is_active ? `Eliminar ${c.name}` : `${c.name} ya está inactivo`}
+                        aria-label={`Eliminar ${c.name}`}
+                        style={{ padding: '2px 4px' }}
+                      >
+                        <Trash2 size={13} strokeWidth={1.75} />
+                      </button>
+                      {!c.is_active && (
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => handleReactivate(c.name)}
+                          disabled={busy[c.name]}
+                          title={`Reactivar ${c.name}`}
+                          aria-label={`Reactivar ${c.name}`}
+                          style={{ padding: '2px 4px' }}
+                        >
+                          <RotateCcw size={13} strokeWidth={1.75} />
+                        </button>
+                      )}
+                    </div>
+                    {c.description && (
+                      <span style={{ font: 'var(--text-caption)', color: 'var(--fg3)' }}>
+                        {c.description}
+                      </span>
+                    )}
+                  </>
+                )}
               </div>
             )
           })
@@ -338,40 +589,81 @@ export function CatalogManagementModal({ open, onClose, catalog, onCatalogChange
   const pressedOnOverlay = useRef(false)
   const [activeTab, setActiveTab] = useState<CatalogTab>('projects')
 
-  // `catalog.projects` is fetched active-only, since that's what every other
-  // consumer (the new/edit activity forms) needs. "Mostrar inactivos" pulls a
-  // separate include_inactive=true snapshot on demand instead of widening the
-  // parent's fetch, so those other consumers never see deactivated entries.
+  // `catalog.projects`/`catalog.categories` are fetched active-only, since
+  // that's what every other consumer (the new/edit activity forms) needs.
+  // "Mostrar inactivos" pulls a separate include_inactive=true snapshot on
+  // demand instead of widening the parent's fetch, so those other consumers
+  // never see deactivated entries. Both tabs share one snapshot fetch since
+  // GET /api/activities/catalog?include_inactive=true returns both projects
+  // and categories together.
   const [showInactiveProjects, setShowInactiveProjects] = useState(false)
-  const [projectsWithInactive, setProjectsWithInactive] = useState<CatalogProject[] | null>(null)
+  const [showInactiveCategories, setShowInactiveCategories] = useState(false)
+  const [catalogWithInactive, setCatalogWithInactive] = useState<ActivityCatalog | null>(null)
 
   useEffect(() => {
-    if (!open || !showInactiveProjects) return
-    getActivityCatalog(true).then(c => setProjectsWithInactive(c.projects)).catch(() => setProjectsWithInactive([]))
-  }, [open, showInactiveProjects, catalog])
+    if (!open || !(showInactiveProjects || showInactiveCategories)) return
+    getActivityCatalog(true).then(setCatalogWithInactive).catch(() => setCatalogWithInactive(null))
+  }, [open, showInactiveProjects, showInactiveCategories, catalog])
 
   if (!open) return null
 
-  const visibleProjects = showInactiveProjects ? (projectsWithInactive ?? catalog?.projects ?? []) : (catalog?.projects ?? [])
+  const visibleProjects = showInactiveProjects ? (catalogWithInactive?.projects ?? catalog?.projects ?? []) : (catalog?.projects ?? [])
+  const visibleCategories = showInactiveCategories ? (catalogWithInactive?.categories ?? catalog?.categories ?? []) : (catalog?.categories ?? [])
+
+  // refreshInactiveSnapshot re-pulls the include_inactive=true snapshot after
+  // a mutation, so a reactivated/deactivated row's is_active flips in the UI
+  // immediately without closing and reopening the modal.
+  function refreshInactiveSnapshot() {
+    if (showInactiveProjects || showInactiveCategories) {
+      getActivityCatalog(true).then(setCatalogWithInactive).catch(() => {})
+    }
+  }
 
   async function handleAddProject(name: string) {
     await addCatalogProject(name)
     onCatalogChanged()
+    refreshInactiveSnapshot()
   }
 
   async function handleRemoveProject(name: string) {
     await removeCatalogProject(name)
     onCatalogChanged()
+    refreshInactiveSnapshot()
+  }
+
+  async function handleReactivateProject(name: string) {
+    await reactivateTimelogProject(name)
+    onCatalogChanged()
+    refreshInactiveSnapshot()
+  }
+
+  async function handleRenameProject(oldName: string, newName: string) {
+    await renameCatalogProject(oldName, newName)
+    onCatalogChanged()
+    refreshInactiveSnapshot()
   }
 
   async function handleAddCategory(name: string, description: string) {
     await addCatalogCategory(name, description)
     onCatalogChanged()
+    refreshInactiveSnapshot()
   }
 
   async function handleRemoveCategory(name: string) {
     await removeCatalogCategory(name)
     onCatalogChanged()
+    refreshInactiveSnapshot()
+  }
+
+  async function handleReactivateCategory(name: string) {
+    await reactivateCatalogCategory(name)
+    onCatalogChanged()
+    refreshInactiveSnapshot()
+  }
+
+  function handleCatalogSaved() {
+    onCatalogChanged()
+    refreshInactiveSnapshot()
   }
 
   return (
@@ -474,16 +766,21 @@ export function CatalogManagementModal({ open, onClose, catalog, onCatalogChange
               items={visibleProjects}
               onAdd={handleAddProject}
               onRemove={handleRemoveProject}
+              onReactivate={handleReactivateProject}
+              onRename={handleRenameProject}
               showInactive={showInactiveProjects}
               onShowInactiveChange={setShowInactiveProjects}
             />
           )}
           {activeTab === 'categories' && (
             <CategorySection
-              categories={catalog?.categories ?? []}
+              categories={visibleCategories}
               onAdd={handleAddCategory}
               onRemove={handleRemoveCategory}
-              onDescriptionSaved={onCatalogChanged}
+              onReactivate={handleReactivateCategory}
+              onSaved={handleCatalogSaved}
+              showInactive={showInactiveCategories}
+              onShowInactiveChange={setShowInactiveCategories}
             />
           )}
         </div>

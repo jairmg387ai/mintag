@@ -82,7 +82,7 @@ func seedTimelogCategory(t *testing.T, st *store.Store, name string) int64 {
 	if err := st.AddTimelogCategory(name, ""); err != nil {
 		t.Fatalf("seed category %q: %v", name, err)
 	}
-	categories, err := st.ListTimelogCategories()
+	categories, err := st.ListTimelogCategories(context.Background(), false)
 	if err != nil {
 		t.Fatalf("list categories: %v", err)
 	}

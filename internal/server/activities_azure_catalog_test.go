@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -105,6 +106,47 @@ func TestAzureCatalogDeactivateMissingReturns404(t *testing.T) {
 	resp := doJSON(t, http.MethodDelete, base+"/api/activities/azure-catalog/999999", nil)
 	assertStatus(t, resp, http.StatusNotFound)
 	resp.Body.Close()
+}
+
+// TestAzureCatalogReactivate_FlipsInactiveBackToActive verifies POST
+// /api/activities/azure-catalog/{id}/reactivate undoes a prior deactivate,
+// and that reactivating an unknown id returns 404.
+func TestAzureCatalogReactivate_FlipsInactiveBackToActive(t *testing.T) {
+	base, _ := newTestServer(t)
+
+	addResp := doJSON(t, http.MethodPost, base+"/api/activities/azure-catalog", map[string]any{
+		"org": "RUNT2QA", "work_item_id": 999222, "label": "To Reactivate",
+	})
+	assertStatus(t, addResp, http.StatusCreated)
+	var added struct {
+		ID int64 `json:"id"`
+	}
+	decodeJSON(t, addResp, &added)
+
+	deactivateResp := doJSON(t, http.MethodDelete, base+"/api/activities/azure-catalog/"+strconv.FormatInt(added.ID, 10), nil)
+	assertStatus(t, deactivateResp, http.StatusNoContent)
+	deactivateResp.Body.Close()
+
+	reactivateResp := doJSON(t, http.MethodPost, base+"/api/activities/azure-catalog/"+strconv.FormatInt(added.ID, 10)+"/reactivate", nil)
+	assertStatus(t, reactivateResp, http.StatusNoContent)
+	reactivateResp.Body.Close()
+
+	listResp := get(t, base+"/api/activities/azure-catalog")
+	var active []map[string]any
+	decodeJSON(t, listResp, &active)
+	found := false
+	for _, a := range active {
+		if int64(a["id"].(float64)) == added.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected activity %d active again, got %#v", added.ID, active)
+	}
+
+	notFoundResp := doJSON(t, http.MethodPost, base+"/api/activities/azure-catalog/999999/reactivate", nil)
+	assertStatus(t, notFoundResp, http.StatusNotFound)
+	notFoundResp.Body.Close()
 }
 
 // TestAzureCatalogAdd_WithProjectAndCategoryID verifies POST
@@ -269,7 +311,7 @@ func seedTimelogCategory(t *testing.T, st *store.Store, name string) int64 {
 	if err := st.AddTimelogCategory(name, ""); err != nil {
 		t.Fatalf("seed category %q: %v", name, err)
 	}
-	categories, err := st.ListTimelogCategories()
+	categories, err := st.ListTimelogCategories(context.Background(), false)
 	if err != nil {
 		t.Fatalf("list categories: %v", err)
 	}

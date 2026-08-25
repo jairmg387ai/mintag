@@ -252,6 +252,21 @@ export async function removeCatalogProject(name: string): Promise<void> {
   if (!res.ok) throw new Error(await res.text())
 }
 
+export async function reactivateTimelogProject(name: string): Promise<void> {
+  const res = await fetch(`/api/activities/catalog/projects/${encodeURIComponent(name)}/reactivate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!res.ok) throw new Error(await res.text())
+}
+
+export function renameCatalogProject(oldName: string, newName: string): Promise<{ name: string }> {
+  return request<{ name: string }>(`/api/activities/catalog/projects/${encodeURIComponent(oldName)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name: newName }),
+  })
+}
+
 export function addCatalogCategory(name: string, description?: string): Promise<{ name: string }> {
   return request<{ name: string }>('/api/activities/catalog/categories', { method: 'POST', body: JSON.stringify({ name, description: description ?? '' }) })
 }
@@ -264,11 +279,20 @@ export async function removeCatalogCategory(name: string): Promise<void> {
   if (!res.ok) throw new Error(await res.text())
 }
 
-// updateCatalogCategoryDescription updates an existing category's description.
-export function updateCatalogCategoryDescription(id: number, description: string): Promise<TimelogCategory> {
-  return request<TimelogCategory>(`/api/activities/catalog/categories/${id}/description`, {
-    method: 'PUT',
-    body: JSON.stringify({ description }),
+export async function reactivateCatalogCategory(name: string): Promise<void> {
+  const res = await fetch(`/api/activities/catalog/categories/${encodeURIComponent(name)}/reactivate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!res.ok) throw new Error(await res.text())
+}
+
+// updateCatalogCategory renames a category and updates its description
+// (full replace — see the backend PATCH handler's doc comment).
+export function updateCatalogCategory(id: number, name: string, description: string): Promise<TimelogCategory> {
+  return request<TimelogCategory>(`/api/activities/catalog/categories/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name, description }),
   })
 }
 
@@ -295,6 +319,14 @@ export function updateAzureActivity(
 export async function deactivateAzureActivity(id: number): Promise<void> {
   const res = await fetch(`/api/activities/azure-catalog/${id}`, {
     method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!res.ok) throw new Error(await res.text())
+}
+
+export async function reactivateAzureActivity(id: number): Promise<void> {
+  const res = await fetch(`/api/activities/azure-catalog/${id}/reactivate`, {
+    method: 'POST',
     headers: { 'Content-Type': 'application/json' },
   })
   if (!res.ok) throw new Error(await res.text())

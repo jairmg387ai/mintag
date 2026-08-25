@@ -422,6 +422,14 @@ func (s *Store) migrateActivities() error {
 		return err
 	}
 
+	// timelog_categories gets only is_active (no created_at/last_used_at —
+	// categories are not subject to the staleness retention sweep, only
+	// manual deactivate/reactivate via DeactivateTimelogCategory/
+	// ReactivateTimelogCategory in catalog.go).
+	if err := s.addColumnIfMissing("timelog_categories", "is_active", "is_active INTEGER NOT NULL DEFAULT 1"); err != nil {
+		return err
+	}
+
 	if err := s.seedDefaultAzureActivity(); err != nil {
 		return err
 	}
