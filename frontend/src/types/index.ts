@@ -275,6 +275,7 @@ export interface AzureActivity {
   project?: string | null
   category_id?: number | null
   last_known_state?: string
+  last_known_assigned_to?: string
 }
 
 export interface AssignedAzureWorkItem {
@@ -282,6 +283,8 @@ export interface AssignedAzureWorkItem {
   title: string
   type: string
   state: string
+  assigned_to_id?: string
+  assigned_to_display_name?: string
 }
 
 export interface AssignedAzureWorkItemsResponse {

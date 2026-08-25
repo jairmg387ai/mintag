@@ -15,7 +15,7 @@ import {
   setDefaultAzureActivity,
 } from '../../api/client'
 import { friendlyCatalogErrorMessage } from '../activities/azureActivity'
-import { useAppActions } from '../../store/AppContext'
+import { useAppActions, useAppState } from '../../store/AppContext'
 import { Card, CardHeader } from '../ui/Card'
 import { CreateWorkItemModal } from './CreateWorkItemModal'
 import { AzureWorkItemStateBadge } from './AzureWorkItemStateBadge'
@@ -50,6 +50,7 @@ function isClosedAzureState(state: string | undefined): boolean {
 // catalog — that tab was removed so this table is the only place left.
 export function WorkItemsView() {
   const { pushToast } = useAppActions()
+  const { azureConfig } = useAppState()
   const [modalOpen, setModalOpen] = useState(false)
   const [lastResult, setLastResult] = useState<CreatedWorkItemResponse | null>(null)
   const [catalog, setCatalog] = useState<ActivityCatalog | null>(null)
@@ -138,6 +139,26 @@ export function WorkItemsView() {
   // state on load instead of "—" every time before the user refreshes again.
   function knownState(a: AzureActivity): string | undefined {
     return liveStates[a.work_item_id]?.state ?? (a.last_known_state || undefined)
+  }
+
+  // knownAssignee mirrors knownState's live-over-cached preference, for the
+  // assignee display name backing the Close/Recreate "only the assignee"
+  // gate below.
+  function knownAssignee(a: AzureActivity): string | undefined {
+    return liveStates[a.work_item_id]?.assigned_to_display_name ?? (a.last_known_assigned_to || undefined)
+  }
+
+  // canCloseOrRecreate is a UI-only hint, not the enforcement — the backend
+  // (ensureAssignedToCaller in work_items.go) always re-checks the live
+  // assignee id at close/recreate time and is the actual source of truth.
+  // When either side of the comparison is unknown (no states refresh has run
+  // yet, or the connected identity's display name isn't loaded), this stays
+  // permissive rather than blocking on a guess — the backend still guards.
+  function canCloseOrRecreate(a: AzureActivity): boolean {
+    const assignee = knownAssignee(a)
+    const me = azureConfig?.user_display_name
+    if (!assignee || !me) return true
+    return assignee.trim().toLowerCase() === me.trim().toLowerCase()
   }
 
   async function refreshStates() {
@@ -311,7 +332,20 @@ export function WorkItemsView() {
   // (see azure.Client.CloseWorkItem/CreateAndActivateWorkItem doc comments) —
   // both require an explicit confirm, mirroring ActivitiesView's
   // window.confirm convention for the delete action.
-  async function handleClose(workItemId: number, label: string) {
+  //
+  // Both take the full AzureActivity row (not just id/label) so they can
+  // run the "assigned to me?" check locally before anything else: when we
+  // already know the answer (a states refresh has run), clicking gives an
+  // immediate toast instead of a round trip that just comes back as a 403 —
+  // the backend's ensureAssignedToCaller still re-checks live and is the
+  // real enforcement (see its doc comment), this is purely a faster no.
+  async function handleClose(a: AzureActivity) {
+    if (!canCloseOrRecreate(a)) {
+      pushToast(`No puedes cerrar el work item ${a.work_item_id}: está asignado a ${knownAssignee(a)}, no a ti.`, true)
+      return
+    }
+    const workItemId = a.work_item_id
+    const label = a.label
     const message = `Se cerrará el work item ${workItemId} (${label}) en Azure DevOps. Antes se sincronizarán Completed Work y Remaining Work con las horas registradas en TimeLog. Esta acción no se puede deshacer.`
     if (!window.confirm(message)) return
 
@@ -338,7 +372,13 @@ export function WorkItemsView() {
     }
   }
 
-  async function handleRecreate(workItemId: number, label: string) {
+  async function handleRecreate(a: AzureActivity) {
+    if (!canCloseOrRecreate(a)) {
+      pushToast(`No puedes recrear el work item ${a.work_item_id}: está asignado a ${knownAssignee(a)}, no a ti.`, true)
+      return
+    }
+    const workItemId = a.work_item_id
+    const label = a.label
     const message = `Se cerrará el work item ${workItemId} (${label}) y se creará uno nuevo con la misma información, ajustando las fechas al mes actual. Antes de cerrarlo se sincronizarán Completed Work y Remaining Work con las horas registradas en TimeLog. Esta acción no se puede deshacer.`
     if (!window.confirm(message)) return
 
@@ -863,14 +903,14 @@ export function WorkItemsView() {
                                     <button
                                       className="btn btn-ghost btn-sm"
                                       disabled={busy || closedAlready || isEditing}
-                                      onClick={() => handleClose(a.work_item_id, a.label)}
+                                      onClick={() => handleClose(a)}
                                     >
                                       Cerrar
                                     </button>
                                     <button
                                       className="btn btn-ghost btn-sm"
                                       disabled={busy || closedAlready || isEditing}
-                                      onClick={() => handleRecreate(a.work_item_id, a.label)}
+                                      onClick={() => handleRecreate(a)}
                                     >
                                       Recrear
                                     </button>

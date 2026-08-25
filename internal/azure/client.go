@@ -284,11 +284,39 @@ func (c *Client) FetchIdentity(ctx context.Context) (userID, displayName string,
 
 // AssignedWorkItem is a work item (bug/task/etc.) currently assigned to the
 // caller in Azure Boards, as returned by FetchAssignedWorkItems.
+//
+// AssignedToID/AssignedToDisplayName are populated from System.AssignedTo —
+// both are blank for an unassigned work item. AssignedToID is the same
+// identity id FetchIdentity resolves (Config.UserID), so callers enforcing
+// "only the assignee may do X" (see work_items.go's close/recreate handlers)
+// must compare against AssignedToID, not the display name, which is not
+// guaranteed unique.
 type AssignedWorkItem struct {
-	ID    int    `json:"id"`
-	Title string `json:"title"`
-	Type  string `json:"type"`  // System.WorkItemType, e.g. "Bug", "Task"
-	State string `json:"state"` // System.State, e.g. "Active", "New"
+	ID                    int    `json:"id"`
+	Title                 string `json:"title"`
+	Type                  string `json:"type"`  // System.WorkItemType, e.g. "Bug", "Task"
+	State                 string `json:"state"` // System.State, e.g. "Active", "New"
+	AssignedToID          string `json:"assigned_to_id,omitempty"`
+	AssignedToDisplayName string `json:"assigned_to_display_name,omitempty"`
+}
+
+// azureIdentityRef is the identity reference shape Azure DevOps embeds for
+// fields like System.AssignedTo (json:"id" is the same VSSPS-derived id
+// FetchIdentity resolves — see AssignedWorkItem's doc comment). Shared by
+// fetchWorkItemDetails and FetchWorkItemFull, both of which request
+// System.AssignedTo.
+type azureIdentityRef struct {
+	DisplayName string `json:"displayName"`
+	ID          string `json:"id"`
+}
+
+// resolve extracts (id, displayName) from a possibly-nil identity ref — nil
+// means the work item is unassigned, which is a normal state, not an error.
+func (r *azureIdentityRef) resolve() (id, displayName string) {
+	if r == nil {
+		return "", ""
+	}
+	return r.ID, r.DisplayName
 }
 
 // FetchAssignedWorkItems returns the work items currently assigned to the
@@ -399,7 +427,7 @@ func (c *Client) fetchWorkItemDetails(ctx context.Context, ids []int) ([]Assigne
 		}
 
 		url := fmt.Sprintf(
-			"https://dev.azure.com/%s/_apis/wit/workitems?ids=%s&fields=System.Id,System.Title,System.WorkItemType,System.State&api-version=7.1",
+			"https://dev.azure.com/%s/_apis/wit/workitems?ids=%s&fields=System.Id,System.Title,System.WorkItemType,System.State,System.AssignedTo&api-version=7.1",
 			c.cfg.Org, strings.Join(idStrs, ","),
 		)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -427,9 +455,10 @@ func (c *Client) fetchWorkItemDetails(ctx context.Context, ids []int) ([]Assigne
 			Value []struct {
 				ID     int `json:"id"`
 				Fields struct {
-					Title string `json:"System.Title"`
-					Type  string `json:"System.WorkItemType"`
-					State string `json:"System.State"`
+					Title      string            `json:"System.Title"`
+					Type       string            `json:"System.WorkItemType"`
+					State      string            `json:"System.State"`
+					AssignedTo *azureIdentityRef `json:"System.AssignedTo"`
 				} `json:"fields"`
 			} `json:"value"`
 		}
@@ -438,11 +467,14 @@ func (c *Client) fetchWorkItemDetails(ctx context.Context, ids []int) ([]Assigne
 		}
 
 		for _, v := range parsed.Value {
+			assignedToID, assignedToDisplayName := v.Fields.AssignedTo.resolve()
 			out = append(out, AssignedWorkItem{
-				ID:    v.ID,
-				Title: v.Fields.Title,
-				Type:  v.Fields.Type,
-				State: v.Fields.State,
+				ID:                    v.ID,
+				Title:                 v.Fields.Title,
+				Type:                  v.Fields.Type,
+				State:                 v.Fields.State,
+				AssignedToID:          assignedToID,
+				AssignedToDisplayName: assignedToDisplayName,
 			})
 		}
 	}
@@ -730,14 +762,16 @@ func (c *Client) FetchClassificationTree(ctx context.Context, kind string) (Clas
 // flows (title, description, area/iteration paths, and estimate) — unlike
 // AssignedWorkItem, which only carries the fields the list/table view needs.
 type WorkItemFull struct {
-	ID               int
-	Title            string
-	Description      string
-	Type             string
-	State            string
-	AreaPath         string
-	IterationPath    string
-	OriginalEstimate float64
+	ID                    int
+	Title                 string
+	Description           string
+	Type                  string
+	State                 string
+	AreaPath              string
+	IterationPath         string
+	OriginalEstimate      float64
+	AssignedToID          string // see AssignedWorkItem's doc comment — compare this, not AssignedToDisplayName
+	AssignedToDisplayName string
 }
 
 // FetchWorkItemFull resolves the full field set for a single work item by
@@ -752,7 +786,7 @@ func (c *Client) FetchWorkItemFull(ctx context.Context, id int) (*WorkItemFull, 
 	}
 
 	const fields = "System.Title,System.Description,System.WorkItemType,System.State," +
-		"System.AreaPath,System.IterationPath,Microsoft.VSTS.Scheduling.OriginalEstimate"
+		"System.AreaPath,System.IterationPath,Microsoft.VSTS.Scheduling.OriginalEstimate,System.AssignedTo"
 	url := fmt.Sprintf(
 		"https://dev.azure.com/%s/_apis/wit/workitems/%d?fields=%s&api-version=7.1-preview.3",
 		c.cfg.Org, id, fields,
@@ -784,27 +818,31 @@ func (c *Client) FetchWorkItemFull(ctx context.Context, id int) (*WorkItemFull, 
 	var parsed struct {
 		ID     int `json:"id"`
 		Fields struct {
-			Title            string  `json:"System.Title"`
-			Description      string  `json:"System.Description"`
-			Type             string  `json:"System.WorkItemType"`
-			State            string  `json:"System.State"`
-			AreaPath         string  `json:"System.AreaPath"`
-			IterationPath    string  `json:"System.IterationPath"`
-			OriginalEstimate float64 `json:"Microsoft.VSTS.Scheduling.OriginalEstimate"`
+			Title            string            `json:"System.Title"`
+			Description      string            `json:"System.Description"`
+			Type             string            `json:"System.WorkItemType"`
+			State            string            `json:"System.State"`
+			AreaPath         string            `json:"System.AreaPath"`
+			IterationPath    string            `json:"System.IterationPath"`
+			OriginalEstimate float64           `json:"Microsoft.VSTS.Scheduling.OriginalEstimate"`
+			AssignedTo       *azureIdentityRef `json:"System.AssignedTo"`
 		} `json:"fields"`
 	}
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
 		return nil, fmt.Errorf("azure: decode fetch work item response: %w", err)
 	}
+	assignedToID, assignedToDisplayName := parsed.Fields.AssignedTo.resolve()
 	return &WorkItemFull{
-		ID:               parsed.ID,
-		Title:            parsed.Fields.Title,
-		Description:      parsed.Fields.Description,
-		Type:             parsed.Fields.Type,
-		State:            parsed.Fields.State,
-		AreaPath:         parsed.Fields.AreaPath,
-		IterationPath:    parsed.Fields.IterationPath,
-		OriginalEstimate: parsed.Fields.OriginalEstimate,
+		ID:                    parsed.ID,
+		Title:                 parsed.Fields.Title,
+		Description:           parsed.Fields.Description,
+		Type:                  parsed.Fields.Type,
+		State:                 parsed.Fields.State,
+		AreaPath:              parsed.Fields.AreaPath,
+		IterationPath:         parsed.Fields.IterationPath,
+		OriginalEstimate:      parsed.Fields.OriginalEstimate,
+		AssignedToID:          assignedToID,
+		AssignedToDisplayName: assignedToDisplayName,
 	}, nil
 }
 

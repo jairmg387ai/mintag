@@ -621,7 +621,7 @@ func TestCloseAzureWorkItem_Success(t *testing.T) {
 			w.Write([]byte(`{"authenticatedUser":{"id":"id","providerDisplayName":"Name"}}`)) //nolint:errcheck
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/_apis/wit/workitems/555"):
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"id":555,"fields":{"System.Title":"T","System.WorkItemType":"Task","System.State":"Active","System.AreaPath":"A","System.IterationPath":"I","Microsoft.VSTS.Scheduling.OriginalEstimate":8}}`)) //nolint:errcheck
+			w.Write([]byte(`{"id":555,"fields":{"System.Title":"T","System.WorkItemType":"Task","System.State":"Active","System.AreaPath":"A","System.IterationPath":"I","Microsoft.VSTS.Scheduling.OriginalEstimate":8,"System.AssignedTo":{"displayName":"Name","id":"id"}}}`)) //nolint:errcheck
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "TimeLogData/Documents"):
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`[{"workItemId":555,"minutes":120}]`)) //nolint:errcheck
@@ -675,7 +675,7 @@ func TestCloseAzureWorkItem_AlreadyClosed(t *testing.T) {
 			w.Write([]byte(`{"authenticatedUser":{"id":"id","providerDisplayName":"Name"}}`)) //nolint:errcheck
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/_apis/wit/workitems/555"):
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"id":555,"fields":{"System.Title":"T","System.WorkItemType":"Task","System.State":"Closed"}}`)) //nolint:errcheck
+			w.Write([]byte(`{"id":555,"fields":{"System.Title":"T","System.WorkItemType":"Task","System.State":"Closed","System.AssignedTo":{"displayName":"Name","id":"id"}}}`)) //nolint:errcheck
 		default:
 			t.Fatalf("unexpected azure request (no TimeLog/PATCH call expected): %s %s", r.Method, r.URL.Path)
 		}
@@ -698,6 +698,129 @@ func TestCloseAzureWorkItem_AlreadyClosed(t *testing.T) {
 	if body.State != "Closed" || body.HoursSynced != 0 || !body.AlreadyClosed {
 		t.Errorf("unexpected response: %+v", body)
 	}
+}
+
+// TestCloseAzureWorkItem_RejectsWhenNotAssignedToCaller verifies a Task
+// assigned to someone else is rejected with 403, and that no TimeLog fetch
+// or PATCH is attempted — the same "transversal task" scenario the
+// ensureAssignedToCaller doc comment describes (a TL or teammate registering
+// time against a task that isn't theirs to close).
+func TestCloseAzureWorkItem_RejectsWhenNotAssignedToCaller(t *testing.T) {
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
+
+	azureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "connectiondata"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"authenticatedUser":{"id":"id","providerDisplayName":"Name"}}`)) //nolint:errcheck
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/_apis/wit/workitems/555"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"id":555,"fields":{"System.Title":"T","System.WorkItemType":"Task","System.State":"Active","System.AssignedTo":{"displayName":"Someone Else","id":"other-id"}}}`)) //nolint:errcheck
+		default:
+			t.Fatalf("unexpected azure request (no TimeLog/PATCH call expected): %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer azureServer.Close()
+
+	base, _ := newTestServerWithAzureRedirect(t, azureServer.URL)
+	putResp := doJSON(t, http.MethodPut, base+"/api/activities/azure-config", map[string]any{"token": "db-token", "auth_mode": "bearer"})
+	assertStatus(t, putResp, http.StatusOK)
+
+	resp := doJSON(t, http.MethodPost, base+"/api/activities/azure-work-items/555/close", nil)
+	assertStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+}
+
+// TestCloseAzureWorkItem_RejectsWhenUnassigned verifies an unassigned Task
+// (no System.AssignedTo at all) is also rejected — "no one" is not "me".
+func TestCloseAzureWorkItem_RejectsWhenUnassigned(t *testing.T) {
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
+
+	azureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "connectiondata"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"authenticatedUser":{"id":"id","providerDisplayName":"Name"}}`)) //nolint:errcheck
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/_apis/wit/workitems/555"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"id":555,"fields":{"System.Title":"T","System.WorkItemType":"Task","System.State":"Active"}}`)) //nolint:errcheck
+		default:
+			t.Fatalf("unexpected azure request (no TimeLog/PATCH call expected): %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer azureServer.Close()
+
+	base, _ := newTestServerWithAzureRedirect(t, azureServer.URL)
+	putResp := doJSON(t, http.MethodPut, base+"/api/activities/azure-config", map[string]any{"token": "db-token", "auth_mode": "bearer"})
+	assertStatus(t, putResp, http.StatusOK)
+
+	resp := doJSON(t, http.MethodPost, base+"/api/activities/azure-work-items/555/close", nil)
+	assertStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+}
+
+// TestRecreateAzureWorkItem_RejectsWhenNotAssignedToCaller mirrors the Close
+// rejection above for Recreate, which also closes the original work item.
+func TestRecreateAzureWorkItem_RejectsWhenNotAssignedToCaller(t *testing.T) {
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
+
+	azureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "connectiondata"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"authenticatedUser":{"id":"id","providerDisplayName":"Name"}}`)) //nolint:errcheck
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/_apis/wit/workitems/555"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"id":555,"fields":{"System.Title":"T","System.WorkItemType":"Task","System.State":"Active","System.AssignedTo":{"displayName":"Someone Else","id":"other-id"}}}`)) //nolint:errcheck
+		default:
+			t.Fatalf("unexpected azure request (no TimeLog/PATCH/create call expected): %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer azureServer.Close()
+
+	base, _ := newTestServerWithAzureRedirect(t, azureServer.URL)
+	putResp := doJSON(t, http.MethodPut, base+"/api/activities/azure-config", map[string]any{"token": "db-token", "auth_mode": "bearer"})
+	assertStatus(t, putResp, http.StatusOK)
+
+	resp := doJSON(t, http.MethodPost, base+"/api/activities/azure-work-items/555/recreate", nil)
+	assertStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+}
+
+// TestCloseAzureWorkItem_UnresolvedIdentityFallsOpen verifies that when the
+// caller's identity was never resolved (UserID empty — a PAT-based setup
+// that never configured MINTAG_AZURE_USER_ID), ensureAssignedToCaller cannot
+// check assignment and lets the close proceed rather than blocking every
+// such setup — see its doc comment for why falling open is intentional here.
+func TestCloseAzureWorkItem_UnresolvedIdentityFallsOpen(t *testing.T) {
+	azureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/_apis/wit/workitems/555"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"id":555,"fields":{"System.Title":"T","System.WorkItemType":"Task","System.State":"Closed"}}`)) //nolint:errcheck
+		default:
+			t.Fatalf("unexpected azure request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer azureServer.Close()
+
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "pat-token")
+	t.Setenv("MINTAG_AZURE_USER", "")
+	t.Setenv("MINTAG_AZURE_USER_ID", "")
+
+	base, _ := newTestServerWithAzureRedirect(t, azureServer.URL)
+
+	resp := doJSON(t, http.MethodPost, base+"/api/activities/azure-work-items/555/close", nil)
+	assertStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
 }
 
 // TestCloseAzureWorkItem_NotFound verifies a 400/404 from Azure surfaces as
@@ -739,7 +862,7 @@ func TestRecreateAzureWorkItem_Success_WithCatalogReassignment(t *testing.T) {
 			w.Write([]byte(`{"authenticatedUser":{"id":"id","providerDisplayName":"Name"}}`)) //nolint:errcheck
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/_apis/wit/workitems/555"):
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"id":555,"fields":{"System.Title":"Old title","System.WorkItemType":"Task","System.State":"Active","System.AreaPath":"A","System.IterationPath":"I","Microsoft.VSTS.Scheduling.OriginalEstimate":8}}`)) //nolint:errcheck
+			w.Write([]byte(`{"id":555,"fields":{"System.Title":"Old title","System.WorkItemType":"Task","System.State":"Active","System.AreaPath":"A","System.IterationPath":"I","Microsoft.VSTS.Scheduling.OriginalEstimate":8,"System.AssignedTo":{"displayName":"Name","id":"id"}}}`)) //nolint:errcheck
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "TimeLogData/Documents"):
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`[{"workItemId":555,"minutes":60}]`)) //nolint:errcheck
@@ -811,7 +934,7 @@ func TestRecreateAzureWorkItem_NoCatalogEntry_NoReassignment(t *testing.T) {
 			w.Write([]byte(`{"authenticatedUser":{"id":"id","providerDisplayName":"Name"}}`)) //nolint:errcheck
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/_apis/wit/workitems/321"):
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"id":321,"fields":{"System.Title":"Unregistered","System.WorkItemType":"Task","System.State":"Active","System.AreaPath":"A","System.IterationPath":"I","Microsoft.VSTS.Scheduling.OriginalEstimate":8}}`)) //nolint:errcheck
+			w.Write([]byte(`{"id":321,"fields":{"System.Title":"Unregistered","System.WorkItemType":"Task","System.State":"Active","System.AreaPath":"A","System.IterationPath":"I","Microsoft.VSTS.Scheduling.OriginalEstimate":8,"System.AssignedTo":{"displayName":"Name","id":"id"}}}`)) //nolint:errcheck
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "TimeLogData/Documents"):
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`[]`)) //nolint:errcheck
@@ -869,7 +992,7 @@ func TestRecreateAzureWorkItem_CloseFails_AbortsBeforeCreate(t *testing.T) {
 			w.Write([]byte(`{"authenticatedUser":{"id":"id","providerDisplayName":"Name"}}`)) //nolint:errcheck
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/_apis/wit/workitems/555"):
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"id":555,"fields":{"System.Title":"T","System.WorkItemType":"Task","System.State":"Active","System.AreaPath":"A","System.IterationPath":"I","Microsoft.VSTS.Scheduling.OriginalEstimate":8}}`)) //nolint:errcheck
+			w.Write([]byte(`{"id":555,"fields":{"System.Title":"T","System.WorkItemType":"Task","System.State":"Active","System.AreaPath":"A","System.IterationPath":"I","Microsoft.VSTS.Scheduling.OriginalEstimate":8,"System.AssignedTo":{"displayName":"Name","id":"id"}}}`)) //nolint:errcheck
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "TimeLogData/Documents"):
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`[]`)) //nolint:errcheck
@@ -915,7 +1038,7 @@ func TestRecreateAzureWorkItem_ActivationPartialFailure(t *testing.T) {
 			w.Write([]byte(`{"authenticatedUser":{"id":"id","providerDisplayName":"Name"}}`)) //nolint:errcheck
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/_apis/wit/workitems/555"):
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"id":555,"fields":{"System.Title":"T","System.WorkItemType":"Task","System.State":"Active","System.AreaPath":"A","System.IterationPath":"I","Microsoft.VSTS.Scheduling.OriginalEstimate":8}}`)) //nolint:errcheck
+			w.Write([]byte(`{"id":555,"fields":{"System.Title":"T","System.WorkItemType":"Task","System.State":"Active","System.AreaPath":"A","System.IterationPath":"I","Microsoft.VSTS.Scheduling.OriginalEstimate":8,"System.AssignedTo":{"displayName":"Name","id":"id"}}}`)) //nolint:errcheck
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "TimeLogData/Documents"):
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`[]`)) //nolint:errcheck

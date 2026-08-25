@@ -23,8 +23,10 @@ vi.mock('../../api/client', () => ({
 }))
 
 const pushToast = vi.fn()
+const useAppState = vi.fn(() => ({ azureConfig: null as { user_display_name?: string } | null }))
 vi.mock('../../store/AppContext', () => ({
   useAppActions: () => ({ pushToast }),
+  useAppState: () => useAppState(),
 }))
 
 const catalog = {
@@ -57,6 +59,7 @@ describe('WorkItemsView', () => {
     vi.mocked(listAssignedAzureWorkItems).mockReset()
     vi.mocked(addAzureActivity).mockReset()
     vi.mocked(getActivityCatalog).mockResolvedValue(catalog)
+    useAppState.mockReset().mockReturnValue({ azureConfig: null })
   })
 
   it('renders catalog rows from listAzureActivities', async () => {
@@ -165,6 +168,56 @@ describe('WorkItemsView', () => {
     expect(closeAzureWorkItem).not.toHaveBeenCalled()
 
     confirmSpy.mockRestore()
+  })
+
+  it('blocks Cerrar/Recrear with a toast (no confirm, no API call) when the last known assignee does not match the connected identity', async () => {
+    useAppState.mockReturnValue({ azureConfig: { user_display_name: 'Jane Doe' } })
+    vi.mocked(listAzureActivities).mockResolvedValue([
+      { ...oneActivity[0], work_item_type: 'Task', last_known_assigned_to: 'Someone Else' },
+    ])
+    const confirmSpy = vi.spyOn(window, 'confirm')
+    const user = userEvent.setup()
+
+    render(<WorkItemsView />)
+    await screen.findByText('101')
+
+    const closeBtn = screen.getByRole('button', { name: /cerrar/i })
+    expect(closeBtn).not.toBeDisabled()
+
+    await user.click(closeBtn)
+
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(closeAzureWorkItem).not.toHaveBeenCalled()
+    expect(pushToast).toHaveBeenCalledWith(expect.stringContaining('Someone Else'), true)
+
+    await user.click(screen.getByRole('button', { name: /recrear/i }))
+    expect(recreateAzureWorkItem).not.toHaveBeenCalled()
+
+    confirmSpy.mockRestore()
+  })
+
+  it('keeps Cerrar/Recrear enabled when the last known assignee matches the connected identity', async () => {
+    useAppState.mockReturnValue({ azureConfig: { user_display_name: 'Jane Doe' } })
+    vi.mocked(listAzureActivities).mockResolvedValue([
+      { ...oneActivity[0], work_item_type: 'Task', last_known_assigned_to: 'Jane Doe' },
+    ])
+
+    render(<WorkItemsView />)
+    await screen.findByText('101')
+
+    expect(screen.getByRole('button', { name: /cerrar/i })).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: /recrear/i })).not.toBeDisabled()
+  })
+
+  it('keeps Cerrar/Recrear enabled when the assignee is unknown (no refresh has run yet)', async () => {
+    useAppState.mockReturnValue({ azureConfig: { user_display_name: 'Jane Doe' } })
+    vi.mocked(listAzureActivities).mockResolvedValue([{ ...oneActivity[0], work_item_type: 'Task' }])
+
+    render(<WorkItemsView />)
+    await screen.findByText('101')
+
+    expect(screen.getByRole('button', { name: /cerrar/i })).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: /recrear/i })).not.toBeDisabled()
   })
 
   it('recreates a work item after confirmation, refreshing the catalog to show the new id', async () => {

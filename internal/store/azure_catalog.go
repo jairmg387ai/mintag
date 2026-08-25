@@ -31,16 +31,17 @@ var ErrAzureActivityNotFound = errors.New("azure activity not found")
 // registration autofills project/category from these fields. Both are
 // optional and independent — either, neither, or both may be set.
 type AzureActivity struct {
-	ID             int64   `json:"id"`
-	Org            string  `json:"org"`
-	WorkItemID     int     `json:"work_item_id"`
-	Label          string  `json:"label"`
-	WorkItemType   string  `json:"work_item_type"`
-	IsActive       bool    `json:"is_active"`
-	IsDefault      bool    `json:"is_default"`
-	Project        *string `json:"project,omitempty"`
-	CategoryID     *int64  `json:"category_id,omitempty"`
-	LastKnownState string  `json:"last_known_state"`
+	ID                  int64   `json:"id"`
+	Org                 string  `json:"org"`
+	WorkItemID          int     `json:"work_item_id"`
+	Label               string  `json:"label"`
+	WorkItemType        string  `json:"work_item_type"`
+	IsActive            bool    `json:"is_active"`
+	IsDefault           bool    `json:"is_default"`
+	Project             *string `json:"project,omitempty"`
+	CategoryID          *int64  `json:"category_id,omitempty"`
+	LastKnownState      string  `json:"last_known_state"`
+	LastKnownAssignedTo string  `json:"last_known_assigned_to"`
 }
 
 // AzureActivityMapping is the optional, independent project/category autofill
@@ -97,7 +98,7 @@ func (s *Store) validateMapping(ctx context.Context, m AzureActivityMapping) err
 func (s *Store) ListAzureActivities(ctx context.Context, includeInactive bool) ([]*AzureActivity, error) {
 	_ = s.maybeSweepCatalogs(ctx)
 
-	query := `SELECT id, org, work_item_id, label, COALESCE(work_item_type, ''), is_active, is_default, project, category_id, COALESCE(last_known_state, '') FROM azure_activities`
+	query := `SELECT id, org, work_item_id, label, COALESCE(work_item_type, ''), is_active, is_default, project, category_id, COALESCE(last_known_state, ''), COALESCE(last_known_assigned_to, '') FROM azure_activities`
 	if !includeInactive {
 		query += ` WHERE is_active = 1`
 	}
@@ -111,7 +112,7 @@ func (s *Store) ListAzureActivities(ctx context.Context, includeInactive bool) (
 	out := make([]*AzureActivity, 0)
 	for rows.Next() {
 		a := &AzureActivity{}
-		if err := rows.Scan(&a.ID, &a.Org, &a.WorkItemID, &a.Label, &a.WorkItemType, &a.IsActive, &a.IsDefault, &a.Project, &a.CategoryID, &a.LastKnownState); err != nil {
+		if err := rows.Scan(&a.ID, &a.Org, &a.WorkItemID, &a.Label, &a.WorkItemType, &a.IsActive, &a.IsDefault, &a.Project, &a.CategoryID, &a.LastKnownState, &a.LastKnownAssignedTo); err != nil {
 			return nil, err
 		}
 		out = append(out, a)
@@ -203,8 +204,8 @@ func (s *Store) UpdateAzureActivity(ctx context.Context, id int64, org, label st
 func (s *Store) FindAzureActivityByWorkItemID(ctx context.Context, workItemID int) (*AzureActivity, error) {
 	a := &AzureActivity{}
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, org, work_item_id, label, COALESCE(work_item_type, ''), is_active, is_default, project, category_id, COALESCE(last_known_state, '') FROM azure_activities WHERE work_item_id = ?`, workItemID,
-	).Scan(&a.ID, &a.Org, &a.WorkItemID, &a.Label, &a.WorkItemType, &a.IsActive, &a.IsDefault, &a.Project, &a.CategoryID, &a.LastKnownState)
+		`SELECT id, org, work_item_id, label, COALESCE(work_item_type, ''), is_active, is_default, project, category_id, COALESCE(last_known_state, ''), COALESCE(last_known_assigned_to, '') FROM azure_activities WHERE work_item_id = ?`, workItemID,
+	).Scan(&a.ID, &a.Org, &a.WorkItemID, &a.Label, &a.WorkItemType, &a.IsActive, &a.IsDefault, &a.Project, &a.CategoryID, &a.LastKnownState, &a.LastKnownAssignedTo)
 	if err == sql.ErrNoRows {
 		return nil, ErrAzureActivityNotFound
 	}
@@ -242,8 +243,8 @@ func (s *Store) ReassignAzureActivityWorkItem(ctx context.Context, id int64, new
 func (s *Store) GetDefaultAzureActivity(ctx context.Context) (*AzureActivity, error) {
 	a := &AzureActivity{}
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, org, work_item_id, label, COALESCE(work_item_type, ''), is_active, is_default, project, category_id, COALESCE(last_known_state, '') FROM azure_activities WHERE is_default = 1 AND is_active = 1`,
-	).Scan(&a.ID, &a.Org, &a.WorkItemID, &a.Label, &a.WorkItemType, &a.IsActive, &a.IsDefault, &a.Project, &a.CategoryID, &a.LastKnownState)
+		`SELECT id, org, work_item_id, label, COALESCE(work_item_type, ''), is_active, is_default, project, category_id, COALESCE(last_known_state, ''), COALESCE(last_known_assigned_to, '') FROM azure_activities WHERE is_default = 1 AND is_active = 1`,
+	).Scan(&a.ID, &a.Org, &a.WorkItemID, &a.Label, &a.WorkItemType, &a.IsActive, &a.IsDefault, &a.Project, &a.CategoryID, &a.LastKnownState, &a.LastKnownAssignedTo)
 	if err == sql.ErrNoRows {
 		return nil, ErrNoDefaultAzureActivity
 	}
@@ -335,25 +336,33 @@ func (s *Store) ReactivateAzureActivity(ctx context.Context, id int64) error {
 	return nil
 }
 
-// SyncAzureActivityLiveState persists the state and work item type just
-// fetched live from Azure (see handleGetAzureWorkItemStates) into the local
-// catalog entry matching workItemID, so the portal shows a "last known"
-// state on load instead of "—" every time until the next manual refresh, and
-// so a work item that was reclassified in Azure (e.g. Bug -> Task) picks up
-// that change locally instead of staying stuck under its original type.
+// SyncAzureActivityLiveState persists the state, work item type, and
+// assignee display name just fetched live from Azure (see
+// handleGetAzureWorkItemStates) into the local catalog entry matching
+// workItemID, so the portal shows a "last known" state on load instead of
+// "—" every time until the next manual refresh, and so a work item that was
+// reclassified in Azure (e.g. Bug -> Task) or reassigned picks up that
+// change locally instead of staying stuck under stale data.
 // workItemType is only applied when non-blank, so a caller that only has a
-// state to report (none currently do) can't blank out a good stored type.
+// state to report can't blank out a good stored type; assignedTo has no such
+// guard and is always overwritten (including to blank for an unassigned work
+// item), since "no longer assigned to anyone" is itself meaningful info, not
+// a caller omission. assignedTo is UI-only (button-disable hint for
+// Close/Recreate) — the actual enforcement in work_items.go's
+// ensureAssignedToCaller always re-fetches the live assignee id, never reads
+// this cached display name.
 // Not every work item id passed to a states refresh is necessarily
 // catalog-registered — a miss is a silent no-op, mirroring
 // TouchAzureActivityLastUsed below.
-func (s *Store) SyncAzureActivityLiveState(ctx context.Context, workItemID int, state, workItemType string) error {
+func (s *Store) SyncAzureActivityLiveState(ctx context.Context, workItemID int, state, workItemType, assignedTo string) error {
 	workItemType = strings.TrimSpace(workItemType)
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE azure_activities
 		 SET last_known_state = ?,
-		     work_item_type = CASE WHEN ? <> '' THEN ? ELSE work_item_type END
+		     work_item_type = CASE WHEN ? <> '' THEN ? ELSE work_item_type END,
+		     last_known_assigned_to = ?
 		 WHERE work_item_id = ?`,
-		state, workItemType, workItemType, workItemID,
+		state, workItemType, workItemType, strings.TrimSpace(assignedTo), workItemID,
 	)
 	return err
 }
@@ -425,8 +434,8 @@ func (s *Store) GetAzureActivity(ctx context.Context, id int64) (*AzureActivity,
 func (s *Store) getAzureActivity(ctx context.Context, id int64) (*AzureActivity, error) {
 	a := &AzureActivity{}
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, org, work_item_id, label, COALESCE(work_item_type, ''), is_active, is_default, project, category_id, COALESCE(last_known_state, '') FROM azure_activities WHERE id = ?`, id,
-	).Scan(&a.ID, &a.Org, &a.WorkItemID, &a.Label, &a.WorkItemType, &a.IsActive, &a.IsDefault, &a.Project, &a.CategoryID, &a.LastKnownState)
+		`SELECT id, org, work_item_id, label, COALESCE(work_item_type, ''), is_active, is_default, project, category_id, COALESCE(last_known_state, ''), COALESCE(last_known_assigned_to, '') FROM azure_activities WHERE id = ?`, id,
+	).Scan(&a.ID, &a.Org, &a.WorkItemID, &a.Label, &a.WorkItemType, &a.IsActive, &a.IsDefault, &a.Project, &a.CategoryID, &a.LastKnownState, &a.LastKnownAssignedTo)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("azure activity not found: %d", id)
 	}

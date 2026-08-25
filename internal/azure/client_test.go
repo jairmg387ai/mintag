@@ -682,6 +682,42 @@ func TestFetchWorkItemsByIDs_Success(t *testing.T) {
 	}
 }
 
+// TestFetchWorkItemsByIDs_ParsesAssignedTo verifies System.AssignedTo is
+// requested and parsed into AssignedToID/AssignedToDisplayName, and that an
+// unassigned work item (field absent) leaves both blank rather than erroring.
+func TestFetchWorkItemsByIDs_ParsesAssignedTo(t *testing.T) {
+	var workitemsQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		workitemsQuery = r.URL.RawQuery
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"count":2,"value":[
+			{"id":101,"fields":{"System.Title":"Fix login bug","System.WorkItemType":"Bug","System.State":"Active",
+				"System.AssignedTo":{"displayName":"Jane Doe","id":"identity-123"}}},
+			{"id":202,"fields":{"System.Title":"Unassigned task","System.WorkItemType":"Task","System.State":"New"}}
+		]}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+
+	items, err := c.FetchWorkItemsByIDs(context.Background(), []int{101, 202})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(workitemsQuery, "System.AssignedTo") {
+		t.Errorf("expected fields query to request System.AssignedTo, got %s", workitemsQuery)
+	}
+	if items[0].AssignedToID != "identity-123" || items[0].AssignedToDisplayName != "Jane Doe" {
+		t.Errorf("expected assigned item to carry identity, got %+v", items[0])
+	}
+	if items[1].AssignedToID != "" || items[1].AssignedToDisplayName != "" {
+		t.Errorf("expected unassigned item to have blank identity, got %+v", items[1])
+	}
+}
+
 func TestFetchWorkItemsByIDs_ChunksAtAzureLimit(t *testing.T) {
 	var detailBatches []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1198,6 +1234,40 @@ func TestFetchWorkItemFull_Success(t *testing.T) {
 	}
 	if *full != *want {
 		t.Errorf("unexpected result: %+v, want %+v", full, want)
+	}
+}
+
+// TestFetchWorkItemFull_ParsesAssignedTo verifies System.AssignedTo is
+// requested and parsed into AssignedToID/AssignedToDisplayName — the field
+// close/recreate handlers compare against the connected identity to enforce
+// "only the assignee can close it".
+func TestFetchWorkItemFull_ParsesAssignedTo(t *testing.T) {
+	var query string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.RawQuery
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":555,"fields":{
+			"System.Title":"Fix login bug",
+			"System.WorkItemType":"Task",
+			"System.State":"Active",
+			"System.AssignedTo":{"displayName":"Jane Doe","id":"identity-123"}
+		}}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", TeamProject: "PROJ", User: "U"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+	full, err := c.FetchWorkItemFull(context.Background(), 555)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(query, "System.AssignedTo") {
+		t.Errorf("expected fields query to request System.AssignedTo, got %s", query)
+	}
+	if full.AssignedToID != "identity-123" || full.AssignedToDisplayName != "Jane Doe" {
+		t.Errorf("expected parsed identity, got %+v", full)
 	}
 }
 

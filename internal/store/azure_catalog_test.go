@@ -757,7 +757,7 @@ func TestSyncAzureActivityLiveState_UpdatesStateAndType(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := s.SyncAzureActivityLiveState(ctx, a.WorkItemID, "Active", "Bug"); err != nil {
+	if err := s.SyncAzureActivityLiveState(ctx, a.WorkItemID, "Active", "Bug", "Jane Doe"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -780,6 +780,41 @@ func TestSyncAzureActivityLiveState_UpdatesStateAndType(t *testing.T) {
 	if found.WorkItemType != "Bug" {
 		t.Errorf("expected work_item_type updated to %q, got %q", "Bug", found.WorkItemType)
 	}
+	if found.LastKnownAssignedTo != "Jane Doe" {
+		t.Errorf("expected last_known_assigned_to=%q, got %q", "Jane Doe", found.LastKnownAssignedTo)
+	}
+}
+
+// TestSyncAzureActivityLiveState_BlankAssignedToClearsStoredValue verifies
+// assignedTo has no "keep existing" guard, unlike workItemType — an
+// unassigned work item overwrites a previously stored assignee with blank,
+// because "unassigned now" is itself meaningful, not a caller omission.
+func TestSyncAzureActivityLiveState_BlankAssignedToClearsStoredValue(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	a, err := s.AddAzureActivity(ctx, "RUNT2QA", 999022, "To Sync", "Task", AzureActivityMapping{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SyncAzureActivityLiveState(ctx, a.WorkItemID, "Active", "Task", "Jane Doe"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SyncAzureActivityLiveState(ctx, a.WorkItemID, "Active", "Task", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := s.GetAzureActivity(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.LastKnownAssignedTo != "" {
+		t.Errorf("expected last_known_assigned_to cleared, got %q", updated.LastKnownAssignedTo)
+	}
 }
 
 // TestSyncAzureActivityLiveState_BlankTypeDoesNotClearStoredType verifies a
@@ -798,7 +833,7 @@ func TestSyncAzureActivityLiveState_BlankTypeDoesNotClearStoredType(t *testing.T
 		t.Fatal(err)
 	}
 
-	if err := s.SyncAzureActivityLiveState(ctx, a.WorkItemID, "Closed", ""); err != nil {
+	if err := s.SyncAzureActivityLiveState(ctx, a.WorkItemID, "Closed", "", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -824,7 +859,7 @@ func TestSyncAzureActivityLiveState_UnknownWorkItemIDIsNotAnError(t *testing.T) 
 	}
 	defer s.Close()
 
-	if err := s.SyncAzureActivityLiveState(context.Background(), 999999, "Active", "Task"); err != nil {
+	if err := s.SyncAzureActivityLiveState(context.Background(), 999999, "Active", "Task", "Jane Doe"); err != nil {
 		t.Fatalf("expected no error syncing an uncataloged work item id, got %v", err)
 	}
 }

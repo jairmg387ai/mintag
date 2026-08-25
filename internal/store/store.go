@@ -406,6 +406,16 @@ func (s *Store) migrateActivities() error {
 	if err := s.addColumnIfMissing("azure_activities", "last_known_state", "last_known_state TEXT"); err != nil {
 		return err
 	}
+	// last_known_assigned_to caches the Azure work item's assignee display
+	// name from the same states refresh as last_known_state above, so the
+	// portal can gate Close/Recreate to the assignee (see ensureAssignedToCaller
+	// in server/work_items.go) without requiring a fresh refresh on every
+	// load. Display name only — the enforcement itself always re-fetches the
+	// live assignee id from Azure at close/recreate time, this cached value
+	// is UI-only (button-disable hint), never the source of truth.
+	if err := s.addColumnIfMissing("azure_activities", "last_known_assigned_to", "last_known_assigned_to TEXT"); err != nil {
+		return err
+	}
 	// backfillCreatedAt for azure_activities runs after seedDefaultAzureActivity
 	// below (not here) — seeding inserts a row without created_at set, and
 	// running backfill before that insert would miss it for a full migrate()

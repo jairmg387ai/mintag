@@ -156,13 +156,13 @@ func (srv *Server) handleGetAzureWorkItemStates(w http.ResponseWriter, r *http.R
 		http.Error(w, sanitizePublicError(err), http.StatusBadGateway)
 		return
 	}
-	// Persist each item's live state/type into the local catalog so the
-	// portal has a "last known" value to show on load without requiring this
-	// manual refresh every time — see SyncAzureActivityLiveState's doc
+	// Persist each item's live state/type/assignee into the local catalog so
+	// the portal has a "last known" value to show on load without requiring
+	// this manual refresh every time — see SyncAzureActivityLiveState's doc
 	// comment. Best-effort: a write failure here must never turn an
 	// otherwise-successful Azure fetch into an error response.
 	for _, item := range items {
-		_ = srv.st.SyncAzureActivityLiveState(r.Context(), item.ID, item.State, item.Type)
+		_ = srv.st.SyncAzureActivityLiveState(r.Context(), item.ID, item.State, item.Type, item.AssignedToDisplayName)
 	}
 	writeJSON(w, map[string]any{"org": az.Config().Org, "team_project": az.Config().TeamProject, "items": items}, nil)
 }
@@ -176,6 +176,36 @@ func azureWorkItemID(w http.ResponseWriter, r *http.Request) (int, bool) {
 		return 0, false
 	}
 	return id, true
+}
+
+// ensureAssignedToCaller enforces that only the person a Task is assigned to
+// in Azure may Close or Recreate it. This is not redundant with Azure's own
+// permission model: tech leads register time against shared "transversal"
+// catalog entries (meetings, PTO, permits) that a whole team logs hours
+// against, and a dev may likewise be handed a TL-shared task for the same
+// reason — everyone with TimeLog access to the org can otherwise close
+// anyone's task through mintag. Compares full.AssignedToID (not the display
+// name, which is not guaranteed unique) against az.Config().UserID.
+//
+// A caller whose identity hasn't been resolved (UserID empty — see
+// FetchIdentity/SaveAzureIdentity) cannot be checked and is let through:
+// falling closed here would break every PAT-based setup that never
+// configured MINTAG_AZURE_USER_ID, for a check that's a UX guard rail against
+// mistaken clicks, not a security boundary — anyone with a valid credential
+// can call the Azure API directly regardless of what mintag enforces.
+func ensureAssignedToCaller(az *azure.Client, full *azure.WorkItemFull) error {
+	callerID := strings.TrimSpace(az.Config().UserID)
+	if callerID == "" {
+		return nil
+	}
+	if full.AssignedToID == callerID {
+		return nil
+	}
+	assignee := full.AssignedToDisplayName
+	if assignee == "" {
+		assignee = "no one (unassigned)"
+	}
+	return fmt.Errorf("work item %d is assigned to %s, not you — only the assignee can close or recreate it", full.ID, assignee)
 }
 
 // POST /api/activities/azure-work-items/{id}/close
@@ -213,6 +243,10 @@ func (srv *Server) handleCloseAzureWorkItem(w http.ResponseWriter, r *http.Reque
 	}
 	if full == nil {
 		http.Error(w, fmt.Sprintf("work item %d not found", id), http.StatusNotFound)
+		return
+	}
+	if err := ensureAssignedToCaller(az, full); err != nil {
+		http.Error(w, sanitizePublicError(err), http.StatusForbidden)
 		return
 	}
 
@@ -274,6 +308,10 @@ func (srv *Server) handleRecreateAzureWorkItem(w http.ResponseWriter, r *http.Re
 	}
 	if old == nil {
 		http.Error(w, fmt.Sprintf("work item %d not found", id), http.StatusNotFound)
+		return
+	}
+	if err := ensureAssignedToCaller(az, old); err != nil {
+		http.Error(w, sanitizePublicError(err), http.StatusForbidden)
 		return
 	}
 
