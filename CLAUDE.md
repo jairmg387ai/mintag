@@ -59,6 +59,30 @@ Environment variables:
 - `MINTAG_AZURE_TIMELOG_PAT` — Azure DevOps PAT used for TimeLog upload
 - `MINTAG_AZURE_TENANT`, `MINTAG_AZURE_CLIENT_ID`, `MINTAG_AZURE_SCOPE` — override the default Azure AD device-code OAuth app registration (see `internal/azure/oauth.go`)
 
+## Releases
+
+Releases are cut by pushing a semver git tag (`vX.Y.Z`) — see `.goreleaser.yaml` and `.github/workflows/release.yml`. GoReleaser auto-generates the GitHub release body from the raw git log (Conventional Commits), which is accurate but not readable on its own.
+
+**After the release workflow publishes**, prepend a short human-readable summary of what the release contains — written in Spanish — above the auto-generated changelog. Do not remove the changelog; it stays below the summary for traceability.
+
+```bash
+# fetch the auto-generated body GoReleaser already published
+existing=$(gh release view vX.Y.Z --json body -q .body)
+
+gh release edit vX.Y.Z --notes "$(cat <<EOF
+## Qué trae esta versión
+
+- <resumen de features/fixes en español, agrupados por tema>
+
+---
+
+$existing
+EOF
+)"
+```
+
+This summary is release documentation for humans, not a generated code artifact — write it in Spanish regardless of the artifact-language default elsewhere in this file.
+
 ## Frontend
 
 Located in `frontend/`. Built with Vite + React 19 + TypeScript + Tailwind v4.
