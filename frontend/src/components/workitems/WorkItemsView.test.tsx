@@ -23,9 +23,11 @@ vi.mock('../../api/client', () => ({
 }))
 
 const pushToast = vi.fn()
+const openModal = vi.fn()
+const setActiveBugEvidenceId = vi.fn()
 const useAppState = vi.fn(() => ({ azureConfig: null as { user_display_name?: string } | null }))
 vi.mock('../../store/AppContext', () => ({
-  useAppActions: () => ({ pushToast }),
+  useAppActions: () => ({ pushToast, openModal, setActiveBugEvidenceId }),
   useAppState: () => useAppState(),
 }))
 
@@ -51,6 +53,8 @@ const oneActivity = [
 describe('WorkItemsView', () => {
   beforeEach(() => {
     pushToast.mockReset()
+    openModal.mockReset()
+    setActiveBugEvidenceId.mockReset()
     vi.mocked(getActivityCatalog).mockReset()
     vi.mocked(listAzureActivities).mockReset()
     vi.mocked(fetchAzureWorkItemStates).mockReset()
@@ -134,6 +138,29 @@ describe('WorkItemsView', () => {
     expect(within(bugRow).queryByRole('button', { name: /recrear/i })).not.toBeInTheDocument()
     expect(within(taskRow).getByRole('button', { name: /cerrar/i })).toBeInTheDocument()
     expect(within(taskRow).getByRole('button', { name: /recrear/i })).toBeInTheDocument()
+  })
+
+  it('shows the "Evidencia DSW-PR-017" action only on Bug rows, opening the panel in the shared Modal', async () => {
+    vi.mocked(listAzureActivities).mockResolvedValue([
+      { ...oneActivity[0], id: 1, work_item_id: 101, work_item_type: 'Bug' },
+      { ...oneActivity[0], id: 2, work_item_id: 202, work_item_type: 'Task' },
+    ])
+    const user = userEvent.setup()
+
+    render(<WorkItemsView />)
+    await screen.findByText('101')
+
+    const rows = screen.getAllByRole('row')
+    const bugRow = rows.find(r => r.textContent?.includes('101'))!
+    const taskRow = rows.find(r => r.textContent?.includes('202'))!
+
+    expect(within(taskRow).queryByRole('button', { name: /evidencia dsw-pr-017/i })).not.toBeInTheDocument()
+    const evidenceButton = within(bugRow).getByRole('button', { name: /evidencia dsw-pr-017/i })
+
+    await user.click(evidenceButton)
+
+    expect(setActiveBugEvidenceId).toHaveBeenCalledWith(101)
+    expect(openModal).toHaveBeenCalledWith('bug-evidence')
   })
 
   it('closes a work item after confirmation and shows the synced hours', async () => {
