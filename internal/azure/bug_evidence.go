@@ -3,9 +3,11 @@ package azure
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // Field reference names for the DSW-PR-017 V2 bug-evidence fields. The two
@@ -212,6 +214,39 @@ func divergentFields(u BugEvidenceUpdate, got *BugEvidence) BugEvidenceUpdate {
 	return out
 }
 
+// bugEvidenceEnvelope is the wire shape of a work item response carrying the
+// bug-evidence fields this package cares about — shared by both a GET
+// $expand=all response (FetchBugEvidence) and a PATCH echo response
+// (PatchBugEvidence), so the JSON struct/decode logic exists in exactly one
+// place.
+type bugEvidenceEnvelope struct {
+	ID     int               `json:"id"`
+	Rev    int               `json:"rev"`
+	Fields bugEvidenceFields `json:"fields"`
+}
+
+// parseBugEvidenceResponse decodes a work item response body (GET or PATCH
+// echo) into a BugEvidence, folding the two TipoSolucion booleans via
+// tipoSolucionFromFlags.
+func parseBugEvidenceResponse(body []byte) (*BugEvidence, error) {
+	var parsed bugEvidenceEnvelope
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil, fmt.Errorf("azure: decode bug evidence response: %w", err)
+	}
+	return &BugEvidence{
+		ID:                    parsed.ID,
+		Rev:                   parsed.Rev,
+		State:                 parsed.Fields.State,
+		TeamProject:           parsed.Fields.TeamProject,
+		Title:                 parsed.Fields.Title,
+		Type:                  parsed.Fields.Type,
+		CausaRaiz:             parsed.Fields.CausaRaiz,
+		CausaRaizIdentificada: parsed.Fields.CausaRaizIdentificada,
+		SolucionDefinitiva:    parsed.Fields.SolucionDefinitiva,
+		TipoSolucion:          tipoSolucionFromFlags(parsed.Fields.Temporal, parsed.Fields.Definitiva),
+	}, nil
+}
+
 // FetchBugEvidence resolves the DSW-PR-017 V2 root-cause/solution evidence
 // fields for a single Bug work item by id, org-scoped (same id-uniqueness
 // rationale as FetchWorkItemFull). Unlike FetchWorkItemFull, this always
@@ -247,25 +282,116 @@ func (c *Client) FetchBugEvidence(ctx context.Context, id int) (*BugEvidence, er
 		return nil, fmt.Errorf("azure: Azure returned HTML/sign-in response; token may be expired or auth mode invalid")
 	}
 
-	var parsed struct {
-		ID     int               `json:"id"`
-		Rev    int               `json:"rev"`
-		Fields bugEvidenceFields `json:"fields"`
+	return parseBugEvidenceResponse(respBody)
+}
+
+// ErrRevConflict is returned by PatchBugEvidence when Azure rejects the
+// leading "/rev" test op — the work item changed since the caller last read
+// it (expectedRev is stale). No field write is applied when this happens;
+// Azure's json-patch test op rejects the entire op list atomically.
+//
+// ASSUMPTION (flagged as a risk, not verified against a real Bug work item):
+// Azure DevOps does not publicly document a stable, distinguishing error
+// code for a rejected json-patch "test" operation. This is detected via
+// isRevConflictResponse: an HTTP 400 whose body mentions both "rev" and a
+// mismatch/test-failure marker. If empirical testing against a real Bug
+// shows a different shape, isRevConflictResponse is the single place to
+// correct.
+var ErrRevConflict = errors.New("azure: bug evidence rev conflict — the work item changed since it was last read")
+
+// ErrInsufficientScope is returned by PatchBugEvidence when the write is
+// rejected as an auth/scope failure (401/403, or the HTML sign-in page
+// pattern) on a PATCH — as opposed to a generic transport error. Because
+// PatchBugEvidence is only ever called after a caller has already
+// successfully read the same Bug (to obtain expectedRev), this rejection is
+// necessarily write-specific, not a blanket credential failure.
+var ErrInsufficientScope = errors.New("azure: azure token lacks scope to write bug evidence fields")
+
+// isRevConflictResponse heuristically detects a rejected "/rev" test op in a
+// failed PATCH response body. See ErrRevConflict's doc comment for the
+// assumption this encodes.
+func isRevConflictResponse(statusCode int, body []byte) bool {
+	if statusCode != http.StatusBadRequest {
+		return false
 	}
-	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return nil, fmt.Errorf("azure: decode fetch bug evidence response: %w", err)
+	lower := strings.ToLower(string(body))
+	if !strings.Contains(lower, "rev") {
+		return false
+	}
+	return strings.Contains(lower, "does not match") ||
+		strings.Contains(lower, "test operation") ||
+		strings.Contains(lower, "testfailed")
+}
+
+// classifyBugEvidencePatchError maps a failed patchWorkItemWithResponse call
+// to ErrRevConflict or ErrInsufficientScope when the failure's status/body
+// matches one of those known shapes, or returns err unchanged (wrapped
+// transport/marshal errors, or a generic non-2xx status) otherwise.
+func classifyBugEvidencePatchError(err error) error {
+	var statusErr *patchStatusError
+	if !errors.As(err, &statusErr) {
+		return err
+	}
+	if isRevConflictResponse(statusErr.StatusCode, statusErr.Body) {
+		return ErrRevConflict
+	}
+	if statusErr.IsHTML || statusErr.StatusCode == http.StatusUnauthorized || statusErr.StatusCode == http.StatusForbidden {
+		return ErrInsufficientScope
+	}
+	return err
+}
+
+// PatchBugEvidence writes the dirty fields in u to Bug id, guarded by an
+// optimistic-concurrency test against expectedRev (see buildBugEvidenceOps).
+// After the PATCH, it parses Azure's echoed fields and compares them against
+// what was submitted (divergentFields): if everything matches, it returns
+// immediately with reaffirmed=false. If some subset diverged — a documented
+// Azure workflow side effect on some fields — it issues a second PATCH
+// containing ONLY that divergent subset (no test/rev op: rev already
+// advanced from the first PATCH, so there is no stable value left to test
+// against) and returns reaffirmed=true on success. If the field is STILL
+// divergent after that second PATCH, this is a hard error — a caller must
+// never treat it as success, and no third PATCH is attempted.
+func (c *Client) PatchBugEvidence(ctx context.Context, id, expectedRev int, u BugEvidenceUpdate) (*BugEvidence, bool, error) {
+	if !c.Enabled() {
+		return nil, false, fmt.Errorf("Azure TimeLog token is not configured")
 	}
 
-	return &BugEvidence{
-		ID:                    parsed.ID,
-		Rev:                   parsed.Rev,
-		State:                 parsed.Fields.State,
-		TeamProject:           parsed.Fields.TeamProject,
-		Title:                 parsed.Fields.Title,
-		Type:                  parsed.Fields.Type,
-		CausaRaiz:             parsed.Fields.CausaRaiz,
-		CausaRaizIdentificada: parsed.Fields.CausaRaizIdentificada,
-		SolucionDefinitiva:    parsed.Fields.SolucionDefinitiva,
-		TipoSolucion:          tipoSolucionFromFlags(parsed.Fields.Temporal, parsed.Fields.Definitiva),
-	}, nil
+	ops, err := buildBugEvidenceOps(expectedRev, u)
+	if err != nil {
+		return nil, false, err
+	}
+
+	body, err := c.patchWorkItemWithResponse(ctx, c.cfg.TeamProject, id, ops)
+	if err != nil {
+		return nil, false, classifyBugEvidencePatchError(err)
+	}
+
+	got, err := parseBugEvidenceResponse(body)
+	if err != nil {
+		return nil, false, err
+	}
+
+	divergent := divergentFields(u, got)
+	if isEmptyBugEvidenceUpdate(divergent) {
+		return got, false, nil
+	}
+
+	reaffirmOps := bugEvidenceFieldOps(divergent)
+	reaffirmBody, err := c.patchWorkItemWithResponse(ctx, c.cfg.TeamProject, id, reaffirmOps)
+	if err != nil {
+		return nil, false, classifyBugEvidencePatchError(err)
+	}
+
+	reaffirmed, err := parseBugEvidenceResponse(reaffirmBody)
+	if err != nil {
+		return nil, false, err
+	}
+
+	stillDivergent := divergentFields(divergent, reaffirmed)
+	if !isEmptyBugEvidenceUpdate(stillDivergent) {
+		return nil, false, fmt.Errorf("azure: bug evidence still divergent after reaffirm PATCH for work item %d", id)
+	}
+
+	return reaffirmed, true, nil
 }
