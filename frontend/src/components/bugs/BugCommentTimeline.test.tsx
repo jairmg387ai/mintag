@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { listBugComments, addBugComment } from '../../api/client'
@@ -57,13 +57,21 @@ describe('BugCommentTimeline', () => {
 
     render(<Harness bugId={170277} />)
 
-    await vi.waitFor(() => expect(screen.getByText('Primer comentario')).toBeInTheDocument())
+    // Fake timers make RTL's own waitFor/findBy* hang (their internal polling
+    // uses the same faked setTimeout) — flush the initial fetch's
+    // microtasks directly instead.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(screen.getByText('Primer comentario')).toBeInTheDocument()
     expect(screen.getByTestId('conflict-modal-open')).toBeInTheDocument()
     expect(screen.getByTestId('draft-touch-count')).toHaveTextContent('0')
 
-    await vi.advanceTimersByTimeAsync(30000)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30000)
+    })
 
-    expect(await vi.waitFor(() => screen.getByText('Comentario nuevo llegado por poll'))).toBeInTheDocument()
+    expect(screen.getByText('Comentario nuevo llegado por poll')).toBeInTheDocument()
     // The sibling state the poll must never touch stays exactly as it was.
     expect(screen.getByTestId('conflict-modal-open')).toBeInTheDocument()
     expect(screen.getByTestId('draft-touch-count')).toHaveTextContent('0')
@@ -112,5 +120,15 @@ describe('BugCommentTimeline', () => {
     expect(screen.getByRole('button', { name: /enviar/i })).toBeDisabled()
     await user.click(screen.getByRole('button', { name: /enviar/i }))
     expect(addBugComment).not.toHaveBeenCalled()
+  })
+
+  it('hides the composer entirely (no textbox, no button) when editable=false, while still showing comments', async () => {
+    vi.mocked(listBugComments).mockResolvedValue([buildComment({ text: 'Solo lectura' })])
+
+    render(<BugCommentTimeline bugId={170277} editable={false} />)
+
+    await screen.findByText('Solo lectura')
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /enviar/i })).not.toBeInTheDocument()
   })
 })

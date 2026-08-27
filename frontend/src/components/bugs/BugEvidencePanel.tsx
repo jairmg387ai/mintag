@@ -4,6 +4,7 @@ import type { BugEvidence, BugEvidenceFields, TipoSolucion } from '../../types'
 import { SafeHtml } from '../shared/SafeHtml'
 import { Button } from '../ui/Button'
 import { TIPO_SOLUCION_LABELS, buildBugEvidenceUpdate, canSetCausaRaizIdentificada } from './bugEvidence'
+import { BugCommentTimeline } from './BugCommentTimeline'
 import { BugConflictModal } from './BugConflictModal'
 import { RichTextField, type RichTextFieldHandle } from './RichTextField'
 import { TipoSolucionRadio } from './TipoSolucionRadio'
@@ -199,6 +200,8 @@ export function BugEvidencePanel({ bugId }: BugEvidencePanelProps) {
           <div className="label" style={{ marginBottom: 6 }}>Tipo de solución</div>
           <div style={{ color: 'var(--fg2)' }}>{TIPO_SOLUCION_LABELS[evidence.fields.tipo_solucion]}</div>
         </div>
+
+        <BugCommentTimeline bugId={evidence.id} editable={false} />
       </div>
     )
   }
@@ -248,6 +251,8 @@ export function BugEvidencePanel({ bugId }: BugEvidencePanelProps) {
           {saving ? 'Guardando...' : 'Guardar'}
         </Button>
       </div>
+
+      <BugCommentTimeline bugId={evidence.id} editable={evidence.editable} />
 
       {conflict && (
         <BugConflictModal
