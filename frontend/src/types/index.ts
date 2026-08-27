@@ -360,3 +360,53 @@ export interface Toast {
   message: string
   isError: boolean
 }
+
+// --- Azure Bug Evidence (DSW-PR-017 V2) ---
+
+// Mirrors azure.TipoSolucion (Go): '' means no tipo registered yet. One
+// control value, never two independent booleans — see bugEvidence.ts.
+export type TipoSolucion = 'temporal' | 'definitiva' | ''
+
+export interface BugEvidenceFields {
+  causa_raiz: string
+  causa_raiz_identificada: boolean
+  solucion_definitiva: string
+  tipo_solucion: TipoSolucion
+}
+
+// GET /api/azure/bugs/{id}/evidence response shape (see internal/server/bug_evidence.go).
+export interface BugEvidence {
+  id: number
+  rev: number
+  state: string
+  team_project: string
+  title: string
+  editable: boolean
+  fields: BugEvidenceFields
+}
+
+// PATCH /api/azure/bugs/{id}/evidence request body's "fields" — dirty-only,
+// mirrors azure.BugEvidenceUpdate exactly. An omitted key means "untouched",
+// never sent to Azure (JSON.stringify already drops undefined keys).
+export interface BugEvidenceUpdate {
+  causa_raiz?: string
+  causa_raiz_identificada?: boolean
+  solucion_definitiva?: string
+  tipo_solucion?: TipoSolucion
+}
+
+// PATCH /api/azure/bugs/{id}/evidence success response.
+export interface BugEvidencePatchResponse {
+  rev: number
+  fields: BugEvidenceFields
+  reaffirmed: boolean
+}
+
+// One row of the Bug's Azure comment timeline (PR5 renders this; the type is
+// defined now per C1 scope).
+export interface BugComment {
+  id: number
+  text: string
+  created_by: string
+  created_date: string
+}
