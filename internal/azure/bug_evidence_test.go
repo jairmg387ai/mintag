@@ -2,6 +2,9 @@ package azure
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -325,4 +328,218 @@ func TestDivergentFields(t *testing.T) {
 			t.Errorf("expected no fields flagged when nothing was submitted, got %+v", diff)
 		}
 	})
+}
+
+// bugEvidenceEchoJSON builds a $expand=all-shaped PATCH-echo response body
+// for the given field values, matching the wire shape bugEvidenceFields
+// expects.
+func bugEvidenceEchoJSON(id, rev int, causaRaiz string, identificada bool, solucion string, temporal, definitiva bool) string {
+	return `{
+		"id": ` + itoa(id) + `,
+		"rev": ` + itoa(rev) + `,
+		"fields": {
+			"System.State": "Activo",
+			"System.TeamProject": "RUNTPRO",
+			"System.Title": "Bug de ejemplo",
+			"System.WorkItemType": "Bug",
+			"Microsoft.VSTS.CMMI.ProposedFix": ` + jsonStr(causaRaiz) + `,
+			"Custom.832c1387-0208-47b9-bd6d-500d3a7b8019": ` + boolJSON(identificada) + `,
+			"Custom.818d41f3-03fe-4c91-9d6a-eeedb596ffb7": ` + jsonStr(solucion) + `,
+			"Custom.Temporal": ` + boolJSON(temporal) + `,
+			"Custom.Definitiva": ` + boolJSON(definitiva) + `
+		}
+	}`
+}
+
+func itoa(n int) string {
+	b, _ := json.Marshal(n)
+	return string(b)
+}
+
+func jsonStr(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
+func TestPatchBugEvidence_ResponseEchoesAll_SinglePatchNoReaffirm(t *testing.T) {
+	var patchCount int
+	var lastOps []patchOp
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		patchCount++
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &lastOps); err != nil {
+			t.Fatalf("unmarshal request ops: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(bugEvidenceEchoJSON(4242, 8, "root cause text", true, "fix text", false, true))) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", TeamProject: "PROJ"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+
+	causaRaiz := "root cause text"
+	identificada := true
+	solucion := "fix text"
+	tipo := TipoSolucionDefinitiva
+	ev, reaffirmed, err := c.PatchBugEvidence(context.Background(), 4242, 7, BugEvidenceUpdate{
+		CausaRaiz:             &causaRaiz,
+		CausaRaizIdentificada: &identificada,
+		SolucionDefinitiva:    &solucion,
+		TipoSolucion:          &tipo,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if reaffirmed {
+		t.Error("expected reaffirmed=false when the response echoes all submitted values")
+	}
+	if patchCount != 1 {
+		t.Fatalf("expected exactly 1 PATCH request, got %d", patchCount)
+	}
+	if ev.CausaRaiz != causaRaiz || !ev.CausaRaizIdentificada || ev.SolucionDefinitiva != solucion || ev.TipoSolucion != TipoSolucionDefinitiva {
+		t.Errorf("expected parsed evidence to reflect the echoed response, got %+v", ev)
+	}
+	values := opValues(lastOps)
+	if got := values["/rev"]; got != float64(7) {
+		t.Errorf("expected op[0] test /rev=7, got %v", got)
+	}
+}
+
+func TestPatchBugEvidence_ResponseDivergesOneField_SecondPatchOnlyThatField(t *testing.T) {
+	var patches [][]patchOp
+	call := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		call++
+		body, _ := io.ReadAll(r.Body)
+		var ops []patchOp
+		if err := json.Unmarshal(body, &ops); err != nil {
+			t.Fatalf("unmarshal request ops: %v", err)
+		}
+		patches = append(patches, ops)
+		w.WriteHeader(http.StatusOK)
+		if call == 1 {
+			// First PATCH echoes a DIFFERENT CausaRaiz than what was submitted
+			// (a workflow side effect); every other field matches.
+			w.Write([]byte(bugEvidenceEchoJSON(4242, 8, "STALE root cause", true, "fix text", false, true))) //nolint:errcheck
+			return
+		}
+		// Second (reaffirm) PATCH echoes the corrected value.
+		w.Write([]byte(bugEvidenceEchoJSON(4242, 9, "root cause text", true, "fix text", false, true))) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", TeamProject: "PROJ"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+
+	causaRaiz := "root cause text"
+	identificada := true
+	solucion := "fix text"
+	tipo := TipoSolucionDefinitiva
+	ev, reaffirmed, err := c.PatchBugEvidence(context.Background(), 4242, 7, BugEvidenceUpdate{
+		CausaRaiz:             &causaRaiz,
+		CausaRaizIdentificada: &identificada,
+		SolucionDefinitiva:    &solucion,
+		TipoSolucion:          &tipo,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !reaffirmed {
+		t.Error("expected reaffirmed=true when a field diverged and needed a second PATCH")
+	}
+	if len(patches) != 2 {
+		t.Fatalf("expected exactly 2 PATCH requests, got %d", len(patches))
+	}
+	secondValues := opValues(patches[1])
+	if _, ok := secondValues["/rev"]; ok {
+		t.Error("expected the second PATCH to NOT include the test/rev op (rev already advanced)")
+	}
+	if len(secondValues) != 1 {
+		t.Fatalf("expected the second PATCH to contain exactly 1 op (only the divergent field), got %d: %+v", len(secondValues), secondValues)
+	}
+	if got := secondValues["/fields/"+FieldCausaRaiz]; got != causaRaiz {
+		t.Errorf("expected the second PATCH to re-affirm only CausaRaiz=%q, got %v", causaRaiz, got)
+	}
+	if ev.CausaRaiz != causaRaiz {
+		t.Errorf("expected the final evidence to reflect the reaffirmed value, got %q", ev.CausaRaiz)
+	}
+}
+
+func TestPatchBugEvidence_StillDivergentAfterSecondPatch_HardError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		// Every PATCH (first and reaffirm) echoes a value different from what
+		// was submitted — the field never actually takes.
+		w.Write([]byte(bugEvidenceEchoJSON(4242, 8, "STILL WRONG root cause", false, "", false, false))) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", TeamProject: "PROJ"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+
+	causaRaiz := "root cause text"
+	ev, reaffirmed, err := c.PatchBugEvidence(context.Background(), 4242, 7, BugEvidenceUpdate{CausaRaiz: &causaRaiz})
+	if err == nil {
+		t.Fatal("expected a hard error when the field is still divergent after the reaffirm PATCH")
+	}
+	if ev != nil {
+		t.Errorf("expected nil evidence on hard error (never report success), got %+v", ev)
+	}
+	if reaffirmed {
+		t.Error("expected reaffirmed=false on hard error")
+	}
+}
+
+func TestPatchBugEvidence_RevConflict_ReturnsErrRevConflictWithNoFollowupPatch(t *testing.T) {
+	var patchCount int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		patchCount++
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"message":"The rev value 7 does not match the current value 9; test operation failed."}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", TeamProject: "PROJ"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+
+	causaRaiz := "root cause text"
+	_, _, err := c.PatchBugEvidence(context.Background(), 4242, 7, BugEvidenceUpdate{CausaRaiz: &causaRaiz})
+	if !errors.Is(err, ErrRevConflict) {
+		t.Fatalf("expected ErrRevConflict, got %v", err)
+	}
+	// Exactly one PATCH attempt reached the server: a rejected /rev test op
+	// means Azure rejects the whole op list atomically (no partial field
+	// writes), and this client must not retry or attempt any corrective
+	// follow-up PATCH after a rev conflict.
+	if patchCount != 1 {
+		t.Fatalf("expected exactly 1 PATCH attempt (no follow-up write after a rev conflict), got %d", patchCount)
+	}
+}
+
+func TestPatchBugEvidence_PatchForbidden_ReturnsErrInsufficientScope(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"message":"not authorized"}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", TeamProject: "PROJ"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+
+	causaRaiz := "root cause text"
+	_, _, err := c.PatchBugEvidence(context.Background(), 4242, 7, BugEvidenceUpdate{CausaRaiz: &causaRaiz})
+	if !errors.Is(err, ErrInsufficientScope) {
+		t.Fatalf("expected ErrInsufficientScope, got %v", err)
+	}
 }
