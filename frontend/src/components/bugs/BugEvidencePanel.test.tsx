@@ -1,12 +1,17 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
-import { fetchBugEvidence, patchBugEvidence } from '../../api/client'
+import { fetchBugEvidence, patchBugEvidence, listBugComments, addBugComment } from '../../api/client'
 import type { BugEvidence } from '../../types'
 import { BugEvidencePanel } from './BugEvidencePanel'
 
 vi.mock('../../api/client', () => ({
   fetchBugEvidence: vi.fn(),
   patchBugEvidence: vi.fn(),
+  // BugEvidencePanel renders BugCommentTimeline (C12), which calls these —
+  // mocked here so this file's tests (which only exercise the evidence
+  // fields) don't depend on the comment timeline's own behavior.
+  listBugComments: vi.fn(),
+  addBugComment: vi.fn(),
 }))
 
 function buildEvidence(overrides: Partial<BugEvidence> = {}): BugEvidence {
@@ -31,6 +36,8 @@ describe('BugEvidencePanel', () => {
   beforeEach(() => {
     vi.mocked(fetchBugEvidence).mockReset()
     vi.mocked(patchBugEvidence).mockReset()
+    vi.mocked(listBugComments).mockReset().mockResolvedValue([])
+    vi.mocked(addBugComment).mockReset()
   })
 
   it('renders read-only when the bug is not editable (no editable inputs in the DOM)', async () => {

@@ -49,7 +49,7 @@ function isClosedAzureState(state: string | undefined): boolean {
 // to own a second, overlapping "Work items de Azure" tab for the same
 // catalog — that tab was removed so this table is the only place left.
 export function WorkItemsView() {
-  const { pushToast } = useAppActions()
+  const { pushToast, openModal, setActiveBugEvidenceId } = useAppActions()
   const { azureConfig } = useAppState()
   const [modalOpen, setModalOpen] = useState(false)
   const [lastResult, setLastResult] = useState<CreatedWorkItemResponse | null>(null)
@@ -687,6 +687,7 @@ export function WorkItemsView() {
                           // coworker reference implementation's isBug exclusion;
                           // Bugs have no such action here either.
                           const isTask = a.work_item_type === 'Task'
+                          const isBug = a.work_item_type === 'Bug'
                           const closedAlready = isClosedAzureState(knownState(a))
                           const busy = !!rowBusy[a.work_item_id]
                           const isEditing = editingId === a.id
@@ -915,6 +916,17 @@ export function WorkItemsView() {
                                       Recrear
                                     </button>
                                   </div>
+                                ) : isBug ? (
+                                  <button
+                                    className="btn btn-ghost btn-sm"
+                                    disabled={isEditing}
+                                    onClick={() => {
+                                      setActiveBugEvidenceId(a.work_item_id)
+                                      openModal('bug-evidence')
+                                    }}
+                                  >
+                                    Evidencia DSW-PR-017
+                                  </button>
                                 ) : (
                                   <span style={{ color: 'var(--fg3)' }}>—</span>
                                 )}

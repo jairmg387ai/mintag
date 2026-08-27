@@ -5,6 +5,8 @@ import {
   isBugEvidenceEditableState,
   buildBugEvidenceUpdate,
   canSetCausaRaizIdentificada,
+  divergentBugEvidenceFields,
+  resolveConflict,
 } from './bugEvidence'
 
 function buildFields(overrides: Partial<BugEvidenceFields> = {}): BugEvidenceFields {
@@ -117,5 +119,86 @@ describe('canSetCausaRaizIdentificada', () => {
 
   it('returns true once causa raiz has non-empty content', () => {
     expect(canSetCausaRaizIdentificada('Root cause found in logs')).toBe(true)
+  })
+})
+
+describe('divergentBugEvidenceFields', () => {
+  it('returns an empty list when draft and remote match exactly', () => {
+    const fields = buildFields({ causa_raiz: 'same', solucion_definitiva: 'same fix' })
+
+    expect(divergentBugEvidenceFields(fields, buildFields({ causa_raiz: 'same', solucion_definitiva: 'same fix' }))).toEqual([])
+  })
+
+  it('returns only the field keys that actually differ (not all four unconditionally)', () => {
+    const draft = buildFields({ causa_raiz: 'mine', solucion_definitiva: 'shared fix' })
+    const remote = buildFields({ causa_raiz: 'azure', solucion_definitiva: 'shared fix' })
+
+    expect(divergentBugEvidenceFields(draft, remote)).toEqual(['causa_raiz'])
+  })
+
+  it('treats tipo_solucion as ONE atomic divergent key, never splitting it into two booleans', () => {
+    const draft = buildFields({ tipo_solucion: 'temporal' })
+    const remote = buildFields({ tipo_solucion: 'definitiva' })
+
+    expect(divergentBugEvidenceFields(draft, remote)).toEqual(['tipo_solucion'])
+  })
+
+  it('detects divergence on causa_raiz_identificada', () => {
+    const draft = buildFields({ causa_raiz_identificada: true })
+    const remote = buildFields({ causa_raiz_identificada: false })
+
+    expect(divergentBugEvidenceFields(draft, remote)).toEqual(['causa_raiz_identificada'])
+  })
+
+  it('can return all four keys when everything diverges', () => {
+    const draft = buildFields({ causa_raiz: 'a', causa_raiz_identificada: true, solucion_definitiva: 'b', tipo_solucion: 'temporal' })
+    const remote = buildFields({ causa_raiz: 'x', causa_raiz_identificada: false, solucion_definitiva: 'y', tipo_solucion: 'definitiva' })
+
+    expect(divergentBugEvidenceFields(draft, remote)).toEqual([
+      'causa_raiz',
+      'causa_raiz_identificada',
+      'solucion_definitiva',
+      'tipo_solucion',
+    ])
+  })
+})
+
+describe('resolveConflict', () => {
+  it('keeps every field from the draft (mine) when no choice is specified', () => {
+    const draft = buildFields({ causa_raiz: 'mine', solucion_definitiva: 'my fix' })
+    const remote = buildFields({ causa_raiz: 'azure', solucion_definitiva: 'azure fix' })
+
+    expect(resolveConflict(draft, remote, {})).toEqual(draft)
+  })
+
+  it('takes the remote (Azure) value only for fields explicitly chosen "azure"', () => {
+    const draft = buildFields({ causa_raiz: 'mine', solucion_definitiva: 'my fix' })
+    const remote = buildFields({ causa_raiz: 'azure', solucion_definitiva: 'azure fix' })
+
+    const resolved = resolveConflict(draft, remote, { causa_raiz: 'azure' })
+
+    expect(resolved).toEqual({ ...draft, causa_raiz: 'azure' })
+  })
+
+  it('resolves tipo_solucion as one atomic unit — never a mixed result', () => {
+    const draft = buildFields({ tipo_solucion: 'temporal' })
+    const remote = buildFields({ tipo_solucion: 'definitiva' })
+
+    expect(resolveConflict(draft, remote, { tipo_solucion: 'azure' }).tipo_solucion).toBe('definitiva')
+    expect(resolveConflict(draft, remote, {}).tipo_solucion).toBe('temporal')
+  })
+
+  it('can resolve every field to azure at once', () => {
+    const draft = buildFields({ causa_raiz: 'mine', causa_raiz_identificada: true, solucion_definitiva: 'my fix', tipo_solucion: 'temporal' })
+    const remote = buildFields({ causa_raiz: 'azure', causa_raiz_identificada: false, solucion_definitiva: 'azure fix', tipo_solucion: 'definitiva' })
+
+    const resolved = resolveConflict(draft, remote, {
+      causa_raiz: 'azure',
+      causa_raiz_identificada: 'azure',
+      solucion_definitiva: 'azure',
+      tipo_solucion: 'azure',
+    })
+
+    expect(resolved).toEqual(remote)
   })
 })

@@ -353,7 +353,7 @@ export interface ActivityValidationSettings {
   block_closed_work_item: boolean
 }
 export type TaskViewName = 'list' | 'kanban'
-export type ModalName = 'task' | 'new-task' | 'import' | 'new-project' | 'meeting' | null
+export type ModalName = 'task' | 'new-task' | 'import' | 'new-project' | 'meeting' | 'bug-evidence' | null
 
 export interface Toast {
   id: number

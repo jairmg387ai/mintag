@@ -3,15 +3,11 @@ import { fetchBugEvidence, patchBugEvidence, BugEvidenceApiError } from '../../a
 import type { BugEvidence, BugEvidenceFields, TipoSolucion } from '../../types'
 import { SafeHtml } from '../shared/SafeHtml'
 import { Button } from '../ui/Button'
-import { buildBugEvidenceUpdate, canSetCausaRaizIdentificada } from './bugEvidence'
+import { TIPO_SOLUCION_LABELS, buildBugEvidenceUpdate, canSetCausaRaizIdentificada } from './bugEvidence'
+import { BugCommentTimeline } from './BugCommentTimeline'
+import { BugConflictModal } from './BugConflictModal'
 import { RichTextField, type RichTextFieldHandle } from './RichTextField'
 import { TipoSolucionRadio } from './TipoSolucionRadio'
-
-const TIPO_SOLUCION_LABELS: Record<TipoSolucion, string> = {
-  '': 'Sin definir',
-  temporal: 'Temporal',
-  definitiva: 'Definitiva',
-}
 
 interface BugEvidencePanelProps {
   bugId: number
@@ -31,6 +27,11 @@ export function BugEvidencePanel({ bugId }: BugEvidencePanelProps) {
   const [loadError, setLoadError] = useState('')
   const [saveError, setSaveError] = useState('')
   const [saving, setSaving] = useState(false)
+  // Non-null exactly while a rev_conflict is being resolved. Holds the
+  // draft that failed to save plus the freshly re-fetched remote evidence
+  // (new rev) — see handleSave's rev_conflict branch and
+  // handleResolveConflict below.
+  const [conflict, setConflict] = useState<{ draft: BugEvidenceFields; remote: BugEvidence } | null>(null)
 
   // Controlled draft state for the two non-rich-text controls. The two
   // rich-text fields (causa_raiz, solucion_definitiva) are intentionally
@@ -71,6 +72,22 @@ export function BugEvidencePanel({ bugId }: BugEvidencePanelProps) {
     }
   }, [bugId])
 
+  // classifySaveError maps a rejected patchBugEvidence call to the message
+  // shown in saveError. rev_conflict is deliberately NOT handled here — its
+  // caller opens BugConflictModal instead of setting a static message.
+  function classifySaveError(e: unknown): string {
+    if (e instanceof BugEvidenceApiError && e.code === 'root_cause_required') {
+      return 'No se puede marcar "Causa raíz identificada" sin registrar la causa raíz.'
+    }
+    if (e instanceof BugEvidenceApiError && e.code === 'insufficient_scope') {
+      return 'Las credenciales configuradas no tienen permiso para escribir en este bug.'
+    }
+    if (e instanceof BugEvidenceApiError && e.code === 'state_not_editable') {
+      return 'El bug cambió de estado y ya no admite edición.'
+    }
+    return e instanceof Error ? e.message : 'No se pudo guardar la evidencia.'
+  }
+
   async function handleSave() {
     if (!evidence) return
     const draft: BugEvidenceFields = {
@@ -102,19 +119,53 @@ export function BugEvidencePanel({ bugId }: BugEvidencePanelProps) {
       setCausaRaizText(result.fields.causa_raiz)
     } catch (e: unknown) {
       if (e instanceof BugEvidenceApiError && e.code === 'rev_conflict') {
-        // Intentional stub for this PR: a real per-field keep-mine/take-Azure
-        // resolution (BugConflictModal) is PR5 scope — that component
-        // doesn't exist yet. No field is overwritten; the user must reload.
-        setSaveError('Alguien más modificó este bug en Azure DevOps. Recarga el panel antes de volver a guardar.')
-      } else if (e instanceof BugEvidenceApiError && e.code === 'root_cause_required') {
-        setSaveError('No se puede marcar "Causa raíz identificada" sin registrar la causa raíz.')
-      } else if (e instanceof BugEvidenceApiError && e.code === 'insufficient_scope') {
-        setSaveError('Las credenciales configuradas no tienen permiso para escribir en este bug.')
-      } else if (e instanceof BugEvidenceApiError && e.code === 'state_not_editable') {
-        setSaveError('El bug cambió de estado y ya no admite edición.')
+        // Re-GET the Bug (builds the fresh remote snapshot the modal diffs
+        // against) and open BugConflictModal instead of silently overwriting
+        // or blocking the user with a plain error.
+        try {
+          const remote = await fetchBugEvidence(evidence.id)
+          setConflict({ draft, remote })
+        } catch (fetchErr: unknown) {
+          setSaveError(fetchErr instanceof Error ? fetchErr.message : 'No se pudo cargar la evidencia actual de Azure DevOps.')
+        }
       } else {
-        setSaveError(e instanceof Error ? e.message : 'No se pudo guardar la evidencia.')
+        setSaveError(classifySaveError(e))
       }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // handleResolveConflict retries the save with the conflict's remote rev
+  // (the caller-side retry the design calls for). If it hits another
+  // rev_conflict, it is reported as a plain error rather than reopening the
+  // modal a second time — a second consecutive conflict is out of this PR's
+  // scope.
+  async function handleResolveConflict(resolved: BugEvidenceFields) {
+    if (!conflict) return
+    const { remote } = conflict
+    setConflict(null)
+
+    const update = buildBugEvidenceUpdate(remote.fields, resolved)
+    if (Object.keys(update).length === 0) {
+      setEvidence(remote)
+      setCausaRaizIdentificada(remote.fields.causa_raiz_identificada)
+      setTipoSolucion(remote.fields.tipo_solucion)
+      setCausaRaizText(remote.fields.causa_raiz)
+      return
+    }
+
+    setSaving(true)
+    setSaveError('')
+    try {
+      const result = await patchBugEvidence(remote.id, remote.rev, update)
+      const nextEvidence = { ...remote, rev: result.rev, fields: result.fields }
+      setEvidence(nextEvidence)
+      setCausaRaizIdentificada(result.fields.causa_raiz_identificada)
+      setTipoSolucion(result.fields.tipo_solucion)
+      setCausaRaizText(result.fields.causa_raiz)
+    } catch (e: unknown) {
+      setSaveError(classifySaveError(e))
     } finally {
       setSaving(false)
     }
@@ -149,6 +200,8 @@ export function BugEvidencePanel({ bugId }: BugEvidencePanelProps) {
           <div className="label" style={{ marginBottom: 6 }}>Tipo de solución</div>
           <div style={{ color: 'var(--fg2)' }}>{TIPO_SOLUCION_LABELS[evidence.fields.tipo_solucion]}</div>
         </div>
+
+        <BugCommentTimeline bugId={evidence.id} editable={false} />
       </div>
     )
   }
@@ -198,6 +251,17 @@ export function BugEvidencePanel({ bugId }: BugEvidencePanelProps) {
           {saving ? 'Guardando...' : 'Guardar'}
         </Button>
       </div>
+
+      <BugCommentTimeline bugId={evidence.id} editable={evidence.editable} />
+
+      {conflict && (
+        <BugConflictModal
+          draft={conflict.draft}
+          remote={conflict.remote}
+          onResolve={handleResolveConflict}
+          onCancel={() => setConflict(null)}
+        />
+      )}
     </div>
   )
 }
