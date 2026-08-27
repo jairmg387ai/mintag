@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
-import DOMPurify from 'dompurify'
 import 'highlight.js/styles/github-dark.css'
 import { useAppState, useAppActions } from '../../store/AppContext'
 import { Modal } from './Modal'
@@ -10,6 +9,7 @@ import { Button } from '../ui/Button'
 import { StatusBadge } from '../shared/StatusBadge'
 import { PriorityTag } from '../shared/PriorityTag'
 import { Avatar } from '../shared/Avatar'
+import { SafeHtml } from '../shared/SafeHtml'
 import { Pencil } from 'lucide-react'
 import { getMeeting, updateMeetingSummary } from '../../api/client'
 import type { Meeting, Task, Status, Priority } from '../../types'
@@ -302,15 +302,6 @@ export function MeetingDetailModal() {
         </div>
       )}
     </Modal>
-  )
-}
-
-function SafeHtml({ html }: { html: string }) {
-  return (
-    <div
-      style={{ font: 'var(--text-body)', lineHeight: 1.7, color: 'var(--fg2)' }}
-      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }}
-    />
   )
 }
 
