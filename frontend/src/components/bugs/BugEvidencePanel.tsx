@@ -1,0 +1,185 @@
+import { useEffect, useRef, useState } from 'react'
+import { fetchBugEvidence, patchBugEvidence, BugEvidenceApiError } from '../../api/client'
+import type { BugEvidence, BugEvidenceFields, TipoSolucion } from '../../types'
+import { SafeHtml } from '../shared/SafeHtml'
+import { Button } from '../ui/Button'
+import { buildBugEvidenceUpdate } from './bugEvidence'
+import { RichTextField, type RichTextFieldHandle } from './RichTextField'
+import { TipoSolucionRadio } from './TipoSolucionRadio'
+
+const TIPO_SOLUCION_LABELS: Record<TipoSolucion, string> = {
+  '': 'Sin definir',
+  temporal: 'Temporal',
+  definitiva: 'Definitiva',
+}
+
+interface BugEvidencePanelProps {
+  bugId: number
+}
+
+// BugEvidencePanel is the DSW-PR-017 V2 evidence container for a single
+// Azure Bug work item. It trusts the GET response's server-computed
+// `editable` boolean directly (rather than re-deriving it from
+// EDITABLE_STATES client-side) to decide read-only vs editable rendering —
+// the server already re-checks state on every write, so this is simply the
+// UX reflection of that same boundary. Not wrapped in this project's Modal
+// component here: PR5's WorkItemsView (C14) is the entry point that opens
+// this panel inside a Modal.
+export function BugEvidencePanel({ bugId }: BugEvidencePanelProps) {
+  const [evidence, setEvidence] = useState<BugEvidence | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [saveError, setSaveError] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  // Controlled draft state for the two non-rich-text controls. The two
+  // rich-text fields (causa_raiz, solucion_definitiva) are intentionally
+  // uncontrolled — see RichTextField's doc comment — and are only read
+  // through refs at save time.
+  const [causaRaizIdentificada, setCausaRaizIdentificada] = useState(false)
+  const [tipoSolucion, setTipoSolucion] = useState<TipoSolucion>('')
+
+  const causaRaizRef = useRef<RichTextFieldHandle>(null)
+  const solucionDefinitivaRef = useRef<RichTextFieldHandle>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setLoadError('')
+    fetchBugEvidence(bugId)
+      .then(ev => {
+        if (cancelled) return
+        setEvidence(ev)
+        setCausaRaizIdentificada(ev.fields.causa_raiz_identificada)
+        setTipoSolucion(ev.fields.tipo_solucion)
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return
+        setLoadError(e instanceof Error ? e.message : 'No se pudo cargar la evidencia del bug.')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [bugId])
+
+  async function handleSave() {
+    if (!evidence) return
+    const draft: BugEvidenceFields = {
+      causa_raiz: causaRaizRef.current?.getValue() ?? evidence.fields.causa_raiz,
+      causa_raiz_identificada: causaRaizIdentificada,
+      solucion_definitiva: solucionDefinitivaRef.current?.getValue() ?? evidence.fields.solucion_definitiva,
+      tipo_solucion: tipoSolucion,
+    }
+
+    const update = buildBugEvidenceUpdate(evidence.fields, draft)
+    if (Object.keys(update).length === 0) return
+
+    setSaving(true)
+    setSaveError('')
+    try {
+      const result = await patchBugEvidence(evidence.id, evidence.rev, update)
+      setEvidence({ ...evidence, rev: result.rev, fields: result.fields })
+      setCausaRaizIdentificada(result.fields.causa_raiz_identificada)
+      setTipoSolucion(result.fields.tipo_solucion)
+    } catch (e: unknown) {
+      if (e instanceof BugEvidenceApiError && e.code === 'rev_conflict') {
+        // Intentional stub for this PR: a real per-field keep-mine/take-Azure
+        // resolution (BugConflictModal) is PR5 scope — that component
+        // doesn't exist yet. No field is overwritten; the user must reload.
+        setSaveError('Alguien más modificó este bug en Azure DevOps. Recarga el panel antes de volver a guardar.')
+      } else if (e instanceof BugEvidenceApiError && e.code === 'root_cause_required') {
+        setSaveError('No se puede marcar "Causa raíz identificada" sin registrar la causa raíz.')
+      } else if (e instanceof BugEvidenceApiError && e.code === 'insufficient_scope') {
+        setSaveError('Las credenciales configuradas no tienen permiso para escribir en este bug.')
+      } else if (e instanceof BugEvidenceApiError && e.code === 'state_not_editable') {
+        setSaveError('El bug cambió de estado y ya no admite edición.')
+      } else {
+        setSaveError(e instanceof Error ? e.message : 'No se pudo guardar la evidencia.')
+      }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) {
+    return <div style={{ padding: 12, color: 'var(--fg3)' }}>Cargando evidencia del bug...</div>
+  }
+
+  if (loadError || !evidence) {
+    return <div style={{ padding: 12, color: 'var(--block-solid)' }}>{loadError || 'Bug no encontrado.'}</div>
+  }
+
+  const fieldKeyBase = `${evidence.id}:${evidence.rev}`
+
+  if (!evidence.editable) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div>
+          <div className="label" style={{ marginBottom: 6 }}>Causa raíz</div>
+          <SafeHtml html={evidence.fields.causa_raiz} />
+        </div>
+        <div>
+          <div className="label" style={{ marginBottom: 6 }}>Causa raíz identificada</div>
+          <div style={{ color: 'var(--fg2)' }}>{evidence.fields.causa_raiz_identificada ? 'Sí' : 'No'}</div>
+        </div>
+        <div>
+          <div className="label" style={{ marginBottom: 6 }}>Solución definitiva</div>
+          <SafeHtml html={evidence.fields.solucion_definitiva} />
+        </div>
+        <div>
+          <div className="label" style={{ marginBottom: 6 }}>Tipo de solución</div>
+          <div style={{ color: 'var(--fg2)' }}>{TIPO_SOLUCION_LABELS[evidence.fields.tipo_solucion]}</div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div>
+        <div className="label" style={{ marginBottom: 6 }}>Causa raíz</div>
+        <RichTextField
+          key={`${fieldKeyBase}:causa_raiz`}
+          ref={causaRaizRef}
+          initialHtml={evidence.fields.causa_raiz}
+          ariaLabel="Causa raíz"
+        />
+      </div>
+
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, font: 'var(--text-body)', color: 'var(--fg1)' }}>
+        <input
+          type="checkbox"
+          checked={causaRaizIdentificada}
+          onChange={e => setCausaRaizIdentificada(e.target.checked)}
+        />
+        Causa raíz identificada
+      </label>
+
+      <div>
+        <div className="label" style={{ marginBottom: 6 }}>Solución definitiva</div>
+        <RichTextField
+          key={`${fieldKeyBase}:solucion_definitiva`}
+          ref={solucionDefinitivaRef}
+          initialHtml={evidence.fields.solucion_definitiva}
+          ariaLabel="Solución definitiva"
+        />
+      </div>
+
+      <div>
+        <div className="label" style={{ marginBottom: 6 }}>Tipo de solución</div>
+        <TipoSolucionRadio value={tipoSolucion} onChange={setTipoSolucion} />
+      </div>
+
+      {saveError && <div style={{ color: 'var(--block-solid)', font: 'var(--text-sm)' }}>{saveError}</div>}
+
+      <div>
+        <Button variant="primary" onClick={handleSave} disabled={saving}>
+          {saving ? 'Guardando...' : 'Guardar'}
+        </Button>
+      </div>
+    </div>
+  )
+}
