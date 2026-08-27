@@ -61,11 +61,13 @@ func writeAPIError(w http.ResponseWriter, status int, code string, extra map[str
 // isAzureNotFoundStatus reports whether err is a FetchBugEvidence failure
 // whose underlying HTTP status was 404. FetchBugEvidence (unlike
 // FetchWorkItemFull) does not special-case 404 into a (nil, nil) return — it
-// always returns a wrapped "unexpected fetch bug evidence status %d" error —
-// so this substring check is how the server tells "not found" apart from any
-// other transport/status failure worth a 502 instead.
+// always returns a wrapped azure.FetchBugEvidenceStatusError, which this
+// checks via errors.As rather than matching error text: the error text
+// echoes untrusted Azure response-body content (sanitizedResponseMessage)
+// and could otherwise coincidentally contain a misleading status substring.
 func isAzureNotFoundStatus(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "status 404")
+	var statusErr *azure.FetchBugEvidenceStatusError
+	return errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusNotFound
 }
 
 // bugEvidenceFieldsResponse projects a *azure.BugEvidence's 4 evidence fields
