@@ -45,4 +45,44 @@ describe('BugEvidencePanel', () => {
     expect(screen.queryByRole('radio')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /guardar/i })).not.toBeInTheDocument()
   })
+
+  it('blocks checking "causa raíz identificada" while causa raíz is empty (root-cause-identified invariant)', async () => {
+    vi.mocked(fetchBugEvidence).mockResolvedValue(
+      buildEvidence({
+        editable: true,
+        fields: {
+          causa_raiz: '',
+          causa_raiz_identificada: false,
+          solucion_definitiva: '',
+          tipo_solucion: '',
+        },
+      }),
+    )
+
+    render(<BugEvidencePanel bugId={170277} />)
+
+    const checkbox = await screen.findByRole('checkbox', { name: /causa raíz identificada/i })
+
+    expect(checkbox).toBeDisabled()
+  })
+
+  it('enables "causa raíz identificada" once causa raíz has non-empty content', async () => {
+    vi.mocked(fetchBugEvidence).mockResolvedValue(
+      buildEvidence({
+        editable: true,
+        fields: {
+          causa_raiz: 'Root cause found in logs',
+          causa_raiz_identificada: false,
+          solucion_definitiva: '',
+          tipo_solucion: '',
+        },
+      }),
+    )
+
+    render(<BugEvidencePanel bugId={170277} />)
+
+    const checkbox = await screen.findByRole('checkbox', { name: /causa raíz identificada/i })
+
+    expect(checkbox).toBeEnabled()
+  })
 })
