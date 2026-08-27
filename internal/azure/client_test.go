@@ -1513,6 +1513,50 @@ func TestCloseWorkItem_ActiveState_TwoStepCloseOnly(t *testing.T) {
 	}
 }
 
+// TestPatchWorkItemWithResponse_ReturnsRawResponseBody exercises the new
+// project-scoped patchWorkItemWithResponse directly: unlike patchWorkItem
+// (which discards the response body), callers building on top of a PATCH's
+// echoed fields (e.g. PatchBugEvidence's divergence check) need the raw
+// bytes back.
+func TestPatchWorkItemWithResponse_ReturnsRawResponseBody(t *testing.T) {
+	var method, path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method = r.Method
+		path = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":4242,"rev":8,"fields":{"System.State":"Active"}}`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+
+	body, err := c.patchWorkItemWithResponse(context.Background(), "OTHERPROJ", 4242, []patchOp{
+		{Op: "add", Path: "/fields/System.State", Value: "Active"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if method != http.MethodPatch {
+		t.Errorf("expected PATCH, got %s", method)
+	}
+	if path != "/ORG/OTHERPROJ/_apis/wit/workitems/4242" {
+		t.Errorf("expected project-scoped path using the passed-in project, got %q", path)
+	}
+	var parsed struct {
+		ID  int `json:"id"`
+		Rev int `json:"rev"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatalf("expected raw response body to be valid JSON, got decode error: %v", err)
+	}
+	if parsed.ID != 4242 || parsed.Rev != 8 {
+		t.Errorf("expected raw body to carry id=4242 rev=8, got %+v", parsed)
+	}
+}
+
 // freezeNow overrides timeNow for the duration of the calling test, restoring
 // it on cleanup. fixed is given as UTC; timeNow's caller converts to the
 // fixed Colombia (UTC-5) offset before deriving optimistic dates.
