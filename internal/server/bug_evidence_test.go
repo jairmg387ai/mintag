@@ -196,6 +196,25 @@ func TestGetBugEvidence_NotFound_Returns404(t *testing.T) {
 	assertStatus(t, resp, http.StatusNotFound)
 }
 
+func TestGetBugEvidence_ServerErrorMentioning404InBody_Returns502NotMisclassifiedAs404(t *testing.T) {
+	// A genuine 500 whose error body happens to echo unrelated text
+	// containing "status 404" (e.g. an upstream dependency's own error)
+	// must not be misclassified as "work item not found".
+	base := setupBugEvidenceTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "connectiondata") {
+			azureConnectionDataOK(w)
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"message":"upstream dependency reported status 404 for an unrelated resource"}`)) //nolint:errcheck
+	})
+
+	resp, err := http.Get(base + "/api/azure/bugs/4242/evidence")
+	mustNoErr(t, err)
+	assertStatus(t, resp, http.StatusBadGateway)
+}
+
 func TestGetBugEvidence_NotConfigured_Returns503(t *testing.T) {
 	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
 	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
