@@ -34,6 +34,10 @@ import type {
   CreatedWorkItemResponse,
   CloseWorkItemResponse,
   RecreateWorkItemResponse,
+  BugEvidence,
+  BugEvidenceUpdate,
+  BugEvidencePatchResponse,
+  BugComment,
 } from '../types'
 
 async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
@@ -43,6 +47,50 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   })
   if (!res.ok) {
     throw new Error(await res.text())
+  }
+  return res.json() as Promise<T>
+}
+
+// BugEvidenceApiError carries the backend's structured {"code": "..."} error
+// body (rev_conflict / state_not_editable / root_cause_required /
+// insufficient_scope / not_a_bug) so callers can branch on the exact failure
+// reason instead of matching an error message string.
+export class BugEvidenceApiError extends Error {
+  code: string
+  extra?: Record<string, unknown>
+
+  constructor(code: string, extra?: Record<string, unknown>) {
+    super(code)
+    this.name = 'BugEvidenceApiError'
+    this.code = code
+    this.extra = extra
+  }
+}
+
+// requestBugEvidence mirrors request<T> above (same headers/opts/JSON-body
+// contract), but additionally parses a non-2xx body as
+// {"code": "...", ...extra} — the shape every bug-evidence/comment error
+// response in internal/server/bug_evidence.go's writeAPIError uses — into a
+// BugEvidenceApiError. Falls back to the same generic Error(text) as
+// request<T> when the body isn't JSON or has no "code" field.
+async function requestBugEvidence<T>(path: string, opts: RequestInit = {}): Promise<T> {
+  const res = await fetch(path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    try {
+      const body = JSON.parse(text) as { code?: unknown; [key: string]: unknown }
+      if (typeof body.code === 'string') {
+        const { code, ...extra } = body
+        throw new BugEvidenceApiError(code, extra)
+      }
+    } catch (e) {
+      if (e instanceof BugEvidenceApiError) throw e
+      // Not JSON, or JSON without a "code" field — fall through below.
+    }
+    throw new Error(text)
   }
   return res.json() as Promise<T>
 }
@@ -534,6 +582,33 @@ export function signOffScenario(dwId: number, scenarioId: number, result: string
   return request<DWTestScenario>(`/api/deployment-windows/${dwId}/test-scenarios/${scenarioId}/sign-off`, {
     method: 'PATCH',
     body: JSON.stringify({ result, signed_off_by }),
+  })
+}
+
+// --- Azure Bug Evidence (DSW-PR-017 V2) ---
+
+export function fetchBugEvidence(id: number): Promise<BugEvidence> {
+  return requestBugEvidence<BugEvidence>(`/api/azure/bugs/${id}/evidence`)
+}
+
+export function patchBugEvidence(id: number, rev: number, fields: BugEvidenceUpdate): Promise<BugEvidencePatchResponse> {
+  return requestBugEvidence<BugEvidencePatchResponse>(`/api/azure/bugs/${id}/evidence`, {
+    method: 'PATCH',
+    body: JSON.stringify({ rev, fields }),
+  })
+}
+
+export function listBugComments(id: number): Promise<BugComment[]> {
+  return requestBugEvidence<BugComment[]>(`/api/azure/bugs/${id}/comments`)
+}
+
+// addBugComment is typed and wired now; PR5's BugCommentTimeline is the
+// first actual caller. idempotencyKey lets a retried submit short-circuit to
+// the already-posted result server-side instead of double-posting.
+export function addBugComment(id: number, idempotencyKey: string, text: string): Promise<BugComment> {
+  return requestBugEvidence<BugComment>(`/api/azure/bugs/${id}/comments`, {
+    method: 'POST',
+    body: JSON.stringify({ idempotency_key: idempotencyKey, text }),
   })
 }
 
