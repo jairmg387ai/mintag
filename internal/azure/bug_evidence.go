@@ -188,6 +188,30 @@ func buildBugEvidenceOps(expectedRev int, u BugEvidenceUpdate) ([]patchOp, error
 	return ops, nil
 }
 
+// divergentFields returns the subset of u's non-nil fields whose submitted
+// value does not match the corresponding field in got (typically the
+// just-echoed PatchBugEvidence response, parsed into a BugEvidence).
+// TipoSolucion is compared as one unit: if u.TipoSolucion is set, the whole
+// field is reported divergent whenever got's folded TipoSolucion differs,
+// regardless of which one of the two underlying booleans actually caused
+// the mismatch. Fields u never touched (nil) are never reported.
+func divergentFields(u BugEvidenceUpdate, got *BugEvidence) BugEvidenceUpdate {
+	var out BugEvidenceUpdate
+	if u.CausaRaiz != nil && *u.CausaRaiz != got.CausaRaiz {
+		out.CausaRaiz = u.CausaRaiz
+	}
+	if u.CausaRaizIdentificada != nil && *u.CausaRaizIdentificada != got.CausaRaizIdentificada {
+		out.CausaRaizIdentificada = u.CausaRaizIdentificada
+	}
+	if u.SolucionDefinitiva != nil && *u.SolucionDefinitiva != got.SolucionDefinitiva {
+		out.SolucionDefinitiva = u.SolucionDefinitiva
+	}
+	if u.TipoSolucion != nil && *u.TipoSolucion != got.TipoSolucion {
+		out.TipoSolucion = u.TipoSolucion
+	}
+	return out
+}
+
 // FetchBugEvidence resolves the DSW-PR-017 V2 root-cause/solution evidence
 // fields for a single Bug work item by id, org-scoped (same id-uniqueness
 // rationale as FetchWorkItemFull). Unlike FetchWorkItemFull, this always
