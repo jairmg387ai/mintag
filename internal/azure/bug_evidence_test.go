@@ -53,6 +53,7 @@ func TestFetchBugEvidence_Success_ParsesEvidenceAndFoldsTipoSolucion(t *testing.
 		{name: "neither flag set", temporal: false, definitiva: false, wantTipoSolucion: TipoSolucionNone},
 		{name: "temporal flag set", temporal: true, definitiva: false, wantTipoSolucion: TipoSolucionTemporal},
 		{name: "definitiva flag set", temporal: false, definitiva: true, wantTipoSolucion: TipoSolucionDefinitiva},
+		{name: "both flags set, definitiva takes priority", temporal: true, definitiva: true, wantTipoSolucion: TipoSolucionDefinitiva},
 	}
 
 	for _, tt := range tests {
