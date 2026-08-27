@@ -123,20 +123,25 @@ func (c *Client) AddBugComment(ctx context.Context, id int, teamProject, text st
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(resp.Body)
 
+	// Errors are run through classifyBugEvidencePatchError (shared with
+	// PatchBugEvidence) so a caller can detect an auth/scope rejection via
+	// errors.Is(err, ErrInsufficientScope) the same way it does for a field
+	// write — a rev conflict never applies to a comment POST, but the
+	// underlying 401/403/HTML-sign-in detection is identical.
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, &patchStatusError{
+		return nil, classifyBugEvidencePatchError(&patchStatusError{
 			StatusCode: resp.StatusCode,
 			Body:       respBody,
 			err:        fmt.Errorf("azure: unexpected add bug comment status %d%s", resp.StatusCode, sanitizedResponseMessage(respBody)),
-		}
+		})
 	}
 	if isHTMLResponse(resp.Header.Get("Content-Type"), respBody) {
-		return nil, &patchStatusError{
+		return nil, classifyBugEvidencePatchError(&patchStatusError{
 			StatusCode: resp.StatusCode,
 			Body:       respBody,
 			IsHTML:     true,
 			err:        fmt.Errorf("azure: Azure returned HTML/sign-in response; token may be expired or auth mode invalid"),
-		}
+		})
 	}
 
 	var parsed bugCommentWire

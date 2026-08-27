@@ -3,6 +3,7 @@ package azure
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -131,7 +132,7 @@ func TestAddBugComment_Forbidden_ReturnsError(t *testing.T) {
 	}
 
 	_, err := c.AddBugComment(context.Background(), 4242, "RUNTPRO", "text")
-	if err == nil {
-		t.Fatal("expected an error for a 403 response")
+	if !errors.Is(err, ErrInsufficientScope) {
+		t.Fatalf("expected ErrInsufficientScope for a 403 response, got %v", err)
 	}
 }
