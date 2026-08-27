@@ -270,3 +270,59 @@ func TestBuildBugEvidenceOps(t *testing.T) {
 		}
 	})
 }
+
+func TestDivergentFields(t *testing.T) {
+	t.Run("all match returns an empty update", func(t *testing.T) {
+		causaRaiz := "same text"
+		identificada := true
+		solucion := "same fix"
+		tipo := TipoSolucionDefinitiva
+		got := &BugEvidence{
+			CausaRaiz:             causaRaiz,
+			CausaRaizIdentificada: identificada,
+			SolucionDefinitiva:    solucion,
+			TipoSolucion:          tipo,
+		}
+		diff := divergentFields(BugEvidenceUpdate{
+			CausaRaiz:             &causaRaiz,
+			CausaRaizIdentificada: &identificada,
+			SolucionDefinitiva:    &solucion,
+			TipoSolucion:          &tipo,
+		}, got)
+		if !isEmptyBugEvidenceUpdate(diff) {
+			t.Errorf("expected no divergent fields, got %+v", diff)
+		}
+	})
+
+	t.Run("a mismatched HTML field is flagged", func(t *testing.T) {
+		submitted := "<p>submitted root cause</p>"
+		got := &BugEvidence{CausaRaiz: "<p>a different root cause was echoed back</p>"}
+		diff := divergentFields(BugEvidenceUpdate{CausaRaiz: &submitted}, got)
+		if diff.CausaRaiz == nil || *diff.CausaRaiz != submitted {
+			t.Errorf("expected CausaRaiz to be flagged as divergent, got %+v", diff)
+		}
+		if diff.CausaRaizIdentificada != nil || diff.SolucionDefinitiva != nil || diff.TipoSolucion != nil {
+			t.Errorf("expected only CausaRaiz to be flagged, got %+v", diff)
+		}
+	})
+
+	t.Run("a mismatched TipoSolucion pair is flagged as one unit even if only one boolean differs", func(t *testing.T) {
+		submitted := TipoSolucionTemporal
+		// got reflects a response where the folded TipoSolucion differs from
+		// what was submitted, even though (from the caller's perspective) only
+		// one of the two underlying booleans actually diverged.
+		got := &BugEvidence{TipoSolucion: TipoSolucionDefinitiva}
+		diff := divergentFields(BugEvidenceUpdate{TipoSolucion: &submitted}, got)
+		if diff.TipoSolucion == nil || *diff.TipoSolucion != submitted {
+			t.Errorf("expected TipoSolucion to be flagged as a single divergent unit, got %+v", diff)
+		}
+	})
+
+	t.Run("untouched (nil) fields are never reported as divergent", func(t *testing.T) {
+		got := &BugEvidence{CausaRaiz: "whatever azure has", SolucionDefinitiva: "whatever else azure has"}
+		diff := divergentFields(BugEvidenceUpdate{}, got)
+		if !isEmptyBugEvidenceUpdate(diff) {
+			t.Errorf("expected no fields flagged when nothing was submitted, got %+v", diff)
+		}
+	})
+}
