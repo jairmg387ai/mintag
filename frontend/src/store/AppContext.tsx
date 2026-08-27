@@ -15,6 +15,7 @@ interface AppState {
   activeProject: number | null
   editingTaskId: number | null
   activeMeetingId: number | null
+  activeBugEvidenceId: number | null
   activeModal: ModalName
   toasts: Toast[]
 }
@@ -27,6 +28,7 @@ interface AppActions {
   setActiveProject: (id: number) => void
   setEditingTaskId: (id: number | null) => void
   setActiveMeetingId: (id: number | null) => void
+  setActiveBugEvidenceId: (id: number | null) => void
   openModal: (modal: ModalName) => void
   closeModal: () => void
   pushToast: (message: string, isError?: boolean) => void
@@ -48,6 +50,7 @@ const defaultState: AppState = {
   activeProject: null,
   editingTaskId: null,
   activeMeetingId: null,
+  activeBugEvidenceId: null,
   activeModal: null,
   toasts: [],
 }
@@ -97,6 +100,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const setActiveMeetingId = useCallback((id: number | null) => {
     setState(prev => ({ ...prev, activeMeetingId: id }))
+  }, [])
+
+  const setActiveBugEvidenceId = useCallback((id: number | null) => {
+    setState(prev => ({ ...prev, activeBugEvidenceId: id }))
   }, [])
 
   const openModal = useCallback((modal: ModalName) => {
@@ -182,6 +189,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setActiveProject,
     setEditingTaskId,
     setActiveMeetingId,
+    setActiveBugEvidenceId,
     openModal,
     closeModal,
     pushToast,

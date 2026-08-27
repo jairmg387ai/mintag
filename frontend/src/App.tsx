@@ -15,6 +15,7 @@ import { NewTaskModal } from './components/modals/NewTaskModal'
 import { ImportMeetingModal } from './components/modals/ImportMeetingModal'
 import { NewProjectModal } from './components/modals/NewProjectModal'
 import { MeetingDetailModal } from './components/modals/MeetingDetailModal'
+import { BugEvidenceModal } from './components/bugs/BugEvidenceModal'
 import { ToastContainer } from './components/shared/Toast'
 
 const VIEW_TITLES: Record<string, string> = {
@@ -62,6 +63,7 @@ function AppInner() {
       {activeModal === 'import' && <ImportMeetingModal />}
       {activeModal === 'new-project' && <NewProjectModal />}
       {activeModal === 'meeting' && <MeetingDetailModal />}
+      {activeModal === 'bug-evidence' && <BugEvidenceModal />}
 
       <ToastContainer />
     </>
