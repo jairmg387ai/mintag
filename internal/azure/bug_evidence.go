@@ -106,6 +106,88 @@ func tipoSolucionFromFlags(temporal, definitiva bool) TipoSolucion {
 	}
 }
 
+// tipoSolucionFlags is the write-side inverse of tipoSolucionFromFlags: it
+// derives the two boolean custom fields to send to Azure for a given
+// TipoSolucion. TipoSolucionNone (or any other/empty value) clears both.
+func tipoSolucionFlags(t TipoSolucion) (temporal, definitiva bool) {
+	switch t {
+	case TipoSolucionTemporal:
+		return true, false
+	case TipoSolucionDefinitiva:
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+// BugEvidenceUpdate is a per-field write intent for PatchBugEvidence. A nil
+// pointer means the field is untouched — untouched fields are never sent to
+// Azure. These 4 exposed fields are the only fields this type can ever
+// express; there is no path to any other Azure field (in particular
+// System.State) through it.
+type BugEvidenceUpdate struct {
+	CausaRaiz             *string
+	CausaRaizIdentificada *bool
+	SolucionDefinitiva    *string
+	TipoSolucion          *TipoSolucion
+}
+
+// isEmptyBugEvidenceUpdate reports whether every field of u is untouched
+// (nil).
+func isEmptyBugEvidenceUpdate(u BugEvidenceUpdate) bool {
+	return u.CausaRaiz == nil && u.CausaRaizIdentificada == nil &&
+		u.SolucionDefinitiva == nil && u.TipoSolucion == nil
+}
+
+// bugEvidenceFieldOps builds one json-patch op per non-nil field of u. This
+// is the single place where an Azure field path is ever emitted for a bug
+// evidence write, and it only ever uses the 5 field constants declared
+// above — there is no code path that can produce any other path (in
+// particular, no System.State path exists here or anywhere else in this
+// file), so a bug-state write through this mechanism is structurally
+// unreachable, not merely a review convention.
+//
+// TipoSolucion is the one deliberate exception to "one field = one op": it
+// always emits BOTH FieldTipoTemporal and FieldTipoDefinitiva together, as
+// one atomic pair, so the illegal "both true" state can never be reached by
+// a caller that only sets one of them.
+func bugEvidenceFieldOps(u BugEvidenceUpdate) []patchOp {
+	var ops []patchOp
+	if u.CausaRaiz != nil {
+		ops = append(ops, patchOp{Op: "add", Path: "/fields/" + FieldCausaRaiz, Value: *u.CausaRaiz})
+	}
+	if u.CausaRaizIdentificada != nil {
+		ops = append(ops, patchOp{Op: "add", Path: "/fields/" + FieldCausaRaizIdentificada, Value: *u.CausaRaizIdentificada})
+	}
+	if u.SolucionDefinitiva != nil {
+		ops = append(ops, patchOp{Op: "add", Path: "/fields/" + FieldSolucionDefinitiva, Value: *u.SolucionDefinitiva})
+	}
+	if u.TipoSolucion != nil {
+		temporal, definitiva := tipoSolucionFlags(*u.TipoSolucion)
+		ops = append(ops,
+			patchOp{Op: "add", Path: "/fields/" + FieldTipoTemporal, Value: temporal},
+			patchOp{Op: "add", Path: "/fields/" + FieldTipoDefinitiva, Value: definitiva},
+		)
+	}
+	return ops
+}
+
+// buildBugEvidenceOps is a pure function building the full json-patch op
+// list for a bug-evidence write: op[0] is always the "/rev" test op
+// (optimistic concurrency against expectedRev), followed by one op per
+// dirty field from u (see bugEvidenceFieldOps). Returns an error if u has no
+// fields set — there is nothing meaningful to PATCH.
+func buildBugEvidenceOps(expectedRev int, u BugEvidenceUpdate) ([]patchOp, error) {
+	fieldOps := bugEvidenceFieldOps(u)
+	if len(fieldOps) == 0 {
+		return nil, fmt.Errorf("azure: bug evidence update has no fields set")
+	}
+	ops := make([]patchOp, 0, len(fieldOps)+1)
+	ops = append(ops, patchOp{Op: "test", Path: "/rev", Value: expectedRev})
+	ops = append(ops, fieldOps...)
+	return ops, nil
+}
+
 // FetchBugEvidence resolves the DSW-PR-017 V2 root-cause/solution evidence
 // fields for a single Bug work item by id, org-scoped (same id-uniqueness
 // rationale as FetchWorkItemFull). Unlike FetchWorkItemFull, this always
