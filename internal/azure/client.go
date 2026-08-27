@@ -677,22 +677,53 @@ func (c *Client) CreateAndActivateWorkItem(ctx context.Context, in CreateWorkIte
 	return created, nil
 }
 
-// patchWorkItem sends one json-patch PATCH to an existing work item. Shared
-// by the two ActivateWorkItem steps so the request-building/error-handling
-// code exists in exactly one place.
+// patchWorkItem sends one json-patch PATCH to an existing work item, scoped
+// to the client's configured TeamProject. Shared by the two ActivateWorkItem
+// steps (and CloseWorkItem/SyncEffortFromTimeLog) so the request-building/
+// error-handling code exists in exactly one place. Delegates to
+// patchWorkItemWithResponse and discards the response body — callers that
+// need the echoed fields (e.g. PatchBugEvidence) call that method directly.
 func (c *Client) patchWorkItem(ctx context.Context, id int, ops []patchOp) error {
+	_, err := c.patchWorkItemWithResponse(ctx, c.cfg.TeamProject, id, ops)
+	return err
+}
+
+// patchStatusError carries the raw HTTP status code and response body of a
+// failed json-patch PATCH, so a caller that needs to classify the failure
+// (e.g. PatchBugEvidence distinguishing a rejected "/rev" test op from an
+// auth/scope rejection) can inspect it via errors.As, without every other
+// patchWorkItem caller having to change how it handles a returned error —
+// Error() proxies to the same sanitized message patchWorkItem always
+// returned.
+type patchStatusError struct {
+	StatusCode int
+	Body       []byte
+	IsHTML     bool
+	err        error
+}
+
+func (e *patchStatusError) Error() string { return e.err.Error() }
+func (e *patchStatusError) Unwrap() error { return e.err }
+
+// patchWorkItemWithResponse sends one json-patch PATCH to an existing work
+// item under the given project (org-level, so callers resolve the project
+// themselves — e.g. from the work item's own System.TeamProject, as
+// PatchBugEvidence does) and returns the raw response body on success, so a
+// caller can inspect Azure's echoed fields (Azure DevOps echoes the updated
+// work item's fields in the PATCH response).
+func (c *Client) patchWorkItemWithResponse(ctx context.Context, project string, id int, ops []patchOp) ([]byte, error) {
 	body, err := json.Marshal(ops)
 	if err != nil {
-		return fmt.Errorf("azure: marshal patch work item payload: %w", err)
+		return nil, fmt.Errorf("azure: marshal patch work item payload: %w", err)
 	}
 
 	url := fmt.Sprintf(
 		"https://dev.azure.com/%s/%s/_apis/wit/workitems/%d?api-version=7.1-preview.3",
-		c.cfg.Org, c.cfg.TeamProject, id,
+		c.cfg.Org, project, id,
 	)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, url, bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("azure: build patch work item request: %w", err)
+		return nil, fmt.Errorf("azure: build patch work item request: %w", err)
 	}
 	c.setAuthHeader(req)
 	req.Header.Set("Content-Type", "application/json-patch+json")
@@ -700,18 +731,27 @@ func (c *Client) patchWorkItem(ctx context.Context, id int, ops []patchOp) error
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("azure: patch work item http request: %w", err)
+		return nil, fmt.Errorf("azure: patch work item http request: %w", err)
 	}
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("azure: unexpected patch work item status %d%s", resp.StatusCode, sanitizedResponseMessage(respBody))
+		return nil, &patchStatusError{
+			StatusCode: resp.StatusCode,
+			Body:       respBody,
+			err:        fmt.Errorf("azure: unexpected patch work item status %d%s", resp.StatusCode, sanitizedResponseMessage(respBody)),
+		}
 	}
 	if isHTMLResponse(resp.Header.Get("Content-Type"), respBody) {
-		return fmt.Errorf("azure: Azure returned HTML/sign-in response; token may be expired or auth mode invalid")
+		return nil, &patchStatusError{
+			StatusCode: resp.StatusCode,
+			Body:       respBody,
+			IsHTML:     true,
+			err:        fmt.Errorf("azure: Azure returned HTML/sign-in response; token may be expired or auth mode invalid"),
+		}
 	}
-	return nil
+	return respBody, nil
 }
 
 // FetchClassificationTree returns the full Area or Iteration path tree
