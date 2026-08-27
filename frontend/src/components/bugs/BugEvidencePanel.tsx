@@ -3,7 +3,7 @@ import { fetchBugEvidence, patchBugEvidence, BugEvidenceApiError } from '../../a
 import type { BugEvidence, BugEvidenceFields, TipoSolucion } from '../../types'
 import { SafeHtml } from '../shared/SafeHtml'
 import { Button } from '../ui/Button'
-import { buildBugEvidenceUpdate } from './bugEvidence'
+import { buildBugEvidenceUpdate, canSetCausaRaizIdentificada } from './bugEvidence'
 import { RichTextField, type RichTextFieldHandle } from './RichTextField'
 import { TipoSolucionRadio } from './TipoSolucionRadio'
 
@@ -38,6 +38,11 @@ export function BugEvidencePanel({ bugId }: BugEvidencePanelProps) {
   // through refs at save time.
   const [causaRaizIdentificada, setCausaRaizIdentificada] = useState(false)
   const [tipoSolucion, setTipoSolucion] = useState<TipoSolucion>('')
+  // Live emptiness signal for causa_raiz, fed by RichTextField's onTextChange
+  // (reads through the ref, never writes back to the DOM — does not turn
+  // the field controlled). Used only to gate the causa_raiz_identificada
+  // checkbox per the root-cause-identified invariant.
+  const [causaRaizText, setCausaRaizText] = useState('')
 
   const causaRaizRef = useRef<RichTextFieldHandle>(null)
   const solucionDefinitivaRef = useRef<RichTextFieldHandle>(null)
@@ -52,6 +57,7 @@ export function BugEvidencePanel({ bugId }: BugEvidencePanelProps) {
         setEvidence(ev)
         setCausaRaizIdentificada(ev.fields.causa_raiz_identificada)
         setTipoSolucion(ev.fields.tipo_solucion)
+        setCausaRaizText(ev.fields.causa_raiz)
       })
       .catch((e: unknown) => {
         if (cancelled) return
@@ -74,6 +80,15 @@ export function BugEvidencePanel({ bugId }: BugEvidencePanelProps) {
       tipo_solucion: tipoSolucion,
     }
 
+    if (draft.causa_raiz_identificada && !canSetCausaRaizIdentificada(draft.causa_raiz)) {
+      // Defensive: the checkbox is disabled while causa_raiz is empty, but
+      // this still guards the edge case where causa_raiz_identificada was
+      // already true from the loaded evidence and the user then clears
+      // causa_raiz's content without unchecking it.
+      setSaveError('No se puede marcar "Causa raíz identificada" sin registrar la causa raíz.')
+      return
+    }
+
     const update = buildBugEvidenceUpdate(evidence.fields, draft)
     if (Object.keys(update).length === 0) return
 
@@ -84,6 +99,7 @@ export function BugEvidencePanel({ bugId }: BugEvidencePanelProps) {
       setEvidence({ ...evidence, rev: result.rev, fields: result.fields })
       setCausaRaizIdentificada(result.fields.causa_raiz_identificada)
       setTipoSolucion(result.fields.tipo_solucion)
+      setCausaRaizText(result.fields.causa_raiz)
     } catch (e: unknown) {
       if (e instanceof BugEvidenceApiError && e.code === 'rev_conflict') {
         // Intentional stub for this PR: a real per-field keep-mine/take-Azure
@@ -146,6 +162,7 @@ export function BugEvidencePanel({ bugId }: BugEvidencePanelProps) {
           ref={causaRaizRef}
           initialHtml={evidence.fields.causa_raiz}
           ariaLabel="Causa raíz"
+          onTextChange={setCausaRaizText}
         />
       </div>
 
@@ -154,6 +171,7 @@ export function BugEvidencePanel({ bugId }: BugEvidencePanelProps) {
           type="checkbox"
           checked={causaRaizIdentificada}
           onChange={e => setCausaRaizIdentificada(e.target.checked)}
+          disabled={!canSetCausaRaizIdentificada(causaRaizText)}
         />
         Causa raíz identificada
       </label>
