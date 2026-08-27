@@ -276,13 +276,28 @@ func (c *Client) FetchBugEvidence(ctx context.Context, id int) (*BugEvidence, er
 	respBody, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("azure: unexpected fetch bug evidence status %d%s", resp.StatusCode, sanitizedResponseMessage(respBody))
+		return nil, fmt.Errorf("azure: unexpected fetch bug evidence status %d%s: %w",
+			resp.StatusCode, sanitizedResponseMessage(respBody), &FetchBugEvidenceStatusError{StatusCode: resp.StatusCode})
 	}
 	if isHTMLResponse(resp.Header.Get("Content-Type"), respBody) {
 		return nil, fmt.Errorf("azure: Azure returned HTML/sign-in response; token may be expired or auth mode invalid")
 	}
 
 	return parseBugEvidenceResponse(respBody)
+}
+
+// FetchBugEvidenceStatusError carries the raw HTTP status code from a failed
+// FetchBugEvidence call so callers can classify the failure (e.g. "was this a
+// 404") via errors.As, instead of substring-matching the error text — which
+// otherwise echoes untrusted Azure response-body content via
+// sanitizedResponseMessage and could coincidentally contain a misleading
+// status-like substring.
+type FetchBugEvidenceStatusError struct {
+	StatusCode int
+}
+
+func (e *FetchBugEvidenceStatusError) Error() string {
+	return fmt.Sprintf("azure: fetch bug evidence returned status %d", e.StatusCode)
 }
 
 // ErrRevConflict is returned by PatchBugEvidence when Azure rejects the

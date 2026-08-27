@@ -306,7 +306,34 @@ func (s *Store) migrate() error {
 	if err := s.migrateDeploymentWindows(); err != nil {
 		return err
 	}
+	if err := s.migrateBugComments(); err != nil {
+		return err
+	}
 	return s.migrateMenuOptions(s.filePreExisted)
+}
+
+// migrateBugComments creates the local idempotency table for outbound Azure
+// Bug comment uploads (see BeginBugCommentUpload/MarkBugCommentPosted/
+// MarkBugCommentFailed in bug_comments.go). Azure remains the system of
+// record for the comment list itself — this table only prevents a retried
+// POST from creating a duplicate Azure comment.
+func (s *Store) migrateBugComments() error {
+	_, err := s.db.Exec(`
+	CREATE TABLE IF NOT EXISTS azure_bug_comment_uploads (
+		id               INTEGER PRIMARY KEY AUTOINCREMENT,
+		work_item_id     INTEGER NOT NULL,
+		idempotency_key  TEXT NOT NULL UNIQUE,
+		body             TEXT NOT NULL,
+		status           TEXT NOT NULL DEFAULT 'pending',
+		created_at       TEXT NOT NULL,
+		posted_at        TEXT,
+		azure_comment_id INTEGER,
+		last_error       TEXT
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_bug_comment_uploads_wi ON azure_bug_comment_uploads(work_item_id);
+	`)
+	return err
 }
 
 func (s *Store) migrateActivities() error {
