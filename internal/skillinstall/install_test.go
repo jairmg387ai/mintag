@@ -55,6 +55,19 @@ func TestInstall_CopiesBundledSkill(t *testing.T) {
 	}
 }
 
+func TestInstall_UnknownSkillNameWritesNothing(t *testing.T) {
+	homeDir := t.TempDir()
+	_, err := Install([]string{"vtt-task-extractor", "--targets"}, []Target{TargetClaude}, homeDir, false)
+	if err == nil {
+		t.Fatal("expected error for unknown skill name")
+	}
+
+	skillDir := filepath.Join(homeDir, ".claude", "skills", "vtt-task-extractor")
+	if _, statErr := os.Stat(skillDir); !os.IsNotExist(statErr) {
+		t.Fatalf("expected no files written for the valid skill when a later name is invalid, but found %s", skillDir)
+	}
+}
+
 func TestInstall_RequiresForceWhenDestinationExists(t *testing.T) {
 	homeDir := t.TempDir()
 	_, err := Install([]string{"vtt-task-extractor"}, []Target{TargetGemini}, homeDir, false)

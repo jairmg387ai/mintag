@@ -53,13 +53,13 @@ func setupClaude(homeDir, execPath string) error {
 	return nil
 }
 
-var mintTagToolNames = []string{
-	"project_create", "project_list",
-	"meeting_import", "meeting_search", "meeting_find_or_create", "meeting_set_rich_content",
-	"task_create", "task_update", "task_search", "task_history", "task_upsert", "tasks_by_project",
-	"graph_search", "graph_node", "graph_neighbors", "graph_impact",
-	"graph_upsert_node", "graph_upsert_edge", "graph_stats",
-}
+// mintagToolWildcard grants every mcp__mintag__* tool in one entry, instead
+// of enumerating each tool name (Claude Code's permission matcher accepts a
+// glob after the literal "mcp__<server>__" prefix — see
+// https://code.claude.com/docs/en/permissions.md). This is what actually
+// keeps the allowlist from going stale: new MCP tools registered in
+// internal/mcp never need a matching addition here.
+const mintagToolWildcard = "mcp__mintag__*"
 
 func addClaudePermissions(settingsPath string) error {
 	data, err := os.ReadFile(settingsPath)
@@ -83,18 +83,12 @@ func addClaudePermissions(settingsPath string) error {
 	}
 
 	allow := toStringSlice(perms["allow"])
-	existing := map[string]bool{}
 	for _, v := range allow {
-		existing[v] = true
-	}
-
-	for _, tool := range mintTagToolNames {
-		entry := "mcp__mintag__" + tool
-		if !existing[entry] {
-			allow = append(allow, entry)
+		if v == mintagToolWildcard {
+			return nil
 		}
 	}
-	perms["allow"] = allow
+	perms["allow"] = append(allow, mintagToolWildcard)
 
 	return writeJSON(settingsPath, settings)
 }

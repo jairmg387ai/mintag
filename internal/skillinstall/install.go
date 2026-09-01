@@ -26,6 +26,7 @@ const (
 var allTargets = []Target{TargetClaude, TargetGemini, TargetOpenCode}
 
 var skillDirs = map[string]string{
+	"activity-autolog":   "bundled/skills/activity-autolog",
 	"mintag-graph":       "bundled/skills/mintag-graph",
 	"vtt-task-extractor": "bundled/skills/vtt-task-extractor",
 }
@@ -57,19 +58,33 @@ func Install(skillNames []string, targets []Target, homeDir string, force bool) 
 		targets = append([]Target(nil), allTargets...)
 	}
 
-	results := make([]Result, 0, len(skillNames)*len(targets))
+	// Validate every skill name and target up front, before writing anything.
+	// copySkillDir has real filesystem side effects that a later error return
+	// can't undo, so a bad name/target discovered mid-loop must never leave
+	// some skills installed and others silently missing from the result.
+	sourceDirs := make(map[string]string, len(skillNames))
 	for _, skillName := range skillNames {
 		sourceDir, ok := skillDirs[skillName]
 		if !ok {
 			return nil, fmt.Errorf("unknown skill %q", skillName)
 		}
+		sourceDirs[skillName] = sourceDir
+	}
+	destRoots := make(map[Target]string, len(targets))
+	for _, target := range targets {
+		destRoot, err := targetDir(homeDir, target)
+		if err != nil {
+			return nil, err
+		}
+		destRoots[target] = destRoot
+	}
+
+	results := make([]Result, 0, len(skillNames)*len(targets))
+	for _, skillName := range skillNames {
+		sourceDir := sourceDirs[skillName]
 
 		for _, target := range targets {
-			destRoot, err := targetDir(homeDir, target)
-			if err != nil {
-				return nil, err
-			}
-			destDir := filepath.Join(destRoot, skillName)
+			destDir := filepath.Join(destRoots[target], skillName)
 			files, err := copySkillDir(sourceDir, destDir, force)
 			if err != nil {
 				return nil, err
