@@ -15,8 +15,8 @@ import (
 
 // registerActivityTools registers the daily-activity MCP tools: activity_log,
 // activity_list, activity_approve, activity_upload, the timelog_projects/
-// timelog_categories catalog tools (including reactivate counterparts for
-// each soft-delete), and the azure_activities catalog tools
+// timelog_categories catalog tools (add/list/remove, plus reactivate
+// counterparts for each soft-delete), and the azure_activities catalog tools
 // (catalog_azure_activity_add/list/set_default/remove/reactivate).
 func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 
@@ -263,6 +263,16 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 		return jsonResult(map[string]string{"reactivated": name}, nil)
 	})
 
+	// --- catalog_project_list ---
+	s.AddTool(mcp.NewTool("catalog_project_list",
+		mcp.WithDescription("List project names in the TimeLog catalog, ordered alphabetically. Use this to look up or fuzzy-match a project before calling activity_log."),
+		mcp.WithString("include_inactive", mcp.Description("'true' to include soft-deleted (inactive) projects; default 'false'")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		includeInactive := req.GetString("include_inactive", "") == "true"
+		projects, err := st.ListTimelogProjects(ctx, includeInactive)
+		return jsonResult(projects, err)
+	})
+
 	// --- catalog_category_add ---
 	s.AddTool(mcp.NewTool("catalog_category_add",
 		mcp.WithDescription("Add a new category to the TimeLog catalog."),
@@ -308,6 +318,16 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 			return errResult(err)
 		}
 		return jsonResult(map[string]string{"reactivated": name}, nil)
+	})
+
+	// --- catalog_category_list ---
+	s.AddTool(mcp.NewTool("catalog_category_list",
+		mcp.WithDescription("List activity categories in the TimeLog catalog, ordered alphabetically. Use this to look up or fuzzy-match a category before calling activity_log."),
+		mcp.WithString("include_inactive", mcp.Description("'true' to include soft-deleted (inactive) categories; default 'false'")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		includeInactive := req.GetString("include_inactive", "") == "true"
+		categories, err := st.ListTimelogCategories(ctx, includeInactive)
+		return jsonResult(categories, err)
 	})
 
 	// --- catalog_azure_activity_add ---
