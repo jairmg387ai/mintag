@@ -38,28 +38,6 @@ function shiftDate(ymd: string, days: number): string {
   return toYMD(date)
 }
 
-const DAY_COMPLETE_HOURS = 8
-
-// dayOfWeek uses local date components (not `new Date(string)`) to avoid the
-// UTC-parsing timezone pitfall already fixed elsewhere in this codebase
-// (see NewActivityModal.tsx's identical helper).
-function dayOfWeek(ymd: string): number {
-  const [y, m, d] = ymd.split('-').map(Number)
-  return new Date(y, m - 1, d).getDay()
-}
-
-// nextBusinessDay advances ymd by one day, then keeps advancing while the
-// result falls on a weekend — mirrors the coworker reference
-// implementation's nextBusinessDay (app.js:180-187), used to auto-advance
-// the viewed/default date once a day's logged hours reach DAY_COMPLETE_HOURS.
-function nextBusinessDay(ymd: string): string {
-  let next = shiftDate(ymd, 1)
-  while (dayOfWeek(next) === 0 || dayOfWeek(next) === 6) {
-    next = shiftDate(next, 1)
-  }
-  return next
-}
-
 const REGISTRO_DIARIO_PREVIEW_LIMIT = 150
 
 function truncateRegistroDiario(value: string): string {
@@ -667,19 +645,7 @@ export function ActivitiesView() {
         onClose={() => setShowNewModal(false)}
         onCreated={async () => {
           setShowNewModal(false)
-          const refreshed = await fetchActivities(date)
-          // Pure UX convenience, never a hard block, never toggled (unlike
-          // the configurable validations) — once the viewed day's logged
-          // hours reach DAY_COMPLETE_HOURS, jump to the next business day so
-          // the next entry doesn't have to be retargeted by hand. Mirrors
-          // the coworker reference implementation's onSubmit day-complete
-          // check (app.js:1331-1339).
-          if (refreshed) {
-            const dayTotal = refreshed.reduce((s, a) => s + a.hours, 0)
-            if (dayTotal >= DAY_COMPLETE_HOURS) {
-              setDate(nextBusinessDay(date))
-            }
-          }
+          await fetchActivities(date)
         }}
         catalog={catalog}
         defaultDate={date}
