@@ -16,7 +16,10 @@ import { StatusBadge } from '../shared/StatusBadge'
 import { Avatar } from '../shared/Avatar'
 import type { DailyActivity, Status, ViewName } from '../../types'
 
-const DAILY_TARGET_HOURS = 8
+// Weekly schedule: Mon-Thu 8h/day, Fri 7.5h/day.
+function dailyTargetHours(day: number): number {
+  return day === 5 ? 7.5 : 8
+}
 
 function fmt(dt: string) {
   if (!dt) return '—'
@@ -34,18 +37,19 @@ function toYMD(d: Date): string {
   return `${y}-${m}-${dd}`
 }
 
-// countBusinessDays counts Mon-Fri dates in [from, to] inclusive. No holiday
-// calendar exists in Mintag, so this is a deliberate approximation — it will
-// overcount expected hours on months with holidays.
-function countBusinessDays(from: Date, to: Date): number {
-  let count = 0
+// expectedBusinessHours sums the daily target across Mon-Fri dates in
+// [from, to] inclusive (Mon-Thu 8h, Fri 7.5h). No holiday calendar exists in
+// Mintag, so this is a deliberate approximation — it will overcount expected
+// hours on months with holidays.
+function expectedBusinessHours(from: Date, to: Date): number {
+  let hours = 0
   const cur = new Date(from)
   while (cur <= to) {
     const day = cur.getDay()
-    if (day !== 0 && day !== 6) count++
+    if (day !== 0 && day !== 6) hours += dailyTargetHours(day)
     cur.setDate(cur.getDate() + 1)
   }
-  return count
+  return hours
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -78,7 +82,7 @@ export function Dashboard() {
     const todayStr = toYMD(today)
     const isBusinessDayToday = today.getDay() !== 0 && today.getDay() !== 6
 
-    const expectedHours = countBusinessDays(monthStart, today) * DAILY_TARGET_HOURS
+    const expectedHours = expectedBusinessHours(monthStart, today)
     const registeredHours = monthActivities.reduce((sum, a) => sum + a.hours, 0)
     const compliancePct = expectedHours > 0 ? Math.round((registeredHours / expectedHours) * 100) : 0
     const loggedToday = monthActivities.some(a => a.date === todayStr)
@@ -186,7 +190,7 @@ export function Dashboard() {
           iconBg="var(--emerald-50)"
           iconFg="var(--emerald-700)"
           value={`${timeLogKpis.expectedHours}h`}
-          label="Meta del mes (días hábiles × 8h)"
+          label="Meta del mes (L-J 8h, V 7.5h)"
           onClick={() => navTo('activities')}
         />
         <StatCard
