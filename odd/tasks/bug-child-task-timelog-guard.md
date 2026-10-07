@@ -22,7 +22,7 @@ The team's new process creates specific child Tasks under each Bug (e.g. Bug 171
 
 ## Tasks
 - [x] T1 — Store: guard setting (get/set, default ON) + tests. Evidence: `go test ./internal/store/ -run TimeLogBugGuard` RED (undefined symbols) → GREEN (2 PASS). Key `activity.validation.block_bug_work_item`.
-- [ ] T2 — Azure client: fetch work item hierarchy (type, assignee id, parent id/type, child tasks with assignee) via `$expand=relations` + tests.
+- [x] T2 — Azure client: fetch work item hierarchy (type, assignee id, parent id/type, child tasks with assignee) via `$expand=relations` + tests. Evidence: `go test ./internal/azure/` RED (undefined WorkItemHierarchy) → GREEN (ok). Adds `FetchWorkItemHierarchy`, `CheckTimeLogTarget`, pure `EvaluateTimeLogTarget`, `*TimeLogTargetError`.
 - [ ] T3 — Upload guard: enforce rules per activity in `UploadActivities`; failed row with actionable message + tests.
 - [ ] T4 — Registration fail-fast: reject activity create/update pointing at a catalogued `Bug` when guard ON (store/server/MCP) + tests.
 - [ ] T5 — Config surface: REST GET/PUT, MCP tool, UI toggle; update `activity-autolog` skill to resolve bug → assigned child task.
