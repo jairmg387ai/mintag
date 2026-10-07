@@ -23,8 +23,13 @@ Bug child tasks are always titled "Atención y/o Corrección del defecto 171308"
 - Refresh stays best-effort: a parent lookup failure must not fail the states refresh.
 
 ## Tasks
-- [ ] T1 — Backend: fetch parent (id/title/type) during states refresh, persist in catalog, expose in AzureActivity JSON and states response + tests. Route: delegated (writer, 2+ non-trivial files).
-- [ ] T2 — Frontend: link always visible, parent Bug subline in WorkItemsView, tooltip in activities UI + tests. Route: delegated (same writer).
+- [x] T1 — Backend: fetch parent (id/title/type) during states refresh, persist in catalog, expose in AzureActivity JSON and states response + tests. Route: delegated (writer, 2+ non-trivial files).
+  - Commit `a4975ac` feat(azure): persist parent work item in activity catalog. Also covers the assigned list (`parent_id`/`parent_title`/`parent_type`) and optional parent fields on catalog add.
+  - Approach: `AttachWorkItemParents` (internal/azure/work_items_parent.go) = one batched `$expand=relations&errorPolicy=omit` read + one batched read of distinct parent ids. On lookup failure the states refresh still succeeds and stored parents are left untouched; a successful lookup with no parent link clears them.
+  - Evidence: RED = compile failures in new azure/store/server tests; GREEN = `go vet ./...` clean, `go test -count=1 ./...` all ok.
+- [x] T2 — Frontend: link always visible, parent Bug subline in WorkItemsView, tooltip in activities UI + tests. Route: delegated (same writer).
+  - Commit `ef46437` feat(web): show azure link and parent bug for work items. Includes the "Asignados en Azure sin catalogar" rows (link + parent line; add persists parent). ActivitiesView/ActivityDetailModal get the tooltip through `AzureActivityReference` (no direct edits needed).
+  - Evidence: RED = 9 new vitest tests failing; GREEN = `npm test` 130/130 passed, `npx tsc -b` clean, `npm run lint` 32 errors / 2 warnings (unchanged from base; the 3 in WorkItemsView.tsx are pre-existing `set-state-in-effect`).
 
 ## Acceptance criteria
 - Every row in "Work Items registrados" has an Azure link on load, without refreshing.
