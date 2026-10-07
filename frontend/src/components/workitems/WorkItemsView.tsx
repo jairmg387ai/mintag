@@ -1002,14 +1002,6 @@ export function WorkItemsView() {
                   )
                 : pendingAssigned
 
-              if (visibleAssigned.length === 0) {
-                return (
-                  <div style={{ textAlign: 'center', padding: '12px 0', color: 'var(--fg3)', font: 'var(--text-body)' }}>
-                    Ningún work item asignado coincide con la búsqueda.
-                  </div>
-                )
-              }
-
               const totalAssignedPages = Math.max(1, Math.ceil(visibleAssigned.length / PAGE_SIZE))
               const currentAssignedPage = Math.min(assignedPage, totalAssignedPages)
               const assignedPageStart = (currentAssignedPage - 1) * PAGE_SIZE
@@ -1028,6 +1020,15 @@ export function WorkItemsView() {
                       style={{ ...inputStyle, paddingLeft: 28 }}
                     />
                   </div>
+
+                  {/* The search box stays mounted even with zero matches (e.g.
+                      after adding the only filtered item), so the user can
+                      always clear the query and get the rest of the list back. */}
+                  {visibleAssigned.length === 0 && (
+                    <div style={{ textAlign: 'center', padding: '12px 0', color: 'var(--fg3)', font: 'var(--text-body)' }}>
+                      Ningún work item asignado coincide con la búsqueda.
+                    </div>
+                  )}
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {pagedAssigned.map(item => (

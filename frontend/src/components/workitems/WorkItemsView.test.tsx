@@ -402,4 +402,32 @@ describe('WorkItemsView', () => {
     // listAzureActivities mock above).
     await waitFor(() => expect(within(pendingSection).queryByText('New assigned task')).not.toBeInTheDocument())
   })
+
+  it('keeps the assigned search box after adding the only filtered match, so the rest of the list can be recovered', async () => {
+    vi.mocked(listAzureActivities).mockResolvedValue(oneActivity)
+    vi.mocked(listAssignedAzureWorkItems).mockResolvedValue({
+      org: 'ORG',
+      items: [
+        { id: 505, title: 'New assigned task', type: 'Task', state: 'New' },
+        { id: 606, title: 'Another pending item', type: 'Bug', state: 'New' },
+      ],
+    })
+    vi.mocked(addAzureActivity).mockResolvedValue({
+      id: 2, org: 'ORG', work_item_id: 505, label: 'New assigned task', work_item_type: 'Task', is_active: true, is_default: false,
+    })
+    const user = userEvent.setup()
+    render(<WorkItemsView />)
+    await screen.findByText('101')
+
+    await user.click(screen.getByRole('button', { name: /sincronizar asignados/i }))
+    const pendingSection = screen.getByText('Asignados en Azure sin catalogar').closest('.card') as HTMLElement
+    const search = await within(pendingSection).findByRole('searchbox', { name: /buscar work items asignados/i })
+    await user.type(search, '505')
+    await user.click(within(pendingSection).getByRole('button', { name: /agregar/i }))
+
+    await waitFor(() => expect(within(pendingSection).queryByText('New assigned task')).not.toBeInTheDocument())
+    const searchAfter = within(pendingSection).getByRole('searchbox', { name: /buscar work items asignados/i })
+    await user.clear(searchAfter)
+    expect(await within(pendingSection).findByText('Another pending item')).toBeInTheDocument()
+  })
 })
