@@ -119,3 +119,36 @@ func TestSetActivityAzureActivity_BugGuard(t *testing.T) {
 		})
 	}
 }
+
+// TestActivityValidationSettings_BlockBugWorkItemDefaultsOnAndMapsToGuard
+// verifies the bug guard is exposed as the fourth ActivityValidationSettings
+// toggle: on by default (unlike its three siblings) and backed by the same
+// setting TimeLogBugGuardEnabled reads.
+func TestActivityValidationSettings_BlockBugWorkItemDefaultsOnAndMapsToGuard(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+
+	v, err := s.GetActivityValidationSettings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !v.BlockBugWorkItem {
+		t.Fatalf("expected block_bug_work_item to default on, got %+v", v)
+	}
+
+	v.BlockBugWorkItem = false
+	if err := s.SetActivityValidationSettings(ctx, *v); err != nil {
+		t.Fatal(err)
+	}
+	enabled, err := s.TimeLogBugGuardEnabled(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enabled {
+		t.Error("expected the guard to be off after saving block_bug_work_item=false")
+	}
+}

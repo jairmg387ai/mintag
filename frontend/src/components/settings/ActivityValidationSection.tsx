@@ -18,6 +18,11 @@ const TOGGLES: Array<{ key: keyof ActivityValidationSettings; label: string; cap
     label: 'Bloquear work item cerrado',
     caption: 'Impide vincular horas a un work item de Azure que ya está Cerrado.',
   },
+  {
+    key: 'block_bug_work_item',
+    label: 'Bloquear registro de horas en Bugs (usar la tarea hija asignada)',
+    caption: 'Rechaza registrar o subir horas sobre un Bug: deben ir a su tarea hija asignada a ti. Activado por defecto.',
+  },
 ]
 
 // Mirrors MenuOptionsSection's immediate-on-change toggle pattern (save on

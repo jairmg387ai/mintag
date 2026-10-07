@@ -353,6 +353,8 @@ export interface ActivityValidationSettings {
   max_hours_per_entry: boolean
   weekend_confirm: boolean
   block_closed_work_item: boolean
+  /** TimeLog bug guard; unlike the other toggles it defaults to true. */
+  block_bug_work_item: boolean
 }
 export type TaskViewName = 'list' | 'kanban'
 export type ModalName = 'task' | 'new-task' | 'import' | 'new-project' | 'meeting' | 'bug-evidence' | null

@@ -27,6 +27,7 @@ metadata:
 - Always omit `date` (defaults to today) and `source` (defaults to "llm_auto").
 - Round hours to the nearest 0.25h; minimum loggable unit is 0.25h.
 - **NEVER** use `Soporte a producción` unless the activity is an active production incident being resolved in real time.
+- **Never log hours on a Bug while the bug guard is on.** The TimeLog bug guard (`block_bug_work_item`, read it with `activity_validation_get`) is ON by default: hours for a Bug go to its child Task assigned to the user, never to the Bug itself. Mintag enforces it twice — linking an activity to a catalogued Bug is rejected, and `activity_upload` fails any row whose work item is a Bug (the error lists the child tasks assigned to you) or a Bug's child task assigned to someone else. Resolve to the child Task up front (see Step 2a) instead of relying on those rejections.
 
 ---
 
@@ -93,6 +94,7 @@ If the request references a specific Azure work item (an ID, a bug label, "el bu
 - If exactly one entry matches and it has both `project` and `category_id` set → that mapping **is** the project/category. Use `project` directly, and resolve `category_id` to a name via `catalog_category_list` (match by `id`). Set `reference_id` to `work_item_id` when calling `activity_log`. **Skip 2b/2c — no catalog listing needed.**
 - If it matches but `project` or `category_id` is missing, fall through to 2b/2c only for the missing piece.
 - If nothing matches, fall through to 2b.
+- **Bug → child Task.** If the hint is a Bug (the matched entry has `work_item_type` `Bug`, or the user says "el bug X") and `activity_validation_get` reports `block_bug_work_item: true`, do NOT use the Bug's entry or ID. Look in the same `catalog_azure_activity_list` result for the bug's child Task assigned to the user (Task-type entries whose label references the bug, e.g. "Atención y/o Corrección del defecto 171306" under Bug 171191) and use that Task's mapping and `work_item_id` as `reference_id`. If none is catalogued or several fit, ask: "¿En cuál tarea hija del bug <id> asignada a ti registro las horas?" — if the user gives a task ID not in the catalog, offer to add it with `catalog_azure_activity_add` (`work_item_type` `Task`) first.
 
 **2b. Resolve project from the live catalog.**
 Call `catalog_project_list` (default `include_inactive=false`) and match the project hint against the returned names:
@@ -181,12 +183,18 @@ mcp__mintag__activity_log(
 - registro_diario: "sobre este tema" is vague → ask: "¿Sobre qué tema fue el soporte al equipo de QA?"
 
 ### Example 3 — explicit, resolved via existing Azure mapping
-**Prompt:** "registra 2 horas al bug 156263"
+**Prompt:** "registra 2 horas a la tarea 156263"
 - hours: 2.0
-- `catalog_azure_activity_list` has an entry with `work_item_id=156263`, `project="RNA Core"`, `category_id` set → use both directly, no listing needed for project/category
+- `catalog_azure_activity_list` has an entry with `work_item_id=156263` (`work_item_type` `Task`), `project="RNA Core"`, `category_id` set → use both directly, no listing needed for project/category
 - `category_id` resolved to a name via `catalog_category_list`
 - registro_diario: ask user what was done if not stated
 - `reference_id` = `156263` in the `activity_log` call
+
+### Example 3b — explicit, user names a Bug (guard on)
+**Prompt:** "registra 3 horas al bug 171191"
+- `catalog_azure_activity_list`: 171191 is `work_item_type` `Bug`; `activity_validation_get` → `block_bug_work_item: true`
+- The catalog also has Task 171306 "Atención y/o Corrección del defecto 171306" assigned to the user → resolve to it: its mapping for project/category, `reference_id` = `171306`
+- Confirmation summary says the hours go to task 171306 (child of bug 171191), not to the bug
 
 ### Example 4 — explicit, unambiguous, no Azure mapping
 **Prompt:** "registra 2 horas de desarrollo del login en RNA Core"
@@ -207,6 +215,8 @@ When user says: "qué hice hoy", "resumen del día", "show today's activities", 
 3. Sum total hours logged.
 4. If total < 8h: "Total logged: Xh — may have Yh unaccounted."
 5. If pending entries: "Run activity_approve then activity_upload to submit to TimeLog."
+
+After `activity_upload`, Mintag syncs each uploaded work item's Completed Work in Azure to the total hours logged in TimeLog for it. That sync is best-effort: failures come back in `effort_sync_errors` while the hours stay uploaded — report them, don't retry the upload.
 
 ## Output Contract
 

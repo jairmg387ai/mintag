@@ -14,6 +14,7 @@ const ALL_VALIDATIONS_OFF: ActivityValidationSettings = {
   max_hours_per_entry: false,
   weekend_confirm: false,
   block_closed_work_item: false,
+  block_bug_work_item: false,
 }
 
 function buildActivity(overrides: Partial<AzureActivity> = {}): AzureActivity {

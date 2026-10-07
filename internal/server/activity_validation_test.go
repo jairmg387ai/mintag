@@ -211,7 +211,8 @@ func TestActivityValidationSettings_PutRoundTrips(t *testing.T) {
 	assertStatus(t, putResp, http.StatusOK)
 	var putBody store.ActivityValidationSettings
 	decodeJSON(t, putResp, &putBody)
-	want := store.ActivityValidationSettings{MaxHoursPerEntry: true, WeekendConfirm: true, BlockClosedWorkItem: false}
+	// block_bug_work_item is omitted, so the bug guard keeps its default (on).
+	want := store.ActivityValidationSettings{MaxHoursPerEntry: true, WeekendConfirm: true, BlockClosedWorkItem: false, BlockBugWorkItem: true}
 	if putBody != want {
 		t.Errorf("expected %+v, got %+v", want, putBody)
 	}
@@ -275,4 +276,29 @@ func TestPatchActivity_BugCatalogEntry_Rejected(t *testing.T) {
 	resp = doJSON(t, http.MethodPatch, fmt.Sprintf("%s/api/activities/%d", base, id), map[string]any{"azure_activity_id": entry.ID})
 	assertStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
+}
+
+// TestPutActivityValidationSettings_BlockBugWorkItem verifies the bug guard
+// is the fourth toggle of the activity-validation endpoint: on by default,
+// preserved when a client omits it (an older client sending only the three
+// original toggles must not silently disable it), and settable explicitly.
+func TestPutActivityValidationSettings_BlockBugWorkItem(t *testing.T) {
+	base, st := newTestServer(t)
+	ctx := context.Background()
+
+	resp := doJSON(t, http.MethodPut, base+"/api/settings/activity-validation", map[string]any{"block_closed_work_item": true})
+	assertStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	if on, err := st.TimeLogBugGuardEnabled(ctx); err != nil || !on {
+		t.Fatalf("expected guard to stay on when the field is omitted, got %v (err %v)", on, err)
+	}
+
+	resp = doJSON(t, http.MethodPut, base+"/api/settings/activity-validation", map[string]any{"block_bug_work_item": false})
+	assertStatus(t, resp, http.StatusOK)
+	if body := assertBodyDoesNotContain(t, resp); !strings.Contains(string(body), `"block_bug_work_item":false`) {
+		t.Fatalf("expected response to report block_bug_work_item=false, got %s", body)
+	}
+	if on, err := st.TimeLogBugGuardEnabled(ctx); err != nil || on {
+		t.Fatalf("expected guard off after explicit false, got %v (err %v)", on, err)
+	}
 }

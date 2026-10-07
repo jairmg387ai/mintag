@@ -477,6 +477,66 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 			"project_retention_days": projectDays,
 		}, nil)
 	})
+
+	// --- activity_validation_get ---
+	s.AddTool(mcp.NewTool("activity_validation_get",
+		mcp.WithDescription("Get the activity logging validation toggles: max_hours_per_entry, weekend_confirm, block_closed_work_item, and block_bug_work_item (the TimeLog bug guard, on by default: hours can't be logged or uploaded on a Bug, only on its child task assigned to you)."),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		v, err := st.GetActivityValidationSettings(ctx)
+		return jsonResult(v, err)
+	})
+
+	// --- activity_validation_set ---
+	s.AddTool(mcp.NewTool("activity_validation_set",
+		mcp.WithDescription("Change activity logging validation toggles. Pass 'true' or 'false' for each toggle to change; omitted toggles keep their current value. Returns the resulting settings."),
+		mcp.WithString("max_hours_per_entry", mcp.Description("Reject entries over 8 hours: 'true' or 'false'")),
+		mcp.WithString("weekend_confirm", mcp.Description("Ask for confirmation before logging on weekends (UI only): 'true' or 'false'")),
+		mcp.WithString("block_closed_work_item", mcp.Description("Block linking hours to a Closed Azure work item: 'true' or 'false'")),
+		mcp.WithString("block_bug_work_item", mcp.Description("TimeLog bug guard: block logging/uploading hours on a Bug (use its child task assigned to you): 'true' or 'false'")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		v, err := st.GetActivityValidationSettings(ctx)
+		if err != nil {
+			return errResult(err)
+		}
+		for _, toggle := range []struct {
+			key   string
+			field *bool
+		}{
+			{"max_hours_per_entry", &v.MaxHoursPerEntry},
+			{"weekend_confirm", &v.WeekendConfirm},
+			{"block_closed_work_item", &v.BlockClosedWorkItem},
+			{"block_bug_work_item", &v.BlockBugWorkItem},
+		} {
+			b, err := parseOptionalBool(req, toggle.key)
+			if err != nil {
+				return errResult(err)
+			}
+			if b != nil {
+				*toggle.field = *b
+			}
+		}
+		if err := st.SetActivityValidationSettings(ctx, *v); err != nil {
+			return errResult(err)
+		}
+		v, err = st.GetActivityValidationSettings(ctx)
+		return jsonResult(v, err)
+	})
+}
+
+// parseOptionalBool reads an optional "true"/"false" string parameter by key
+// (the MCP tools here take every argument as a string). Returns (nil, nil)
+// when absent or empty, meaning "leave unchanged"; (nil, err) on any other
+// value.
+func parseOptionalBool(req mcp.CallToolRequest, key string) (*bool, error) {
+	v := strings.TrimSpace(req.GetString(key, ""))
+	if v == "" {
+		return nil, nil
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return nil, fmt.Errorf("%s must be 'true' or 'false', got %q", key, v)
+	}
+	return &b, nil
 }
 
 // parseOptionalDays reads an optional string parameter by key and parses it
