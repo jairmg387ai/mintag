@@ -13,6 +13,10 @@ import (
 // uploaded. Failures are collected and returned in the result without stopping
 // the remaining uploads. If az is nil or disabled, an error is returned
 // immediately with no HTTP calls made.
+//
+// With the TimeLog bug guard on (the default — see TimeLogBugGuardEnabled),
+// each resolved work item is first checked with azure.Client.CheckTimeLogTarget
+// and a rejected row fails without being posted.
 func (s *Store) UploadActivities(ctx context.Context, date string, az *azure.Client) (*UploadResult, error) {
 	if az == nil {
 		return nil, fmt.Errorf("Azure TimeLog token is not configured")
@@ -48,6 +52,17 @@ func (s *Store) UploadActivities(ctx context.Context, date string, az *azure.Cli
 		workItemByAzureActivityID[aa.ID] = aa.WorkItemID
 	}
 
+	// The bug guard (see TimeLogBugGuardEnabled) is read once per batch like
+	// the catalog snapshot above. With it off, no extra Azure call is made.
+	bugGuard, err := s.TimeLogBugGuardEnabled(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("upload: read bug guard setting: %w", err)
+	}
+	// targetCheckByWorkItem caches CheckTimeLogTarget's verdict per work item
+	// for this upload only: many rows usually share a work item, and the
+	// hierarchy can change between uploads, so it is never persisted.
+	targetCheckByWorkItem := map[int]error{}
+
 	result := &UploadResult{
 		FailedIDs:        []int64{},
 		Errors:           []string{},
@@ -60,6 +75,23 @@ func (s *Store) UploadActivities(ctx context.Context, date string, az *azure.Cli
 			result.FailedIDs = append(result.FailedIDs, a.ID)
 			result.Errors = append(result.Errors, resolveErr.Error())
 			continue
+		}
+		if bugGuard {
+			checkErr, checked := targetCheckByWorkItem[workItemID]
+			if !checked {
+				checkErr = az.CheckTimeLogTarget(ctx, workItemID)
+				targetCheckByWorkItem[workItemID] = checkErr
+			}
+			// Both a rule rejection and a failure to read Azure fail only this
+			// row, which stays "approved" for a retry — same partial-failure
+			// semantics as a failed PostTimeEntry below. Failing closed on a
+			// read error is deliberate: posting without the check is exactly
+			// what the guard exists to prevent.
+			if checkErr != nil {
+				result.FailedIDs = append(result.FailedIDs, a.ID)
+				result.Errors = append(result.Errors, checkErr.Error())
+				continue
+			}
 		}
 
 		entry := azure.TimeEntry{

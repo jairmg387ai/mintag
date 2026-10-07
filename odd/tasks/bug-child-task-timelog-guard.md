@@ -23,7 +23,7 @@ The team's new process creates specific child Tasks under each Bug (e.g. Bug 171
 ## Tasks
 - [x] T1 — Store: guard setting (get/set, default ON) + tests. Evidence: `go test ./internal/store/ -run TimeLogBugGuard` RED (undefined symbols) → GREEN (2 PASS). Key `activity.validation.block_bug_work_item`.
 - [x] T2 — Azure client: fetch work item hierarchy (type, assignee id, parent id/type, child tasks with assignee) via `$expand=relations` + tests. Evidence: `go test ./internal/azure/` RED (undefined WorkItemHierarchy) → GREEN (ok). Adds `FetchWorkItemHierarchy`, `CheckTimeLogTarget`, pure `EvaluateTimeLogTarget`, `*TimeLogTargetError`.
-- [ ] T3 — Upload guard: enforce rules per activity in `UploadActivities`; failed row with actionable message + tests.
+- [x] T3 — Upload guard: enforce rules per activity in `UploadActivities`; failed row with actionable message + tests. Evidence: `go test ./...` all ok, `go vet ./...` clean.
 - [ ] T4 — Registration fail-fast: reject activity create/update pointing at a catalogued `Bug` when guard ON (store/server/MCP) + tests.
 - [ ] T5 — Config surface: REST GET/PUT, MCP tool, UI toggle; update `activity-autolog` skill to resolve bug → assigned child task.
 
@@ -42,6 +42,9 @@ Strategy: ask-on-risk. Forecast ~600–800 authored lines (exceeds 400 → chain
 
 ## Progress / Evidence
 - Branch `feat/bug-child-task-timelog-guard` created from `master`.
+- T1 committed 2ac8fd2; T2 committed 33aa35e.
+- T3: guard enforced in `UploadActivities` (per-upload cache, fail-closed on Azure read errors — accepted). RED observed first (guard tests saw 0 work item reads). Server route-test fakes now answer work item GETs with a standalone Task. `go vet ./...` exit 0; `go test ./...` all ok.
+- Decisions: T5 adds the guard as a 4th field of `ActivityValidationSettings`; fail-closed accepted.
 
 ## Route log
 - T1–T4: delegated writer (2+ non-trivial files, preparation reading).

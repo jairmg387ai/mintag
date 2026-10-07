@@ -44,10 +44,35 @@ func azureClientForTest(srv *httptest.Server) *azure.Client {
 	}
 	c := azure.NewClient(cfg)
 	// Replace the internal http.Client transport to redirect calls to the test server.
+	// Work item reads made by the bug guard (on by default) are answered
+	// locally as a standalone Task, so these tests' servers only ever see the
+	// TimeLog POSTs their responders count. Guard behavior itself is covered
+	// in upload_bug_guard_test.go.
 	c.SetHTTPClient(&http.Client{
-		Transport: uploadRedirectToServer(srv.URL),
+		Transport: standaloneWorkItemTransport{next: uploadRedirectToServer(srv.URL)},
 	})
 	return c
+}
+
+// standaloneWorkItemTransport answers every GET for a work item with a Task
+// that has no parent, which the bug guard always allows, and forwards every
+// other request to next.
+type standaloneWorkItemTransport struct {
+	next http.RoundTripper
+}
+
+func (rt standaloneWorkItemTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Method != http.MethodGet || !strings.Contains(req.URL.Path, "/_apis/wit/workitems/") {
+		return rt.next.RoundTrip(req)
+	}
+	id := req.URL.Path[strings.LastIndex(req.URL.Path, "/")+1:]
+	body := `{"id":` + id + `,"fields":{"System.Title":"Standalone","System.WorkItemType":"Task"}}`
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Request:    req,
+	}, nil
 }
 
 // uploadRedirectTransport rewrites all request hosts to the given base URL (test server).

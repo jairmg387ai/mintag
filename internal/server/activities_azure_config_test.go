@@ -78,6 +78,9 @@ func TestActivityUploadRouteUsesStoreBackedAzureConfig(t *testing.T) {
 	var gotAuthMu sync.Mutex
 	var gotAuth string
 	azureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveStandaloneWorkItem(w, r) {
+			return
+		}
 		gotAuthMu.Lock()
 		gotAuth = r.Header.Get("Authorization")
 		gotAuthMu.Unlock()
@@ -347,6 +350,9 @@ func TestActivityUploadRouteRefreshesOAuthTokenBeforeUpload(t *testing.T) {
 
 	var gotUploadAuth string
 	azureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveStandaloneWorkItem(w, r) {
+			return
+		}
 		gotUploadAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"oauth-doc-123"}`))
@@ -620,4 +626,19 @@ func assertBodyDoesNotContain(t *testing.T, resp *http.Response, forbidden ...st
 		}
 	}
 	return body
+}
+
+// serveStandaloneWorkItem answers the TimeLog bug guard's work item read
+// (GET .../_apis/wit/workitems/{id}, on by default during uploads) with a
+// Task that has no parent, which the guard always allows, so the route tests
+// above only observe the TimeLog POST they assert on. It reports whether it
+// handled the request.
+func serveStandaloneWorkItem(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method != http.MethodGet || !strings.Contains(r.URL.Path, "/_apis/wit/workitems/") {
+		return false
+	}
+	id := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"id":` + id + `,"fields":{"System.Title":"Standalone","System.WorkItemType":"Task"}}`))
+	return true
 }
