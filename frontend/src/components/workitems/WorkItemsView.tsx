@@ -124,6 +124,11 @@ export function WorkItemsView() {
     setAssignedPage(1)
   }, [assignedSearchQuery, pendingAssigned])
 
+  function openBugEvidence(bugId: number) {
+    setActiveBugEvidenceId(bugId)
+    openModal('bug-evidence')
+  }
+
   function categoryName(categoryId: AzureActivity['category_id']): string {
     if (!categoryId || !catalog) return '—'
     return catalog.categories.find(c => c.id === categoryId)?.name ?? '—'
@@ -808,6 +813,7 @@ export function WorkItemsView() {
                                         parentId={a.parent_work_item_id}
                                         title={a.parent_title}
                                         type={a.parent_type}
+                                        onOpenBugEvidence={openBugEvidence}
                                       />
                                     ) : null}
                                   </td>
@@ -923,10 +929,7 @@ export function WorkItemsView() {
                                   <button
                                     className="btn btn-ghost btn-sm"
                                     disabled={isEditing}
-                                    onClick={() => {
-                                      setActiveBugEvidenceId(a.work_item_id)
-                                      openModal('bug-evidence')
-                                    }}
+                                    onClick={() => openBugEvidence(a.work_item_id)}
                                   >
                                     Evidencia DSW-PR-017
                                   </button>
@@ -1054,7 +1057,7 @@ export function WorkItemsView() {
                         <span style={{ flex: 1, color: 'var(--fg1)', font: 'var(--text-sm)' }}>
                           {item.title}
                           {item.parent_id && assignedOrg ? (
-                            <ParentWorkItemLine org={assignedOrg} parentId={item.parent_id} title={item.parent_title} type={item.parent_type} />
+                            <ParentWorkItemLine org={assignedOrg} parentId={item.parent_id} title={item.parent_title} type={item.parent_type} onOpenBugEvidence={openBugEvidence} />
                           ) : null}
                         </span>
                         <span style={{ color: 'var(--fg3)', font: 'var(--text-caption)' }}>{item.type}</span>
@@ -1132,13 +1135,21 @@ function AzureOpenLink({ org, workItemId }: { org: string; workItemId: number })
 // ParentWorkItemLine is the secondary line under a work item's label that
 // names its parent (e.g. the Bug a correction Task hangs under), linked to
 // Azure. The Bug icon is reserved for Bug parents; any other parent type is
-// shown as a plain text prefix.
-function ParentWorkItemLine({ org, parentId, title, type }: { org: string; parentId: number; title?: string; type?: string }) {
+// shown as a plain text prefix. Bug parents also get the DSW-PR-017 evidence
+// action when onOpenBugEvidence is given, since only the child Task (not the
+// Bug itself) is catalogued once hours must go to the correction Task.
+function ParentWorkItemLine({ org, parentId, title, type, onOpenBugEvidence }: {
+  org: string
+  parentId: number
+  title?: string
+  type?: string
+  onOpenBugEvidence?: (bugId: number) => void
+}) {
   const trimmedType = type?.trim()
   const isBug = trimmedType?.toLowerCase() === 'bug'
   const trimmedTitle = title?.trim()
   return (
-    <div style={{ marginTop: 2 }}>
+    <div style={{ marginTop: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
       <a
         href={azureWorkItemUrl({ org, work_item_id: parentId })}
         target="_blank"
@@ -1156,6 +1167,18 @@ function ParentWorkItemLine({ org, parentId, title, type }: { org: string; paren
           {trimmedTitle ? ` — ${trimmedTitle}` : ''}
         </span>
       </a>
+      {isBug && onOpenBugEvidence && (
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={() => onOpenBugEvidence(parentId)}
+          title="Ver seguimiento, comentarios y causa raíz del bug"
+          aria-label={`Evidencia del bug #${parentId}`}
+          style={{ padding: '0 6px', font: 'var(--text-caption)' }}
+        >
+          Evidencia
+        </button>
+      )}
     </div>
   )
 }

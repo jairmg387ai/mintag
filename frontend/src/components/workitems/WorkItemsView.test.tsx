@@ -297,6 +297,33 @@ describe('WorkItemsView', () => {
     expect(within(parentLink).getByLabelText('Bug')).toBeInTheDocument()
   })
 
+  it('opens the parent bug evidence panel from a bug child task row', async () => {
+    vi.mocked(listAzureActivities).mockResolvedValue([
+      {
+        ...oneActivity[0], work_item_id: 171306, label: 'Atención y/o Corrección del defecto 171191', work_item_type: 'Task',
+        parent_work_item_id: 171191, parent_title: 'Login falla', parent_type: 'Bug',
+      },
+    ])
+    const user = userEvent.setup()
+    render(<WorkItemsView />)
+    await screen.findByText('171306')
+
+    await user.click(screen.getByRole('button', { name: /evidencia del bug #171191/i }))
+
+    expect(setActiveBugEvidenceId).toHaveBeenCalledWith(171191)
+    expect(openModal).toHaveBeenCalledWith('bug-evidence')
+  })
+
+  it('does not offer bug evidence for a non-bug parent', async () => {
+    vi.mocked(listAzureActivities).mockResolvedValue([
+      { ...oneActivity[0], work_item_type: 'Task', parent_work_item_id: 900, parent_title: 'Historia', parent_type: 'User Story' },
+    ])
+    render(<WorkItemsView />)
+    await screen.findByText('101')
+
+    expect(screen.queryByRole('button', { name: /evidencia del bug/i })).not.toBeInTheDocument()
+  })
+
   it('shows a non-bug parent with a plain type prefix instead of the bug icon', async () => {
     vi.mocked(listAzureActivities).mockResolvedValue([
       { ...oneActivity[0], work_item_type: 'Task', parent_work_item_id: 900, parent_title: 'Historia', parent_type: 'User Story' },
