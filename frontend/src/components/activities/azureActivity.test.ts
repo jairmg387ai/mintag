@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AzureActivity } from '../../types'
-import { azureActivityMatches, filterAzureActivities } from './azureActivity'
+import { azureActivityMatches, filterAzureActivities, formatAzureParentLabel } from './azureActivity'
 
 function buildActivity(overrides: Partial<AzureActivity> = {}): AzureActivity {
   return {
@@ -74,5 +74,21 @@ describe('filterAzureActivities', () => {
 
     expect(result).toHaveLength(2)
     expect(result.map(a => a.id)).toEqual([1, 2])
+  })
+})
+
+describe('formatAzureParentLabel', () => {
+  it('formats type, id and title of a known parent', () => {
+    expect(formatAzureParentLabel(buildActivity({ parent_work_item_id: 171308, parent_title: 'Login falla', parent_type: 'Bug' })))
+      .toBe('Bug #171308 — Login falla')
+  })
+
+  it('omits missing type or title parts', () => {
+    expect(formatAzureParentLabel(buildActivity({ parent_work_item_id: 42 }))).toBe('#42')
+  })
+
+  it('returns undefined when there is no parent', () => {
+    expect(formatAzureParentLabel(buildActivity())).toBeUndefined()
+    expect(formatAzureParentLabel(buildActivity({ parent_work_item_id: null }))).toBeUndefined()
   })
 })

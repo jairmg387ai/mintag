@@ -149,4 +149,19 @@ describe('AzureActivityCombobox', () => {
       'Deploy pipeline (#9001)',
     ])
   })
+
+  it('shows the parent bug as a tooltip on options and on the selected value', async () => {
+    const user = userEvent.setup()
+    const withParent = [
+      ...catalog,
+      buildActivity({ id: 3, label: 'Atención del defecto', work_item_id: 171306, work_item_type: 'Task', parent_work_item_id: 171308, parent_title: 'Login falla', parent_type: 'Bug' }),
+    ]
+    renderCombobox('3', withParent)
+    const input = screen.getByRole('combobox', { name: 'Actividad de Azure' })
+    expect(input).toHaveAttribute('title', 'Bug #171308 — Login falla')
+
+    await user.click(input)
+    expect(screen.getByRole('option', { name: /Atención del defecto/ })).toHaveAttribute('title', 'Bug #171308 — Login falla')
+    expect(screen.getByRole('option', { name: /Deploy pipeline/ })).not.toHaveAttribute('title')
+  })
 })

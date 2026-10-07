@@ -276,6 +276,11 @@ export interface AzureActivity {
   category_id?: number | null
   last_known_state?: string
   last_known_assigned_to?: string
+  // Parent work item (e.g. the Bug a correction Task hangs under), read from
+  // Azure relations on a states refresh — never parsed from the label.
+  parent_work_item_id?: number | null
+  parent_title?: string
+  parent_type?: string
 }
 
 export interface AssignedAzureWorkItem {
@@ -285,6 +290,11 @@ export interface AssignedAzureWorkItem {
   state: string
   assigned_to_id?: string
   assigned_to_display_name?: string
+  // Parent work item from Azure relations; absent when there is none or the
+  // best-effort lookup failed.
+  parent_id?: number
+  parent_title?: string
+  parent_type?: string
 }
 
 export interface AssignedAzureWorkItemsResponse {

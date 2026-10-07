@@ -356,7 +356,17 @@ export function listAzureActivities(includeInactive?: boolean): Promise<AzureAct
 }
 
 export function addAzureActivity(
-  body: { org: string; work_item_id: number; label: string; work_item_type?: string; project?: string | null; category_id?: number | null },
+  body: {
+    org: string
+    work_item_id: number
+    label: string
+    work_item_type?: string
+    project?: string | null
+    category_id?: number | null
+    parent_work_item_id?: number
+    parent_title?: string
+    parent_type?: string
+  },
 ): Promise<AzureActivity> {
   return request<AzureActivity>('/api/activities/azure-catalog', { method: 'POST', body: JSON.stringify(body) })
 }

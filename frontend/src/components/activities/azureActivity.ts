@@ -17,6 +17,19 @@ export function azureWorkItemUrl(a: Pick<AzureActivity, 'org' | 'work_item_id'>)
   return `https://dev.azure.com/${orgPath}/_workitems/edit/${a.work_item_id}`
 }
 
+// Tooltip/secondary text for an Azure activity's parent work item, e.g.
+// "Bug #171308 — Login falla". Undefined when the parent is unknown, so
+// callers can skip the tooltip entirely. Shared by the activities UI
+// (link/combobox tooltips) and the work items table.
+export function formatAzureParentLabel(
+  a: Pick<AzureActivity, 'parent_work_item_id' | 'parent_title' | 'parent_type'>,
+): string | undefined {
+  if (!a.parent_work_item_id) return undefined
+  const type = a.parent_type?.trim()
+  const title = a.parent_title?.trim()
+  return `${type ? `${type} ` : ''}#${a.parent_work_item_id}${title ? ` — ${title}` : ''}`
+}
+
 // Shared formatting so every combo/display shows the same "label (#work
 // item id)" shape — the label alone doesn't identify the Azure work item.
 export function formatAzureActivityLabel(a: AzureActivity): string {

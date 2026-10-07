@@ -269,23 +269,73 @@ describe('WorkItemsView', () => {
     confirmSpy.mockRestore()
   })
 
-  it('renders an Azure DevOps link per row only after a states refresh has resolved org/team_project', async () => {
+  it('renders an Azure DevOps link per row on load, without a states refresh', async () => {
     vi.mocked(listAzureActivities).mockResolvedValue(oneActivity)
-    vi.mocked(fetchAzureWorkItemStates).mockResolvedValue({
-      org: 'ORG', team_project: 'RUNTPRO',
-      items: [{ id: 101, title: 'Fix login bug', type: 'Bug', state: 'Active' }],
+    render(<WorkItemsView />)
+    await screen.findByText('101')
+
+    const link = screen.getByTitle(/abrir en azure devops/i)
+    expect(link).toHaveAttribute('href', 'https://dev.azure.com/ORG/_workitems/edit/101')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(fetchAzureWorkItemStates).not.toHaveBeenCalled()
+  })
+
+  it('shows the parent bug under the task label, linked to Azure', async () => {
+    vi.mocked(listAzureActivities).mockResolvedValue([
+      {
+        ...oneActivity[0], work_item_id: 171306, label: 'Atención y/o Corrección del defecto 171191', work_item_type: 'Task',
+        parent_work_item_id: 171191, parent_title: 'Login falla', parent_type: 'Bug',
+      },
+    ])
+    render(<WorkItemsView />)
+    await screen.findByText('171306')
+
+    const parentLink = screen.getByRole('link', { name: /#171191 — Login falla/ })
+    expect(parentLink).toHaveAttribute('href', 'https://dev.azure.com/ORG/_workitems/edit/171191')
+    expect(parentLink).toHaveAttribute('target', '_blank')
+    expect(parentLink).toHaveAttribute('rel', 'noreferrer')
+    expect(within(parentLink).getByLabelText('Bug')).toBeInTheDocument()
+  })
+
+  it('shows a non-bug parent with a plain type prefix instead of the bug icon', async () => {
+    vi.mocked(listAzureActivities).mockResolvedValue([
+      { ...oneActivity[0], work_item_type: 'Task', parent_work_item_id: 900, parent_title: 'Historia', parent_type: 'User Story' },
+    ])
+    render(<WorkItemsView />)
+    await screen.findByText('101')
+
+    const parentLink = screen.getByRole('link', { name: /User Story #900 — Historia/ })
+    expect(within(parentLink).queryByLabelText('Bug')).not.toBeInTheDocument()
+  })
+
+  it('assigned rows show an Azure link and the parent bug, and adding persists the parent', async () => {
+    vi.mocked(listAzureActivities).mockResolvedValue(oneActivity)
+    vi.mocked(listAssignedAzureWorkItems).mockResolvedValue({
+      org: 'ORG',
+      items: [
+        { id: 171306, title: 'Atención y/o Corrección del defecto 171191', type: 'Task', state: 'Active', parent_id: 171191, parent_title: 'Login falla', parent_type: 'Bug' },
+      ],
+    })
+    vi.mocked(addAzureActivity).mockResolvedValue({
+      id: 2, org: 'ORG', work_item_id: 171306, label: 'x', work_item_type: 'Task', is_active: true, is_default: false,
     })
     const user = userEvent.setup()
     render(<WorkItemsView />)
     await screen.findByText('101')
 
-    expect(screen.queryByTitle(/abrir en azure devops/i)).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /sincronizar asignados/i }))
+    const pendingSection = screen.getByText('Asignados en Azure sin catalogar').closest('.card') as HTMLElement
+    await within(pendingSection).findByText('Atención y/o Corrección del defecto 171191')
 
-    await user.click(screen.getByRole('button', { name: /refrescar estados/i }))
+    expect(within(pendingSection).getByTitle(/abrir en azure devops/i)).toHaveAttribute('href', 'https://dev.azure.com/ORG/_workitems/edit/171306')
+    const parentLink = within(pendingSection).getByRole('link', { name: /#171191 — Login falla/ })
+    expect(parentLink).toHaveAttribute('href', 'https://dev.azure.com/ORG/_workitems/edit/171191')
 
-    const link = await screen.findByTitle(/abrir en azure devops/i)
-    expect(link).toHaveAttribute('href', 'https://dev.azure.com/ORG/RUNTPRO/_workitems/edit/101')
-    expect(link).toHaveAttribute('target', '_blank')
+    await user.click(within(pendingSection).getByRole('button', { name: /agregar/i }))
+    expect(addAzureActivity).toHaveBeenCalledWith({
+      org: 'ORG', work_item_id: 171306, label: 'Atención y/o Corrección del defecto 171191', work_item_type: 'Task',
+      parent_work_item_id: 171191, parent_title: 'Login falla', parent_type: 'Bug',
+    })
   })
 
   it('filters hide bugs, tasks, and closed rows independently, leaving unknown-state rows visible', async () => {
