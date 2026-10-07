@@ -44,29 +44,38 @@ func azureClientForTest(srv *httptest.Server) *azure.Client {
 	}
 	c := azure.NewClient(cfg)
 	// Replace the internal http.Client transport to redirect calls to the test server.
-	// Work item reads made by the bug guard (on by default) are answered
-	// locally as a standalone Task, so these tests' servers only ever see the
-	// TimeLog POSTs their responders count. Guard behavior itself is covered
-	// in upload_bug_guard_test.go.
+	// Work item reads made by the bug guard (on by default) and the
+	// post-upload CompletedWork sync calls are answered locally (see
+	// azureSideCallStubTransport), so these tests' servers only ever see the
+	// TimeLog POSTs their responders count and inspect. Guard and sync
+	// behavior are covered in upload_bug_guard_test.go.
 	c.SetHTTPClient(&http.Client{
-		Transport: standaloneWorkItemTransport{next: uploadRedirectToServer(srv.URL)},
+		Transport: azureSideCallStubTransport{next: uploadRedirectToServer(srv.URL)},
 	})
 	return c
 }
 
-// standaloneWorkItemTransport answers every GET for a work item with a Task
-// that has no parent, which the bug guard always allows, and forwards every
-// other request to next.
-type standaloneWorkItemTransport struct {
+// azureSideCallStubTransport answers the Azure calls an upload makes besides
+// the TimeLog POST: a work item GET gets a Task with no parent (always
+// allowed by the bug guard), the TimeLog documents GET gets an empty list,
+// and the CompletedWork PATCH succeeds. Every other request goes to next.
+type azureSideCallStubTransport struct {
 	next http.RoundTripper
 }
 
-func (rt standaloneWorkItemTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req.Method != http.MethodGet || !strings.Contains(req.URL.Path, "/_apis/wit/workitems/") {
+func (rt azureSideCallStubTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	var body string
+	switch {
+	case req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/_apis/wit/workitems/"):
+		id := req.URL.Path[strings.LastIndex(req.URL.Path, "/")+1:]
+		body = `{"id":` + id + `,"fields":{"System.Title":"Standalone","System.WorkItemType":"Task"}}`
+	case req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/Documents"):
+		body = `[]`
+	case req.Method == http.MethodPatch:
+		body = `{}`
+	default:
 		return rt.next.RoundTrip(req)
 	}
-	id := req.URL.Path[strings.LastIndex(req.URL.Path, "/")+1:]
-	body := `{"id":` + id + `,"fields":{"System.Title":"Standalone","System.WorkItemType":"Task"}}`
 	return &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},

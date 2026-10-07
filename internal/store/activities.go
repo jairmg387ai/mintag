@@ -35,6 +35,11 @@ type UploadResult struct {
 	FailedIDs        []int64          `json:"failed_ids"`
 	Errors           []string         `json:"errors"`
 	AzureDocumentIDs map[int64]string `json:"azure_document_ids,omitempty"`
+	// EffortSyncErrors are non-fatal failures of the post-upload
+	// CompletedWork sync (see UploadActivities): the hours were uploaded and
+	// the rows marked uploaded regardless; only the work item's Completed
+	// Work field may be stale.
+	EffortSyncErrors []string `json:"effort_sync_errors,omitempty"`
 }
 
 // validateActivity checks inputs before any DB write.

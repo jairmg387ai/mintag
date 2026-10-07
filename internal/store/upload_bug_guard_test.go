@@ -14,15 +14,25 @@ import (
 	"github.com/Gentleman-Programming/mintag/internal/azure"
 )
 
-// guardAzureServer fakes the three Azure endpoints an upload touches with the
-// bug guard on: single work item reads ($expand=relations), batch work item
-// reads (ids=...), and TimeLog POSTs. It records how many work item reads were
-// made and which work item ids were actually posted to TimeLog.
+// guardAzureServer fakes every Azure endpoint an upload touches: single work
+// item reads ($expand=relations), batch work item reads (ids=...), TimeLog
+// POSTs, the TimeLog documents GET, and the CompletedWork PATCH. It records
+// how many work item reads were made, which work item ids were posted to
+// TimeLog, how often the documents were listed, and every CompletedWork
+// value patched. The documents GET returns priorDocs plus one 60-minute-per-
+// hour document for every successful POST.
 type guardAzureServer struct {
 	*httptest.Server
-	mu          sync.Mutex
-	reads       int
-	postedItems []int
+	mu            sync.Mutex
+	reads         int
+	postedItems   []int
+	postedMinutes []int
+	priorDocs     []azure.TimeLogDocument
+	docListings   int
+	failDocs      bool
+	failPatch     bool
+	completedWork map[int]float64
+	patchedFields map[int][]string
 }
 
 func newGuardAzureServer(t *testing.T) *guardAzureServer {
@@ -42,17 +52,51 @@ func newGuardAzureServer(t *testing.T) *guardAzureServer {
 		171323: rel("Reverse", 171191),
 	}
 
-	g := &guardAzureServer{}
+	g := &guardAzureServer{completedWork: map[int]float64{}, patchedFields: map[int][]string{}}
 	g.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		g.mu.Lock()
 		defer g.mu.Unlock()
-		if r.Method == http.MethodPost {
+		switch {
+		case r.Method == http.MethodPost:
 			var payload map[string]any
 			body, _ := io.ReadAll(r.Body)
 			_ = json.Unmarshal(body, &payload)
 			id, _ := payload["workItemId"].(float64)
+			minutes, _ := payload["minutes"].(float64)
 			g.postedItems = append(g.postedItems, int(id))
+			g.postedMinutes = append(g.postedMinutes, int(minutes))
 			w.Write([]byte(`{"id":"doc"}`)) //nolint:errcheck
+			return
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/Documents"):
+			g.docListings++
+			if g.failDocs {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			docs := append([]azure.TimeLogDocument{}, g.priorDocs...)
+			for i, id := range g.postedItems {
+				docs = append(docs, azure.TimeLogDocument{WorkItemID: id, Minutes: g.postedMinutes[i]})
+			}
+			json.NewEncoder(w).Encode(docs) //nolint:errcheck
+			return
+		case r.Method == http.MethodPatch:
+			if g.failPatch {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			var id int
+			fmt.Sscanf(r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:], "%d", &id) //nolint:errcheck
+			var ops []struct {
+				Path  string  `json:"path"`
+				Value float64 `json:"value"`
+			}
+			body, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(body, &ops)
+			for _, op := range ops {
+				g.patchedFields[id] = append(g.patchedFields[id], op.Path)
+				g.completedWork[id] = op.Value
+			}
+			w.Write([]byte(`{}`)) //nolint:errcheck
 			return
 		}
 		g.reads++
@@ -226,5 +270,97 @@ func TestUploadActivities_BugGuardCachesPerWorkItem(t *testing.T) {
 	}
 	if srv.reads != 2 {
 		t.Errorf("expected the hierarchy check to run once (2 reads), got %d reads", srv.reads)
+	}
+}
+
+// TestUploadActivities_SyncsCompletedWork verifies that after a batch posts,
+// each work item with at least one successful post gets CompletedWork set to
+// its TimeLog total (prior documents + this batch), from a single documents
+// listing, without touching RemainingWork; a rejected row's work item is not
+// synced.
+func TestUploadActivities_SyncsCompletedWork(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	approvedActivityOn(t, s, 171306)
+	approvedActivityOn(t, s, 156263)
+	approvedActivityOn(t, s, 171191) // Bug: rejected by the guard
+
+	srv := newGuardAzureServer(t)
+	defer srv.Close()
+	srv.priorDocs = []azure.TimeLogDocument{{WorkItemID: 171306, Minutes: 90}}
+
+	result, err := s.UploadActivities(ctx, "2026-06-12", srv.client())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.UploadedCount != 2 || len(result.FailedIDs) != 1 {
+		t.Fatalf("expected 2 uploads and 1 rejection, got %d / %v", result.UploadedCount, result.FailedIDs)
+	}
+	if len(result.EffortSyncErrors) != 0 {
+		t.Errorf("expected no effort sync errors, got %v", result.EffortSyncErrors)
+	}
+	if srv.docListings != 1 {
+		t.Errorf("expected TimeLog documents to be listed once per batch, got %d", srv.docListings)
+	}
+	want := map[int]float64{171306: 2.5, 156263: 1}
+	if fmt.Sprint(srv.completedWork) != fmt.Sprint(want) {
+		t.Errorf("expected CompletedWork %v, got %v", want, srv.completedWork)
+	}
+	for id, paths := range srv.patchedFields {
+		if len(paths) != 1 || paths[0] != "/fields/Microsoft.VSTS.Scheduling.CompletedWork" {
+			t.Errorf("work item %d: expected only CompletedWork to be patched, got %v", id, paths)
+		}
+	}
+}
+
+// TestUploadActivities_EffortSyncFailureIsNonFatal verifies a failed
+// documents listing or PATCH is reported in EffortSyncErrors while the
+// upload itself still succeeds and the row is marked uploaded.
+func TestUploadActivities_EffortSyncFailureIsNonFatal(t *testing.T) {
+	tests := []struct {
+		name      string
+		failDocs  bool
+		failPatch bool
+		wantErr   string
+	}{
+		{name: "documents listing fails", failDocs: true, wantErr: "completed work sync: azure: unexpected fetch time log documents status 500"},
+		{name: "patch fails", failPatch: true, wantErr: "completed work sync for work item 171306: azure: unexpected patch work item status 403"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, err := OpenInMemory()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			ctx := context.Background()
+			id := approvedActivityOn(t, s, 171306)
+
+			srv := newGuardAzureServer(t)
+			defer srv.Close()
+			srv.failDocs, srv.failPatch = tt.failDocs, tt.failPatch
+
+			result, err := s.UploadActivities(ctx, "2026-06-12", srv.client())
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if result.UploadedCount != 1 || len(result.FailedIDs) != 0 || len(result.Errors) != 0 {
+				t.Fatalf("expected the upload to succeed, got %+v", result)
+			}
+			if len(result.EffortSyncErrors) != 1 || result.EffortSyncErrors[0] != tt.wantErr {
+				t.Errorf("unexpected effort sync errors:\n got: %v\nwant: [%s]", result.EffortSyncErrors, tt.wantErr)
+			}
+			got, err := s.GetActivity(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Status != "uploaded" {
+				t.Errorf("a sync failure must not undo the upload, got status %q", got.Status)
+			}
+		})
 	}
 }

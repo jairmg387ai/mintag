@@ -956,13 +956,7 @@ func (c *Client) SyncEffortFromTimeLog(ctx context.Context, id int, originalEsti
 	if err != nil {
 		return 0, err
 	}
-	var minutes int
-	for _, d := range docs {
-		if d.WorkItemID == id {
-			minutes += d.Minutes
-		}
-	}
-	total := math.Round(float64(minutes)/60*100) / 100
+	total := TimeLogHours(docs, id)
 
 	remaining := 0.0
 	if originalEstimate > 0 {
@@ -976,6 +970,31 @@ func (c *Client) SyncEffortFromTimeLog(ctx context.Context, id int, originalEsti
 		return total, err
 	}
 	return total, nil
+}
+
+// TimeLogHours is the total hours logged in TimeLog for one work item: the
+// sum of its documents' minutes, converted to hours and rounded to 2
+// decimals. Shared by SyncEffortFromTimeLog and the post-upload CompletedWork
+// sync (see store.UploadActivities), which fetches the documents once per
+// batch and evaluates every touched work item against that one snapshot.
+func TimeLogHours(docs []TimeLogDocument, id int) float64 {
+	var minutes int
+	for _, d := range docs {
+		if d.WorkItemID == id {
+			minutes += d.Minutes
+		}
+	}
+	return math.Round(float64(minutes)/60*100) / 100
+}
+
+// SetCompletedWork sets only Microsoft.VSTS.Scheduling.CompletedWork on a
+// work item. Unlike SyncEffortFromTimeLog it leaves RemainingWork alone: the
+// post-upload sync has no estimate to reconcile against, and recomputing
+// RemainingWork there would overwrite whatever the assignee set by hand.
+func (c *Client) SetCompletedWork(ctx context.Context, id int, hours float64) error {
+	return c.patchWorkItem(ctx, id, []patchOp{
+		{Op: "add", Path: "/fields/Microsoft.VSTS.Scheduling.CompletedWork", Value: hours},
+	})
 }
 
 // IsClosedState reports whether state is a terminal closed state, in either

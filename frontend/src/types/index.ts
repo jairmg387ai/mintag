@@ -300,6 +300,8 @@ export interface UploadResult {
   failed_ids: number[]
   errors: string[]
   azure_document_ids?: Record<string, string>
+  /** Non-fatal failures syncing Completed Work after the upload; the hours were still uploaded. */
+  effort_sync_errors?: string[]
 }
 
 export interface AzureTimeLogConfigStatus {

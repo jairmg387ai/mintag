@@ -17,6 +17,11 @@ import (
 // With the TimeLog bug guard on (the default — see TimeLogBugGuardEnabled),
 // each resolved work item is first checked with azure.Client.CheckTimeLogTarget
 // and a rejected row fails without being posted.
+//
+// After the loop, every work item that received at least one successful post
+// gets its CompletedWork synced to its TimeLog total (see syncCompletedWork).
+// That sync is best-effort and always on: its failures land in
+// UploadResult.EffortSyncErrors and never fail or undo the upload.
 func (s *Store) UploadActivities(ctx context.Context, date string, az *azure.Client) (*UploadResult, error) {
 	if az == nil {
 		return nil, fmt.Errorf("Azure TimeLog token is not configured")
@@ -62,6 +67,10 @@ func (s *Store) UploadActivities(ctx context.Context, date string, az *azure.Cli
 	// for this upload only: many rows usually share a work item, and the
 	// hierarchy can change between uploads, so it is never persisted.
 	targetCheckByWorkItem := map[int]error{}
+	// postedWorkItems collects the distinct work items with at least one
+	// successful post, in first-posted order, for the CompletedWork sync.
+	var postedWorkItems []int
+	posted := map[int]bool{}
 
 	result := &UploadResult{
 		FailedIDs:        []int64{},
@@ -113,9 +122,38 @@ func (s *Store) UploadActivities(ctx context.Context, date string, az *azure.Cli
 		}
 		result.AzureDocumentIDs[a.ID] = azureDocumentID
 		result.UploadedCount++
+		if !posted[workItemID] {
+			posted[workItemID] = true
+			postedWorkItems = append(postedWorkItems, workItemID)
+		}
 	}
 
+	result.EffortSyncErrors = syncCompletedWork(ctx, az, postedWorkItems)
 	return result, nil
+}
+
+// syncCompletedWork sets CompletedWork on each work item to the total hours
+// logged for it in TimeLog, so Azure Boards reflects the hours just uploaded.
+// TimeLog documents are listed once for the whole batch and every work item
+// is evaluated against that snapshot (azure.TimeLogHours, the same
+// computation the close/recreate flows use). RemainingWork is deliberately
+// left alone — see azure.Client.SetCompletedWork. Returns one message per
+// failure; nil when everything synced or there was nothing to sync.
+func syncCompletedWork(ctx context.Context, az *azure.Client, workItemIDs []int) []string {
+	if len(workItemIDs) == 0 {
+		return nil
+	}
+	docs, err := az.FetchTimeLogDocuments(ctx)
+	if err != nil {
+		return []string{fmt.Sprintf("completed work sync: %v", err)}
+	}
+	var errs []string
+	for _, id := range workItemIDs {
+		if err := az.SetCompletedWork(ctx, id, azure.TimeLogHours(docs, id)); err != nil {
+			errs = append(errs, fmt.Sprintf("completed work sync for work item %d: %v", id, err))
+		}
+	}
+	return errs
 }
 
 // resolveAzureWorkItemID picks the Azure work item id for a single activity

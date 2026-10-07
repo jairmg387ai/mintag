@@ -78,7 +78,7 @@ func TestActivityUploadRouteUsesStoreBackedAzureConfig(t *testing.T) {
 	var gotAuthMu sync.Mutex
 	var gotAuth string
 	azureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if serveStandaloneWorkItem(w, r) {
+		if serveUploadSideCall(w, r) {
 			return
 		}
 		gotAuthMu.Lock()
@@ -350,7 +350,7 @@ func TestActivityUploadRouteRefreshesOAuthTokenBeforeUpload(t *testing.T) {
 
 	var gotUploadAuth string
 	azureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if serveStandaloneWorkItem(w, r) {
+		if serveUploadSideCall(w, r) {
 			return
 		}
 		gotUploadAuth = r.Header.Get("Authorization")
@@ -628,17 +628,24 @@ func assertBodyDoesNotContain(t *testing.T, resp *http.Response, forbidden ...st
 	return body
 }
 
-// serveStandaloneWorkItem answers the TimeLog bug guard's work item read
-// (GET .../_apis/wit/workitems/{id}, on by default during uploads) with a
-// Task that has no parent, which the guard always allows, so the route tests
-// above only observe the TimeLog POST they assert on. It reports whether it
-// handled the request.
-func serveStandaloneWorkItem(w http.ResponseWriter, r *http.Request) bool {
-	if r.Method != http.MethodGet || !strings.Contains(r.URL.Path, "/_apis/wit/workitems/") {
+// serveUploadSideCall answers the Azure calls an upload makes besides the
+// TimeLog POST, so the route tests above only observe the POST they assert
+// on: the bug guard's work item read (on by default) gets a Task with no
+// parent, which the guard always allows; the post-upload CompletedWork sync's
+// TimeLog documents listing gets an empty list and its PATCH succeeds. It
+// reports whether it handled the request.
+func serveUploadSideCall(w http.ResponseWriter, r *http.Request) bool {
+	w.Header().Set("Content-Type", "application/json")
+	switch {
+	case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/_apis/wit/workitems/"):
+		id := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+		_, _ = w.Write([]byte(`{"id":` + id + `,"fields":{"System.Title":"Standalone","System.WorkItemType":"Task"}}`))
+	case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/Documents"):
+		_, _ = w.Write([]byte(`[]`))
+	case r.Method == http.MethodPatch:
+		_, _ = w.Write([]byte(`{}`))
+	default:
 		return false
 	}
-	id := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
-	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write([]byte(`{"id":` + id + `,"fields":{"System.Title":"Standalone","System.WorkItemType":"Task"}}`))
 	return true
 }
