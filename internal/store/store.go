@@ -443,6 +443,20 @@ func (s *Store) migrateActivities() error {
 	if err := s.addColumnIfMissing("azure_activities", "last_known_assigned_to", "last_known_assigned_to TEXT"); err != nil {
 		return err
 	}
+	// parent_work_item_id/parent_title/parent_type cache the work item's
+	// Azure parent (Hierarchy-Reverse relation), refreshed by the same states
+	// refresh — see SyncAzureActivityParent in azure_catalog.go. Read from
+	// relations, never parsed from the title, so it works however the child
+	// task is named or created.
+	if err := s.addColumnIfMissing("azure_activities", "parent_work_item_id", "parent_work_item_id INTEGER"); err != nil {
+		return err
+	}
+	if err := s.addColumnIfMissing("azure_activities", "parent_title", "parent_title TEXT"); err != nil {
+		return err
+	}
+	if err := s.addColumnIfMissing("azure_activities", "parent_type", "parent_type TEXT"); err != nil {
+		return err
+	}
 	// backfillCreatedAt for azure_activities runs after seedDefaultAzureActivity
 	// below (not here) — seeding inserts a row without created_at set, and
 	// running backfill before that insert would miss it for a full migrate()
