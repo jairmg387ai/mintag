@@ -75,7 +75,7 @@ func newGuardAzureServer(t *testing.T) *guardAzureServer {
 			}
 			docs := append([]azure.TimeLogDocument{}, g.priorDocs...)
 			for i, id := range g.postedItems {
-				docs = append(docs, azure.TimeLogDocument{WorkItemID: id, Minutes: g.postedMinutes[i]})
+				docs = append(docs, azure.TimeLogDocument{WorkItemID: id, Minutes: float64(g.postedMinutes[i])})
 			}
 			json.NewEncoder(w).Encode(docs) //nolint:errcheck
 			return

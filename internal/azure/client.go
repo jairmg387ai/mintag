@@ -888,9 +888,12 @@ func (c *Client) FetchWorkItemFull(ctx context.Context, id int) (*WorkItemFull, 
 
 // TimeLogDocument is one entry from the TimeLog extension's Documents
 // collection — the same collection PostTimeEntry/DeleteTimeEntry write to.
+//
+// Minutes is a float because the extension serializes it with a decimal
+// point (e.g. 480.0); decoding into an int fails the whole response.
 type TimeLogDocument struct {
-	WorkItemID int `json:"workItemId"`
-	Minutes    int `json:"minutes"`
+	WorkItemID int     `json:"workItemId"`
+	Minutes    float64 `json:"minutes"`
 }
 
 // FetchTimeLogDocuments lists every TimeLog document in the configured org's
@@ -978,13 +981,13 @@ func (c *Client) SyncEffortFromTimeLog(ctx context.Context, id int, originalEsti
 // sync (see store.UploadActivities), which fetches the documents once per
 // batch and evaluates every touched work item against that one snapshot.
 func TimeLogHours(docs []TimeLogDocument, id int) float64 {
-	var minutes int
+	var minutes float64
 	for _, d := range docs {
 		if d.WorkItemID == id {
 			minutes += d.Minutes
 		}
 	}
-	return math.Round(float64(minutes)/60*100) / 100
+	return math.Round(minutes/60*100) / 100
 }
 
 // remainingWork is max(0, originalEstimate-total) rounded to 2 decimals —
