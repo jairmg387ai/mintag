@@ -19,7 +19,8 @@ import (
 // and a rejected row fails without being posted.
 //
 // After the loop, every work item that received at least one successful post
-// gets its CompletedWork synced to its TimeLog total (see syncCompletedWork).
+// gets its CompletedWork (and, when it has an estimate, RemainingWork) synced
+// to its TimeLog total (see syncEffort).
 // That sync is best-effort and always on: its failures land in
 // UploadResult.EffortSyncErrors and never fail or undo the upload.
 func (s *Store) UploadActivities(ctx context.Context, date string, az *azure.Client) (*UploadResult, error) {
@@ -67,8 +68,11 @@ func (s *Store) UploadActivities(ctx context.Context, date string, az *azure.Cli
 	// for this upload only: many rows usually share a work item, and the
 	// hierarchy can change between uploads, so it is never persisted.
 	targetCheckByWorkItem := map[int]error{}
+	// estimateByWorkItem keeps the OriginalEstimate of every work item the
+	// guard managed to read, so the effort sync doesn't read it again.
+	estimateByWorkItem := map[int]float64{}
 	// postedWorkItems collects the distinct work items with at least one
-	// successful post, in first-posted order, for the CompletedWork sync.
+	// successful post, in first-posted order, for the effort sync.
 	var postedWorkItems []int
 	posted := map[int]bool{}
 
@@ -88,8 +92,12 @@ func (s *Store) UploadActivities(ctx context.Context, date string, az *azure.Cli
 		if bugGuard {
 			checkErr, checked := targetCheckByWorkItem[workItemID]
 			if !checked {
-				checkErr = az.CheckTimeLogTarget(ctx, workItemID)
+				var item *azure.WorkItemHierarchy
+				item, checkErr = az.CheckTimeLogTarget(ctx, workItemID)
 				targetCheckByWorkItem[workItemID] = checkErr
+				if item != nil {
+					estimateByWorkItem[workItemID] = item.OriginalEstimate
+				}
 			}
 			// Both a rule rejection and a failure to read Azure fail only this
 			// row, which stays "approved" for a retry — same partial-failure
@@ -128,29 +136,55 @@ func (s *Store) UploadActivities(ctx context.Context, date string, az *azure.Cli
 		}
 	}
 
-	result.EffortSyncErrors = syncCompletedWork(ctx, az, postedWorkItems)
+	result.EffortSyncErrors = syncEffort(ctx, az, postedWorkItems, estimateByWorkItem)
 	return result, nil
 }
 
-// syncCompletedWork sets CompletedWork on each work item to the total hours
-// logged for it in TimeLog, so Azure Boards reflects the hours just uploaded.
-// TimeLog documents are listed once for the whole batch and every work item
-// is evaluated against that snapshot (azure.TimeLogHours, the same
-// computation the close/recreate flows use). RemainingWork is deliberately
-// left alone — see azure.Client.SetCompletedWork. Returns one message per
-// failure; nil when everything synced or there was nothing to sync.
-func syncCompletedWork(ctx context.Context, az *azure.Client, workItemIDs []int) []string {
+// syncEffort updates each work item's effort fields from TimeLog, so Azure
+// Boards reflects the hours just uploaded: CompletedWork becomes the total
+// hours logged for it, and RemainingWork becomes max(0, OriginalEstimate -
+// total) when it has an estimate (left untouched otherwise — see
+// azure.Client.SetEffortFromTimeLogTotal). TimeLog documents are listed once
+// for the whole batch and every work item is evaluated against that snapshot
+// (azure.TimeLogHours, the same computation the close/recreate flows use).
+//
+// knownEstimates holds the estimates the bug guard already read; the rest are
+// read in one batch request. If that read fails, those work items still get
+// CompletedWork but keep their RemainingWork, since the estimate is unknown.
+// Returns one message per failure; nil when everything synced or there was
+// nothing to sync.
+func syncEffort(ctx context.Context, az *azure.Client, workItemIDs []int, knownEstimates map[int]float64) []string {
 	if len(workItemIDs) == 0 {
 		return nil
 	}
 	docs, err := az.FetchTimeLogDocuments(ctx)
 	if err != nil {
-		return []string{fmt.Sprintf("completed work sync: %v", err)}
+		return []string{fmt.Sprintf("effort sync: %v", err)}
 	}
+
 	var errs []string
+	estimates := make(map[int]float64, len(workItemIDs))
+	var unknown []int
 	for _, id := range workItemIDs {
-		if err := az.SetCompletedWork(ctx, id, azure.TimeLogHours(docs, id)); err != nil {
-			errs = append(errs, fmt.Sprintf("completed work sync for work item %d: %v", id, err))
+		if est, ok := knownEstimates[id]; ok {
+			estimates[id] = est
+		} else {
+			unknown = append(unknown, id)
+		}
+	}
+	if len(unknown) > 0 {
+		fetched, err := az.FetchOriginalEstimates(ctx, unknown)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("effort sync: read original estimates (remaining work left unchanged): %v", err))
+		}
+		for id, est := range fetched {
+			estimates[id] = est
+		}
+	}
+
+	for _, id := range workItemIDs {
+		if err := az.SetEffortFromTimeLogTotal(ctx, id, azure.TimeLogHours(docs, id), estimates[id]); err != nil {
+			errs = append(errs, fmt.Sprintf("effort sync for work item %d: %v", id, err))
 		}
 	}
 	return errs

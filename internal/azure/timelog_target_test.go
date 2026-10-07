@@ -277,7 +277,7 @@ func TestCheckTimeLogTarget(t *testing.T) {
 		171191: `{"id":171191,"fields":{"System.Title":"Login falla","System.WorkItemType":"Bug"},"relations":[
 			{"rel":"System.LinkTypes.Hierarchy-Forward","url":"` + relURL(171306) + `"},
 			{"rel":"System.LinkTypes.Hierarchy-Forward","url":"` + relURL(171323) + `"}]}`,
-		171306: `{"id":171306,"fields":{"System.Title":"Atención","System.WorkItemType":"Task","System.AssignedTo":{"displayName":"Me","id":"me-id"}},"relations":[
+		171306: `{"id":171306,"fields":{"System.Title":"Atención","System.WorkItemType":"Task","Microsoft.VSTS.Scheduling.OriginalEstimate":6,"System.AssignedTo":{"displayName":"Me","id":"me-id"}},"relations":[
 			{"rel":"System.LinkTypes.Hierarchy-Reverse","url":"` + relURL(171191) + `"}]}`,
 		171323: `{"id":171323,"fields":{"System.Title":"Verificación","System.WorkItemType":"Task","System.AssignedTo":{"displayName":"Jane Doe","id":"jane-id"}},"relations":[
 			{"rel":"System.LinkTypes.Hierarchy-Reverse","url":"` + relURL(171191) + `"}]}`,
@@ -290,13 +290,14 @@ func TestCheckTimeLogTarget(t *testing.T) {
 	}
 
 	tests := []struct {
-		name      string
-		id        int
-		wantErr   string
-		wantCalls int
+		name         string
+		id           int
+		wantErr      string
+		wantCalls    int
+		wantEstimate float64
 	}{
 		{name: "bug rejected with my child task", id: 171191, wantErr: "work item 171191 is a Bug; log hours on its child task: #171306 Atención", wantCalls: 2},
-		{name: "bug child assigned to me allowed", id: 171306, wantCalls: 2},
+		{name: "bug child assigned to me allowed", id: 171306, wantCalls: 2, wantEstimate: 6},
 		{name: "bug child assigned to someone else rejected", id: 171323, wantErr: "work item 171323 is a task of Bug 171191 assigned to Jane Doe, not you; log hours only on bug tasks assigned to you", wantCalls: 2},
 		{name: "standalone task allowed with a single call", id: 156263, wantCalls: 1},
 		{name: "missing work item rejected", id: 42, wantErr: "work item 42 was not found in Azure DevOps", wantCalls: 1},
@@ -309,7 +310,10 @@ func TestCheckTimeLogTarget(t *testing.T) {
 				cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", UserID: "me-id"},
 				http: &http.Client{Transport: redirectToServer(srv.URL)},
 			}
-			err := c.CheckTimeLogTarget(context.Background(), tt.id)
+			item, err := c.CheckTimeLogTarget(context.Background(), tt.id)
+			if tt.id != 42 && (item == nil || item.ID != tt.id) {
+				t.Errorf("expected the read work item %d to be returned, got %+v", tt.id, item)
+			}
 			if tt.wantErr == "" && err != nil {
 				t.Fatalf("expected allowed, got %v", err)
 			}
@@ -321,6 +325,9 @@ func TestCheckTimeLogTarget(t *testing.T) {
 				if err.Error() != tt.wantErr {
 					t.Errorf("unexpected message:\n got: %s\nwant: %s", err.Error(), tt.wantErr)
 				}
+			}
+			if item != nil && item.OriginalEstimate != tt.wantEstimate {
+				t.Errorf("expected OriginalEstimate %v, got %v", tt.wantEstimate, item.OriginalEstimate)
 			}
 			if len(*calls) != tt.wantCalls {
 				t.Errorf("expected %d HTTP calls, got %d: %v", tt.wantCalls, len(*calls), *calls)
@@ -338,7 +345,7 @@ func TestCheckTimeLogTarget_TransportErrorIsNotARejection(t *testing.T) {
 		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG", UserID: "me-id"},
 		http: &http.Client{Transport: redirectToServer(srv.URL)},
 	}
-	err := c.CheckTimeLogTarget(context.Background(), 1)
+	_, err := c.CheckTimeLogTarget(context.Background(), 1)
 	if err == nil {
 		t.Fatal("expected error on 500")
 	}

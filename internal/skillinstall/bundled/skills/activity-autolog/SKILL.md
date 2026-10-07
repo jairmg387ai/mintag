@@ -216,7 +216,7 @@ When user says: "qué hice hoy", "resumen del día", "show today's activities", 
 4. If total < 8h: "Total logged: Xh — may have Yh unaccounted."
 5. If pending entries: "Run activity_approve then activity_upload to submit to TimeLog."
 
-After `activity_upload`, Mintag syncs each uploaded work item's Completed Work in Azure to the total hours logged in TimeLog for it. That sync is best-effort: failures come back in `effort_sync_errors` while the hours stay uploaded — report them, don't retry the upload.
+After `activity_upload`, Mintag syncs each uploaded work item's Completed Work in Azure to the total hours logged in TimeLog for it, and its Remaining Work to Original Estimate minus that total (floored at 0) when it has an estimate. That sync is best-effort: failures come back in `effort_sync_errors` while the hours stay uploaded — report them, don't retry the upload.
 
 ## Output Contract
 

@@ -28,6 +28,7 @@ type WorkItemHierarchy struct {
 	State                 string
 	AssignedToID          string // see AssignedWorkItem's doc comment — compare this, not AssignedToDisplayName
 	AssignedToDisplayName string
+	OriginalEstimate      float64 // 0 when the work item has no estimate
 	ParentID              int
 	ChildIDs              []int
 }
@@ -81,10 +82,11 @@ func (c *Client) FetchWorkItemHierarchy(ctx context.Context, id int) (*WorkItemH
 	var parsed struct {
 		ID     int `json:"id"`
 		Fields struct {
-			Title      string            `json:"System.Title"`
-			Type       string            `json:"System.WorkItemType"`
-			State      string            `json:"System.State"`
-			AssignedTo *azureIdentityRef `json:"System.AssignedTo"`
+			Title            string            `json:"System.Title"`
+			Type             string            `json:"System.WorkItemType"`
+			State            string            `json:"System.State"`
+			OriginalEstimate float64           `json:"Microsoft.VSTS.Scheduling.OriginalEstimate"`
+			AssignedTo       *azureIdentityRef `json:"System.AssignedTo"`
 		} `json:"fields"`
 		Relations []struct {
 			Rel string `json:"rel"`
@@ -103,6 +105,7 @@ func (c *Client) FetchWorkItemHierarchy(ctx context.Context, id int) (*WorkItemH
 		State:                 parsed.Fields.State,
 		AssignedToID:          assignedToID,
 		AssignedToDisplayName: assignedToDisplayName,
+		OriginalEstimate:      parsed.Fields.OriginalEstimate,
 	}
 	for _, r := range parsed.Relations {
 		linkedID, ok := workItemIDFromURL(r.URL)
@@ -135,16 +138,21 @@ func workItemIDFromURL(u string) (int, bool) {
 // costs one call for a work item that is neither a Bug nor parented, and two
 // otherwise (the item, then a batch read of its children or its parent).
 //
-// A nil return means hours may be logged. A *TimeLogTargetError is a rule
+// A nil error means hours may be logged. A *TimeLogTargetError is a rule
 // rejection (including a work item that doesn't exist); any other error is a
 // failure to read Azure and says nothing about the work item itself.
-func (c *Client) CheckTimeLogTarget(ctx context.Context, id int) error {
+//
+// The work item it read is returned whenever the read succeeded (allowed or
+// rejected), so callers can reuse its fields — e.g. OriginalEstimate for the
+// post-upload effort sync — instead of reading it again; it is nil when the
+// work item doesn't exist or Azure couldn't be read.
+func (c *Client) CheckTimeLogTarget(ctx context.Context, id int) (*WorkItemHierarchy, error) {
 	item, err := c.FetchWorkItemHierarchy(ctx, id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if item == nil {
-		return &TimeLogTargetError{WorkItemID: id, Message: fmt.Sprintf("work item %d was not found in Azure DevOps", id)}
+		return nil, &TimeLogTargetError{WorkItemID: id, Message: fmt.Sprintf("work item %d was not found in Azure DevOps", id)}
 	}
 
 	var parent *AssignedWorkItem
@@ -153,19 +161,19 @@ func (c *Client) CheckTimeLogTarget(ctx context.Context, id int) error {
 	case isBugType(item.Type):
 		if len(item.ChildIDs) > 0 {
 			if children, err = c.FetchWorkItemsByIDs(ctx, item.ChildIDs); err != nil {
-				return err
+				return item, err
 			}
 		}
 	case item.ParentID != 0:
 		parents, err := c.FetchWorkItemsByIDs(ctx, []int{item.ParentID})
 		if err != nil {
-			return err
+			return item, err
 		}
 		if len(parents) > 0 {
 			parent = &parents[0]
 		}
 	}
-	return EvaluateTimeLogTarget(*item, parent, children, c.cfg.UserID)
+	return item, EvaluateTimeLogTarget(*item, parent, children, c.cfg.UserID)
 }
 
 // EvaluateTimeLogTarget is the pure TimeLog bug-guard rule, kept free of HTTP

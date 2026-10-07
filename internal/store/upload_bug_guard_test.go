@@ -16,10 +16,10 @@ import (
 
 // guardAzureServer fakes every Azure endpoint an upload touches: single work
 // item reads ($expand=relations), batch work item reads (ids=...), TimeLog
-// POSTs, the TimeLog documents GET, and the CompletedWork PATCH. It records
-// how many work item reads were made, which work item ids were posted to
-// TimeLog, how often the documents were listed, and every CompletedWork
-// value patched. The documents GET returns priorDocs plus one 60-minute-per-
+// POSTs, the TimeLog documents GET, and the effort PATCH. It records how many
+// work item reads were made, which work item ids were posted to TimeLog, how
+// often the documents were listed, and every field value patched per work
+// item. The documents GET returns priorDocs plus one 60-minute-per-
 // hour document for every successful POST.
 type guardAzureServer struct {
 	*httptest.Server
@@ -31,8 +31,7 @@ type guardAzureServer struct {
 	docListings   int
 	failDocs      bool
 	failPatch     bool
-	completedWork map[int]float64
-	patchedFields map[int][]string
+	patched       map[int]map[string]float64
 }
 
 func newGuardAzureServer(t *testing.T) *guardAzureServer {
@@ -42,9 +41,10 @@ func newGuardAzureServer(t *testing.T) *guardAzureServer {
 	}
 	fields := map[int]string{
 		171191: `"System.Title":"Login falla","System.WorkItemType":"Bug"`,
-		171306: `"System.Title":"Atención y/o Corrección del defecto 171306","System.WorkItemType":"Task","System.AssignedTo":{"displayName":"Me","id":"me-id"}`,
+		171306: `"System.Title":"Atención y/o Corrección del defecto 171306","System.WorkItemType":"Task","Microsoft.VSTS.Scheduling.OriginalEstimate":4,"System.AssignedTo":{"displayName":"Me","id":"me-id"}`,
 		171323: `"System.Title":"Verificación y validación del defecto 171323","System.WorkItemType":"Task","System.AssignedTo":{"displayName":"Jane Doe","id":"jane-id"}`,
-		156263: `"System.Title":"Transversal","System.WorkItemType":"Task"`,
+		156263: `"System.Title":"Transversal","System.WorkItemType":"Task","Microsoft.VSTS.Scheduling.OriginalEstimate":0.5`,
+		171400: `"System.Title":"Sin estimado","System.WorkItemType":"Task"`,
 	}
 	relations := map[int]string{
 		171191: rel("Forward", 171306) + "," + rel("Forward", 171323),
@@ -52,7 +52,7 @@ func newGuardAzureServer(t *testing.T) *guardAzureServer {
 		171323: rel("Reverse", 171191),
 	}
 
-	g := &guardAzureServer{completedWork: map[int]float64{}, patchedFields: map[int][]string{}}
+	g := &guardAzureServer{patched: map[int]map[string]float64{}}
 	g.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		g.mu.Lock()
 		defer g.mu.Unlock()
@@ -92,9 +92,11 @@ func newGuardAzureServer(t *testing.T) *guardAzureServer {
 			}
 			body, _ := io.ReadAll(r.Body)
 			_ = json.Unmarshal(body, &ops)
+			if g.patched[id] == nil {
+				g.patched[id] = map[string]float64{}
+			}
 			for _, op := range ops {
-				g.patchedFields[id] = append(g.patchedFields[id], op.Path)
-				g.completedWork[id] = op.Value
+				g.patched[id][op.Path] = op.Value
 			}
 			w.Write([]byte(`{}`)) //nolint:errcheck
 			return
@@ -177,7 +179,9 @@ func TestUploadActivities_BugGuard(t *testing.T) {
 		},
 		{name: "bug child task assigned to me uploaded", workItemID: 171306, wantReads: 2},
 		{name: "standalone task uploaded", workItemID: 156263, wantReads: 1},
-		{name: "guard off uploads a bug without reading Azure", workItemID: 171191, guardOff: true, wantReads: 0},
+		// With the guard off the only read is the effort sync's batch
+		// OriginalEstimate lookup — no hierarchy check.
+		{name: "guard off uploads a bug without the hierarchy check", workItemID: 171191, guardOff: true, wantReads: 1},
 	}
 
 	for _, tt := range tests {
@@ -273,20 +277,27 @@ func TestUploadActivities_BugGuardCachesPerWorkItem(t *testing.T) {
 	}
 }
 
-// TestUploadActivities_SyncsCompletedWork verifies that after a batch posts,
-// each work item with at least one successful post gets CompletedWork set to
-// its TimeLog total (prior documents + this batch), from a single documents
-// listing, without touching RemainingWork; a rejected row's work item is not
-// synced.
-func TestUploadActivities_SyncsCompletedWork(t *testing.T) {
+const (
+	completedWorkField = "/fields/Microsoft.VSTS.Scheduling.CompletedWork"
+	remainingWorkField = "/fields/Microsoft.VSTS.Scheduling.RemainingWork"
+)
+
+// TestUploadActivities_SyncsEffort verifies that after a batch posts, each
+// work item with at least one successful post gets CompletedWork set to its
+// TimeLog total (prior documents + this batch) from a single documents
+// listing, and RemainingWork set to max(0, OriginalEstimate-total) only when
+// it has an estimate. With the guard on, the estimate comes from the guard's
+// own read (no extra request); a rejected row's work item is not synced.
+func TestUploadActivities_SyncsEffort(t *testing.T) {
 	s, err := OpenInMemory()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
 	ctx := context.Background()
-	approvedActivityOn(t, s, 171306)
-	approvedActivityOn(t, s, 156263)
+	approvedActivityOn(t, s, 171306) // estimate 4 > total 2.5
+	approvedActivityOn(t, s, 156263) // estimate 0.5 < total 1 -> floors at 0
+	approvedActivityOn(t, s, 171400) // no estimate -> RemainingWork untouched
 	approvedActivityOn(t, s, 171191) // Bug: rejected by the guard
 
 	srv := newGuardAzureServer(t)
@@ -297,8 +308,8 @@ func TestUploadActivities_SyncsCompletedWork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.UploadedCount != 2 || len(result.FailedIDs) != 1 {
-		t.Fatalf("expected 2 uploads and 1 rejection, got %d / %v", result.UploadedCount, result.FailedIDs)
+	if result.UploadedCount != 3 || len(result.FailedIDs) != 1 {
+		t.Fatalf("expected 3 uploads and 1 rejection, got %d / %v", result.UploadedCount, result.FailedIDs)
 	}
 	if len(result.EffortSyncErrors) != 0 {
 		t.Errorf("expected no effort sync errors, got %v", result.EffortSyncErrors)
@@ -306,14 +317,55 @@ func TestUploadActivities_SyncsCompletedWork(t *testing.T) {
 	if srv.docListings != 1 {
 		t.Errorf("expected TimeLog documents to be listed once per batch, got %d", srv.docListings)
 	}
-	want := map[int]float64{171306: 2.5, 156263: 1}
-	if fmt.Sprint(srv.completedWork) != fmt.Sprint(want) {
-		t.Errorf("expected CompletedWork %v, got %v", want, srv.completedWork)
+	// Guard reads only: 156263 and 171400 = 1 each; 171306 (bug child) = its
+	// read + parent batch; the bug = its read + children batch. No estimate
+	// batch read on top.
+	if srv.reads != 6 {
+		t.Errorf("expected estimates to be reused from the guard's reads (6 reads), got %d", srv.reads)
 	}
-	for id, paths := range srv.patchedFields {
-		if len(paths) != 1 || paths[0] != "/fields/Microsoft.VSTS.Scheduling.CompletedWork" {
-			t.Errorf("work item %d: expected only CompletedWork to be patched, got %v", id, paths)
-		}
+	want := map[int]map[string]float64{
+		171306: {completedWorkField: 2.5, remainingWorkField: 1.5},
+		156263: {completedWorkField: 1, remainingWorkField: 0},
+		171400: {completedWorkField: 1},
+	}
+	if fmt.Sprint(srv.patched) != fmt.Sprint(want) {
+		t.Errorf("unexpected effort patches:\n got: %v\nwant: %v", srv.patched, want)
+	}
+}
+
+// TestUploadActivities_SyncsEffortWithGuardOff verifies the estimate is read
+// in one batch request when the guard didn't already read the work items.
+func TestUploadActivities_SyncsEffortWithGuardOff(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	if err := s.SetTimeLogBugGuardEnabled(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	approvedActivityOn(t, s, 171306)
+	approvedActivityOn(t, s, 171400)
+
+	srv := newGuardAzureServer(t)
+	defer srv.Close()
+	result, err := s.UploadActivities(ctx, "2026-06-12", srv.client())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.UploadedCount != 2 || len(result.EffortSyncErrors) != 0 {
+		t.Fatalf("expected 2 clean uploads, got %+v", result)
+	}
+	if srv.reads != 1 {
+		t.Errorf("expected a single batch estimate read, got %d reads", srv.reads)
+	}
+	want := map[int]map[string]float64{
+		171306: {completedWorkField: 1, remainingWorkField: 3},
+		171400: {completedWorkField: 1},
+	}
+	if fmt.Sprint(srv.patched) != fmt.Sprint(want) {
+		t.Errorf("unexpected effort patches:\n got: %v\nwant: %v", srv.patched, want)
 	}
 }
 
@@ -327,8 +379,8 @@ func TestUploadActivities_EffortSyncFailureIsNonFatal(t *testing.T) {
 		failPatch bool
 		wantErr   string
 	}{
-		{name: "documents listing fails", failDocs: true, wantErr: "completed work sync: azure: unexpected fetch time log documents status 500"},
-		{name: "patch fails", failPatch: true, wantErr: "completed work sync for work item 171306: azure: unexpected patch work item status 403"},
+		{name: "documents listing fails", failDocs: true, wantErr: "effort sync: azure: unexpected fetch time log documents status 500"},
+		{name: "patch fails", failPatch: true, wantErr: "effort sync for work item 171306: azure: unexpected patch work item status 403"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
