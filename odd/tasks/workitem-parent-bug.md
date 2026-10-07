@@ -38,3 +38,6 @@ Bug child tasks are always titled "Atención y/o Corrección del defecto 171308"
 
 ## Checks
 `go test ./...`, `go vet ./...`; in `frontend/`: `npm test`, `npx tsc -b`, `npm run lint` (compare to base 32 pre-existing errors).
+
+## T3 (user request, affb444)
+- [x] T3 — Bug child Task rows (catalogued and "Asignados en Azure sin catalogar") show an "Evidencia" action on the parent Bug line that opens the DSW-PR-017 evidence panel (tracking, comments, root cause) for the parent bug id. Why: hours now go to the correction Task, so the Bug itself is no longer catalogued and its evidence action was unreachable. The evidence endpoint only needs the bug id (no catalog dependency). Route: inline (one file + test). Evidence: RED (1 failing test) → GREEN; `npm test` 132/132, `tsc -b` ok, eslint on touched file: 3 pre-existing set-state-in-effect errors only.
