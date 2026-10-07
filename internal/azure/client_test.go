@@ -1355,6 +1355,26 @@ func TestFetchTimeLogDocuments_WrappedItemsShape(t *testing.T) {
 	}
 }
 
+func TestFetchTimeLogDocuments_DecimalMinutes(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`[{"workItemId":555,"minutes":480.0},{"workItemId":555,"minutes":30.5}]`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	c := &Client{
+		cfg:  Config{Token: "x", AuthMode: AuthModeBearer, Org: "ORG"},
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+	docs, err := c.FetchTimeLogDocuments(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := TimeLogHours(docs, 555); got != 8.51 {
+		t.Errorf("TimeLogHours = %v, want 8.51", got)
+	}
+}
+
 func TestSyncEffortFromTimeLog_ComputesTotalsAndPatches(t *testing.T) {
 	var patchOps []patchOp
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

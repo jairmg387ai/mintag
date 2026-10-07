@@ -44,10 +44,44 @@ func azureClientForTest(srv *httptest.Server) *azure.Client {
 	}
 	c := azure.NewClient(cfg)
 	// Replace the internal http.Client transport to redirect calls to the test server.
+	// Work item reads made by the bug guard (on by default) and the
+	// post-upload CompletedWork sync calls are answered locally (see
+	// azureSideCallStubTransport), so these tests' servers only ever see the
+	// TimeLog POSTs their responders count and inspect. Guard and sync
+	// behavior are covered in upload_bug_guard_test.go.
 	c.SetHTTPClient(&http.Client{
-		Transport: uploadRedirectToServer(srv.URL),
+		Transport: azureSideCallStubTransport{next: uploadRedirectToServer(srv.URL)},
 	})
 	return c
+}
+
+// azureSideCallStubTransport answers the Azure calls an upload makes besides
+// the TimeLog POST: a work item GET gets a Task with no parent (always
+// allowed by the bug guard), the TimeLog documents GET gets an empty list,
+// and the CompletedWork PATCH succeeds. Every other request goes to next.
+type azureSideCallStubTransport struct {
+	next http.RoundTripper
+}
+
+func (rt azureSideCallStubTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	var body string
+	switch {
+	case req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/_apis/wit/workitems/"):
+		id := req.URL.Path[strings.LastIndex(req.URL.Path, "/")+1:]
+		body = `{"id":` + id + `,"fields":{"System.Title":"Standalone","System.WorkItemType":"Task"}}`
+	case req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/Documents"):
+		body = `[]`
+	case req.Method == http.MethodPatch:
+		body = `{}`
+	default:
+		return rt.next.RoundTrip(req)
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Request:    req,
+	}, nil
 }
 
 // uploadRedirectTransport rewrites all request hosts to the given base URL (test server).

@@ -300,6 +300,8 @@ export interface UploadResult {
   failed_ids: number[]
   errors: string[]
   azure_document_ids?: Record<string, string>
+  /** Non-fatal failures syncing Completed Work after the upload; the hours were still uploaded. */
+  effort_sync_errors?: string[]
 }
 
 export interface AzureTimeLogConfigStatus {
@@ -351,6 +353,8 @@ export interface ActivityValidationSettings {
   max_hours_per_entry: boolean
   weekend_confirm: boolean
   block_closed_work_item: boolean
+  /** TimeLog bug guard; unlike the other toggles it defaults to true. */
+  block_bug_work_item: boolean
 }
 export type TaskViewName = 'list' | 'kanban'
 export type ModalName = 'task' | 'new-task' | 'import' | 'new-project' | 'meeting' | 'bug-evidence' | null

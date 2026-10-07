@@ -164,6 +164,15 @@ func (srv *Server) handleCreateActivity(w http.ResponseWriter, r *http.Request) 
 	}
 
 	ctx := r.Context()
+	// The bug guard is checked before the row exists so a rejected link
+	// doesn't leave an unlinked activity behind; SetActivityAzureActivity
+	// (via applyAzureActivityID) enforces it again for PATCH and MCP callers.
+	if body.AzureActivityID != nil {
+		if err := srv.st.RejectBugAzureActivity(ctx, *body.AzureActivityID); err != nil {
+			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+			return
+		}
+	}
 	a, err := srv.st.CreateActivity(ctx, body.Date, body.Hours, body.Project, body.Category, body.RegistroDiario, body.Source)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
@@ -988,18 +997,37 @@ func (srv *Server) handleGetActivityValidationSettings(w http.ResponseWriter, r 
 }
 
 // PUT /api/settings/activity-validation
-// Body: {"max_hours_per_entry": bool, "weekend_confirm": bool, "block_closed_work_item": bool}
-// All three toggles are written together — see
-// SetActivityValidationSettings' doc comment for why there is no partial
-// update here, unlike catalog-retention's independent nil-clears-one fields.
+// Body: {"max_hours_per_entry": bool, "weekend_confirm": bool, "block_closed_work_item": bool, "block_bug_work_item": bool}
+// All toggles are written together — see SetActivityValidationSettings' doc
+// comment for why there is no partial update here, unlike catalog-retention's
+// independent nil-clears-one fields. The one exception is
+// block_bug_work_item: it defaults ON, so a client that predates it (and
+// sends only the original three) must not silently switch the guard off by
+// omission — an absent field keeps the current value.
 func (srv *Server) handleSetActivityValidationSettings(w http.ResponseWriter, r *http.Request) {
-	var body store.ActivityValidationSettings
+	var body struct {
+		store.ActivityValidationSettings
+		// Shadows the embedded field (shallower depth wins in encoding/json)
+		// so omission can be told apart from an explicit false.
+		BlockBugWorkItem *bool `json:"block_bug_work_item"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	ctx := r.Context()
-	if err := srv.st.SetActivityValidationSettings(ctx, body); err != nil {
+	settings := body.ActivityValidationSettings
+	if body.BlockBugWorkItem != nil {
+		settings.BlockBugWorkItem = *body.BlockBugWorkItem
+	} else {
+		current, err := srv.st.TimeLogBugGuardEnabled(ctx)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		settings.BlockBugWorkItem = current
+	}
+	if err := srv.st.SetActivityValidationSettings(ctx, settings); err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
 	}

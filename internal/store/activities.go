@@ -35,6 +35,11 @@ type UploadResult struct {
 	FailedIDs        []int64          `json:"failed_ids"`
 	Errors           []string         `json:"errors"`
 	AzureDocumentIDs map[int64]string `json:"azure_document_ids,omitempty"`
+	// EffortSyncErrors are non-fatal failures of the post-upload effort sync
+	// (CompletedWork/RemainingWork, see UploadActivities): the hours were
+	// uploaded and the rows marked uploaded regardless; only the work item's
+	// effort fields may be stale.
+	EffortSyncErrors []string `json:"effort_sync_errors,omitempty"`
 }
 
 // validateActivity checks inputs before any DB write.
@@ -375,7 +380,8 @@ func (s *Store) MarkUploaded(ctx context.Context, id int64, azureDocumentID stri
 // addColumnIfMissing("daily_activities", "azure_activity_id", ...) in
 // store.go), so this validates at the application level: when
 // azureActivityID is non-nil, it must reference an existing, active
-// (is_active=1) row in azure_activities.
+// (is_active=1) row in azure_activities, and — with the TimeLog bug guard
+// on — not a catalogued Bug (see RejectBugAzureActivity).
 func (s *Store) SetActivityAzureActivity(ctx context.Context, id int64, azureActivityID *int64) error {
 	if azureActivityID != nil {
 		var isActive bool
@@ -390,6 +396,9 @@ func (s *Store) SetActivityAzureActivity(ctx context.Context, id int64, azureAct
 		}
 		if !isActive {
 			return fmt.Errorf("azure activity %d is inactive and cannot be assigned", *azureActivityID)
+		}
+		if err := s.RejectBugAzureActivity(ctx, *azureActivityID); err != nil {
+			return err
 		}
 	}
 

@@ -888,9 +888,12 @@ func (c *Client) FetchWorkItemFull(ctx context.Context, id int) (*WorkItemFull, 
 
 // TimeLogDocument is one entry from the TimeLog extension's Documents
 // collection — the same collection PostTimeEntry/DeleteTimeEntry write to.
+//
+// Minutes is a float because the extension serializes it with a decimal
+// point (e.g. 480.0); decoding into an int fails the whole response.
 type TimeLogDocument struct {
-	WorkItemID int `json:"workItemId"`
-	Minutes    int `json:"minutes"`
+	WorkItemID int     `json:"workItemId"`
+	Minutes    float64 `json:"minutes"`
 }
 
 // FetchTimeLogDocuments lists every TimeLog document in the configured org's
@@ -956,17 +959,11 @@ func (c *Client) SyncEffortFromTimeLog(ctx context.Context, id int, originalEsti
 	if err != nil {
 		return 0, err
 	}
-	var minutes int
-	for _, d := range docs {
-		if d.WorkItemID == id {
-			minutes += d.Minutes
-		}
-	}
-	total := math.Round(float64(minutes)/60*100) / 100
+	total := TimeLogHours(docs, id)
 
 	remaining := 0.0
 	if originalEstimate > 0 {
-		remaining = math.Max(0, math.Round((originalEstimate-total)*100)/100)
+		remaining = remainingWork(originalEstimate, total)
 	}
 
 	if err := c.patchWorkItem(ctx, id, []patchOp{
@@ -976,6 +973,103 @@ func (c *Client) SyncEffortFromTimeLog(ctx context.Context, id int, originalEsti
 		return total, err
 	}
 	return total, nil
+}
+
+// TimeLogHours is the total hours logged in TimeLog for one work item: the
+// sum of its documents' minutes, converted to hours and rounded to 2
+// decimals. Shared by SyncEffortFromTimeLog and the post-upload CompletedWork
+// sync (see store.UploadActivities), which fetches the documents once per
+// batch and evaluates every touched work item against that one snapshot.
+func TimeLogHours(docs []TimeLogDocument, id int) float64 {
+	var minutes float64
+	for _, d := range docs {
+		if d.WorkItemID == id {
+			minutes += d.Minutes
+		}
+	}
+	return math.Round(minutes/60*100) / 100
+}
+
+// remainingWork is max(0, originalEstimate-total) rounded to 2 decimals —
+// floored at 0 so over-logging never produces a negative remaining value.
+// Shared by SyncEffortFromTimeLog and SetEffortFromTimeLogTotal.
+func remainingWork(originalEstimate, total float64) float64 {
+	return math.Max(0, math.Round((originalEstimate-total)*100)/100)
+}
+
+// SetEffortFromTimeLogTotal is the post-upload effort sync (see
+// store.UploadActivities): CompletedWork becomes total (the TimeLog hours,
+// see TimeLogHours) and, when the work item has an OriginalEstimate,
+// RemainingWork becomes remainingWork(originalEstimate, total). Unlike
+// SyncEffortFromTimeLog (the close/recreate flow, which zeroes
+// RemainingWork when there is no estimate), a work item without an estimate
+// keeps its RemainingWork untouched — it is still in progress, and zeroing
+// it mid-work would erase whatever the assignee set by hand.
+func (c *Client) SetEffortFromTimeLogTotal(ctx context.Context, id int, total, originalEstimate float64) error {
+	ops := []patchOp{
+		{Op: "add", Path: "/fields/Microsoft.VSTS.Scheduling.CompletedWork", Value: total},
+	}
+	if originalEstimate > 0 {
+		ops = append(ops, patchOp{Op: "add", Path: "/fields/Microsoft.VSTS.Scheduling.RemainingWork", Value: remainingWork(originalEstimate, total)})
+	}
+	return c.patchWorkItem(ctx, id, ops)
+}
+
+// FetchOriginalEstimates reads Microsoft.VSTS.Scheduling.OriginalEstimate for
+// a batch of work items in one request (org-scoped, like
+// fetchWorkItemDetails), keyed by id. A work item without an estimate maps
+// to 0; one missing from Azure's response is absent from the map. ids must be
+// non-empty and at most 200 (Azure's batch limit) — the post-upload sync
+// touches one work item per distinct uploaded target, far below that.
+func (c *Client) FetchOriginalEstimates(ctx context.Context, ids []int) (map[int]float64, error) {
+	if !c.Enabled() {
+		return nil, fmt.Errorf("Azure TimeLog token is not configured")
+	}
+	idStrs := make([]string, len(ids))
+	for i, id := range ids {
+		idStrs[i] = fmt.Sprintf("%d", id)
+	}
+	url := fmt.Sprintf(
+		"https://dev.azure.com/%s/_apis/wit/workitems?ids=%s&fields=System.Id,Microsoft.VSTS.Scheduling.OriginalEstimate&api-version=7.1",
+		c.cfg.Org, strings.Join(idStrs, ","),
+	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("azure: build original estimates request: %w", err)
+	}
+	c.setAuthHeader(req)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("azure: original estimates http request: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("azure: unexpected original estimates status %d%s", resp.StatusCode, sanitizedResponseMessage(respBody))
+	}
+	if isHTMLResponse(resp.Header.Get("Content-Type"), respBody) {
+		return nil, fmt.Errorf("azure: Azure returned HTML/sign-in response; token may be expired or auth mode invalid")
+	}
+
+	var parsed struct {
+		Value []struct {
+			ID     int `json:"id"`
+			Fields struct {
+				OriginalEstimate float64 `json:"Microsoft.VSTS.Scheduling.OriginalEstimate"`
+			} `json:"fields"`
+		} `json:"value"`
+	}
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return nil, fmt.Errorf("azure: decode original estimates response: %w", err)
+	}
+	out := make(map[int]float64, len(parsed.Value))
+	for _, v := range parsed.Value {
+		out[v.ID] = v.Fields.OriginalEstimate
+	}
+	return out, nil
 }
 
 // IsClosedState reports whether state is a terminal closed state, in either

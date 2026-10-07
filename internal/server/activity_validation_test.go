@@ -211,7 +211,8 @@ func TestActivityValidationSettings_PutRoundTrips(t *testing.T) {
 	assertStatus(t, putResp, http.StatusOK)
 	var putBody store.ActivityValidationSettings
 	decodeJSON(t, putResp, &putBody)
-	want := store.ActivityValidationSettings{MaxHoursPerEntry: true, WeekendConfirm: true, BlockClosedWorkItem: false}
+	// block_bug_work_item is omitted, so the bug guard keeps its default (on).
+	want := store.ActivityValidationSettings{MaxHoursPerEntry: true, WeekendConfirm: true, BlockClosedWorkItem: false, BlockBugWorkItem: true}
 	if putBody != want {
 		t.Errorf("expected %+v, got %+v", want, putBody)
 	}
@@ -221,5 +222,83 @@ func TestActivityValidationSettings_PutRoundTrips(t *testing.T) {
 	decodeJSON(t, getResp, &getBody)
 	if getBody != want {
 		t.Errorf("expected persisted %+v, got %+v", want, getBody)
+	}
+}
+
+// TestCreateActivity_BugCatalogEntry_RejectedBeforeCreate verifies the TimeLog
+// bug guard (on by default) rejects POST /api/activities linking to a
+// catalogued Bug with 422 using only the catalog — no Azure connection is
+// configured — and that no activity row is left behind.
+func TestCreateActivity_BugCatalogEntry_RejectedBeforeCreate(t *testing.T) {
+	base, st := newTestServer(t)
+	ctx := context.Background()
+	entry, err := st.AddAzureActivity(ctx, "RUNT2QA", 171191, "Login falla", "Bug", store.AzureActivityMapping{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp := doJSON(t, http.MethodPost, base+"/api/activities", map[string]any{
+		"date": "2026-06-12", "hours": 1, "project": "RNCEA",
+		"category": "Actividades de arquitectura, diseño y código", "registro_diario": "Trabajo",
+		"azure_activity_id": entry.ID,
+	})
+	assertStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+
+	rows, err := st.ListActivities(ctx, "2026-06-12", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("expected no activity to be created, got %d", len(rows))
+	}
+}
+
+// TestPatchActivity_BugCatalogEntry_Rejected verifies relinking an existing
+// activity to a catalogued Bug is rejected too, and that turning the guard
+// off restores the previous behavior.
+func TestPatchActivity_BugCatalogEntry_Rejected(t *testing.T) {
+	base, st := newTestServer(t)
+	ctx := context.Background()
+	entry, err := st.AddAzureActivity(ctx, "RUNT2QA", 171191, "Login falla", "Bug", store.AzureActivityMapping{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := createPendingActivity(t, st)
+
+	resp := doJSON(t, http.MethodPatch, fmt.Sprintf("%s/api/activities/%d", base, id), map[string]any{"azure_activity_id": entry.ID})
+	assertStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+
+	if err := st.SetTimeLogBugGuardEnabled(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	resp = doJSON(t, http.MethodPatch, fmt.Sprintf("%s/api/activities/%d", base, id), map[string]any{"azure_activity_id": entry.ID})
+	assertStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+}
+
+// TestPutActivityValidationSettings_BlockBugWorkItem verifies the bug guard
+// is the fourth toggle of the activity-validation endpoint: on by default,
+// preserved when a client omits it (an older client sending only the three
+// original toggles must not silently disable it), and settable explicitly.
+func TestPutActivityValidationSettings_BlockBugWorkItem(t *testing.T) {
+	base, st := newTestServer(t)
+	ctx := context.Background()
+
+	resp := doJSON(t, http.MethodPut, base+"/api/settings/activity-validation", map[string]any{"block_closed_work_item": true})
+	assertStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	if on, err := st.TimeLogBugGuardEnabled(ctx); err != nil || !on {
+		t.Fatalf("expected guard to stay on when the field is omitted, got %v (err %v)", on, err)
+	}
+
+	resp = doJSON(t, http.MethodPut, base+"/api/settings/activity-validation", map[string]any{"block_bug_work_item": false})
+	assertStatus(t, resp, http.StatusOK)
+	if body := assertBodyDoesNotContain(t, resp); !strings.Contains(string(body), `"block_bug_work_item":false`) {
+		t.Fatalf("expected response to report block_bug_work_item=false, got %s", body)
+	}
+	if on, err := st.TimeLogBugGuardEnabled(ctx); err != nil || on {
+		t.Fatalf("expected guard off after explicit false, got %v (err %v)", on, err)
 	}
 }

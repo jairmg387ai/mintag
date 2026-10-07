@@ -524,6 +524,11 @@ export function ActivitiesView() {
                 IDs con error: {uploadResult.failed_ids.join(', ')} — {uploadResult.errors.join(', ')}
               </div>
             )}
+            {(uploadResult.effort_sync_errors?.length ?? 0) > 0 && (
+              <div style={{ marginTop: 4, color: 'var(--amber-700)' }}>
+                Horas subidas, pero no se pudo actualizar el esfuerzo (Completed/Remaining Work): {uploadResult.effort_sync_errors?.join(', ')}
+              </div>
+            )}
           </div>
         )}
 
