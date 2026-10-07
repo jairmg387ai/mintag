@@ -43,7 +43,7 @@ Strategy: ask-on-risk. Forecast ~600–800 authored lines (exceeds 400 → chain
 ## Progress / Evidence
 - Branch `feat/bug-child-task-timelog-guard` created from `master`.
 - T1 committed 2ac8fd2; T2 committed 33aa35e.
-- T3: guard enforced in `UploadActivities` (per-upload cache, fail-closed on Azure read errors — accepted). RED observed first (guard tests saw 0 work item reads). Server route-test fakes now answer work item GETs with a standalone Task. `go vet ./...` exit 0; `go test ./...` all ok.
+- T3 committed bfcd467: guard enforced in `UploadActivities` (per-upload cache, fail-closed on Azure read errors — accepted). RED observed first (guard tests saw 0 work item reads). Server route-test fakes now answer work item GETs with a standalone Task. `go vet ./...` exit 0; `go test ./...` all ok.
 - Decisions: T5 adds the guard as a 4th field of `ActivityValidationSettings`; fail-closed accepted.
 
 ## Route log
