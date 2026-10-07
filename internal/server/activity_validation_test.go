@@ -223,3 +223,56 @@ func TestActivityValidationSettings_PutRoundTrips(t *testing.T) {
 		t.Errorf("expected persisted %+v, got %+v", want, getBody)
 	}
 }
+
+// TestCreateActivity_BugCatalogEntry_RejectedBeforeCreate verifies the TimeLog
+// bug guard (on by default) rejects POST /api/activities linking to a
+// catalogued Bug with 422 using only the catalog — no Azure connection is
+// configured — and that no activity row is left behind.
+func TestCreateActivity_BugCatalogEntry_RejectedBeforeCreate(t *testing.T) {
+	base, st := newTestServer(t)
+	ctx := context.Background()
+	entry, err := st.AddAzureActivity(ctx, "RUNT2QA", 171191, "Login falla", "Bug", store.AzureActivityMapping{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp := doJSON(t, http.MethodPost, base+"/api/activities", map[string]any{
+		"date": "2026-06-12", "hours": 1, "project": "RNCEA",
+		"category": "Actividades de arquitectura, diseño y código", "registro_diario": "Trabajo",
+		"azure_activity_id": entry.ID,
+	})
+	assertStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+
+	rows, err := st.ListActivities(ctx, "2026-06-12", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("expected no activity to be created, got %d", len(rows))
+	}
+}
+
+// TestPatchActivity_BugCatalogEntry_Rejected verifies relinking an existing
+// activity to a catalogued Bug is rejected too, and that turning the guard
+// off restores the previous behavior.
+func TestPatchActivity_BugCatalogEntry_Rejected(t *testing.T) {
+	base, st := newTestServer(t)
+	ctx := context.Background()
+	entry, err := st.AddAzureActivity(ctx, "RUNT2QA", 171191, "Login falla", "Bug", store.AzureActivityMapping{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := createPendingActivity(t, st)
+
+	resp := doJSON(t, http.MethodPatch, fmt.Sprintf("%s/api/activities/%d", base, id), map[string]any{"azure_activity_id": entry.ID})
+	assertStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+
+	if err := st.SetTimeLogBugGuardEnabled(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	resp = doJSON(t, http.MethodPatch, fmt.Sprintf("%s/api/activities/%d", base, id), map[string]any{"azure_activity_id": entry.ID})
+	assertStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+}

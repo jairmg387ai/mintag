@@ -375,7 +375,8 @@ func (s *Store) MarkUploaded(ctx context.Context, id int64, azureDocumentID stri
 // addColumnIfMissing("daily_activities", "azure_activity_id", ...) in
 // store.go), so this validates at the application level: when
 // azureActivityID is non-nil, it must reference an existing, active
-// (is_active=1) row in azure_activities.
+// (is_active=1) row in azure_activities, and — with the TimeLog bug guard
+// on — not a catalogued Bug (see RejectBugAzureActivity).
 func (s *Store) SetActivityAzureActivity(ctx context.Context, id int64, azureActivityID *int64) error {
 	if azureActivityID != nil {
 		var isActive bool
@@ -390,6 +391,9 @@ func (s *Store) SetActivityAzureActivity(ctx context.Context, id int64, azureAct
 		}
 		if !isActive {
 			return fmt.Errorf("azure activity %d is inactive and cannot be assigned", *azureActivityID)
+		}
+		if err := s.RejectBugAzureActivity(ctx, *azureActivityID); err != nil {
+			return err
 		}
 	}
 

@@ -24,8 +24,9 @@ The team's new process creates specific child Tasks under each Bug (e.g. Bug 171
 - [x] T1 — Store: guard setting (get/set, default ON) + tests. Evidence: `go test ./internal/store/ -run TimeLogBugGuard` RED (undefined symbols) → GREEN (2 PASS). Key `activity.validation.block_bug_work_item`.
 - [x] T2 — Azure client: fetch work item hierarchy (type, assignee id, parent id/type, child tasks with assignee) via `$expand=relations` + tests. Evidence: `go test ./internal/azure/` RED (undefined WorkItemHierarchy) → GREEN (ok). Adds `FetchWorkItemHierarchy`, `CheckTimeLogTarget`, pure `EvaluateTimeLogTarget`, `*TimeLogTargetError`.
 - [x] T3 — Upload guard: enforce rules per activity in `UploadActivities`; failed row with actionable message + tests. Evidence: `go test ./...` all ok, `go vet ./...` clean.
-- [ ] T4 — Registration fail-fast: reject activity create/update pointing at a catalogued `Bug` when guard ON (store/server/MCP) + tests.
+- [x] T4 — Registration fail-fast: reject activity create/update pointing at a catalogued `Bug` when guard ON (store/server/MCP) + tests. Evidence: RED (store link accepted, REST 201/200) → GREEN; `go test ./...` ok. `Store.RejectBugAzureActivity` runs in `SetActivityAzureActivity` and before row creation in `handleCreateActivity`. MCP `activity_log`/`activity_update` take no `azure_activity_id`, so there is nothing to link there (N/A).
 - [ ] T5 — Config surface: REST GET/PUT, MCP tool, UI toggle; update `activity-autolog` skill to resolve bug → assigned child task.
+- [ ] T6 — After a successful upload, sync each touched work item's `Microsoft.VSTS.Scheduling.CompletedWork` to the TimeLog total (once per work item per batch, TimeLog documents fetched once). RemainingWork untouched. Best-effort: sync failure does not undo the upload; surfaced in `UploadResult` as non-fatal errors. Tests.
 
 ## Acceptance criteria
 - Guard ON by default on a fresh DB.
@@ -33,17 +34,18 @@ The team's new process creates specific child Tasks under each Bug (e.g. Bug 171
 - Uploading to a bug child Task assigned to someone else fails; assigned to me succeeds.
 - Uploading to a standalone Task succeeds.
 - Guard OFF restores previous behavior.
+- After upload, each touched Task shows Completed Work = total hours logged in TimeLog for it.
 
 ## Checks
 `go test ./...`, `go vet ./...`, `npm run lint` + `npm run build` in `frontend/` (T5).
 
 ## Delivery
-Strategy: ask-on-risk. Forecast ~600–800 authored lines (exceeds 400 → chain strategy decision before crossing budget).
+Strategy: single-pr (user decision 2026-10-07; branch already >1000 lines, exception accepted). Forecast ~600–800 authored lines (exceeds 400 → chain strategy decision before crossing budget).
 
 ## Progress / Evidence
 - Branch `feat/bug-child-task-timelog-guard` created from `master`.
 - T1 committed 2ac8fd2; T2 committed 33aa35e.
-- T3 committed bfcd467: guard enforced in `UploadActivities` (per-upload cache, fail-closed on Azure read errors — accepted). RED observed first (guard tests saw 0 work item reads). Server route-test fakes now answer work item GETs with a standalone Task. `go vet ./...` exit 0; `go test ./...` all ok.
+- T3 committed bfcd467 (hash recorded in 683d1aa): guard enforced in `UploadActivities` (per-upload cache, fail-closed on Azure read errors — accepted). RED observed first (guard tests saw 0 work item reads). Server route-test fakes now answer work item GETs with a standalone Task. `go vet ./...` exit 0; `go test ./...` all ok.
 - Decisions: T5 adds the guard as a 4th field of `ActivityValidationSettings`; fail-closed accepted.
 
 ## Route log

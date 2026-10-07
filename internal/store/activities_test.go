@@ -847,7 +847,7 @@ func TestApproveActivities_TouchesProjectAndAzureActivityLastUsed(t *testing.T) 
 	if err := s.AddTimelogProject("RNCEA"); err != nil {
 		t.Fatal(err)
 	}
-	azureActivity, err := s.AddAzureActivity(ctx, "RUNT2QA", 999040, "Linked Bug", "Bug", AzureActivityMapping{})
+	azureActivity, err := s.AddAzureActivity(ctx, "RUNT2QA", 999040, "Linked Task", "Task", AzureActivityMapping{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -901,7 +901,7 @@ func TestSetActivityAzureActivity_TouchesLastUsedOnLink(t *testing.T) {
 	defer s.Close()
 
 	ctx := context.Background()
-	azureActivity, err := s.AddAzureActivity(ctx, "RUNT2QA", 999041, "Linked Bug", "Bug", AzureActivityMapping{})
+	azureActivity, err := s.AddAzureActivity(ctx, "RUNT2QA", 999041, "Linked Task", "Task", AzureActivityMapping{})
 	if err != nil {
 		t.Fatal(err)
 	}

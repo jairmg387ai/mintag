@@ -164,6 +164,15 @@ func (srv *Server) handleCreateActivity(w http.ResponseWriter, r *http.Request) 
 	}
 
 	ctx := r.Context()
+	// The bug guard is checked before the row exists so a rejected link
+	// doesn't leave an unlinked activity behind; SetActivityAzureActivity
+	// (via applyAzureActivityID) enforces it again for PATCH and MCP callers.
+	if body.AzureActivityID != nil {
+		if err := srv.st.RejectBugAzureActivity(ctx, *body.AzureActivityID); err != nil {
+			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+			return
+		}
+	}
 	a, err := srv.st.CreateActivity(ctx, body.Date, body.Hours, body.Project, body.Category, body.RegistroDiario, body.Source)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
