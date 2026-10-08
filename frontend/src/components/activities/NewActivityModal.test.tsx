@@ -2,12 +2,13 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ActivityCatalog, ActivityValidationSettings, AzureActivity } from '../../types'
-import { createActivity, getActivityValidationSettings } from '../../api/client'
+import { createActivity, fetchWorkItemEffort, getActivityValidationSettings } from '../../api/client'
 import { NewActivityModal } from './NewActivityModal'
 
 vi.mock('../../api/client', () => ({
   createActivity: vi.fn(),
   getActivityValidationSettings: vi.fn(),
+  fetchWorkItemEffort: vi.fn(),
 }))
 
 const ALL_VALIDATIONS_OFF: ActivityValidationSettings = {
@@ -80,6 +81,8 @@ describe('NewActivityModal Azure activity picker', () => {
     vi.mocked(createActivity).mockResolvedValue({} as never)
     vi.mocked(getActivityValidationSettings).mockReset()
     vi.mocked(getActivityValidationSettings).mockResolvedValue(ALL_VALIDATIONS_OFF)
+    vi.mocked(fetchWorkItemEffort).mockReset()
+    vi.mocked(fetchWorkItemEffort).mockResolvedValue({ org: 'my-org', items: [] })
   })
 
   it('filters the candidate list as the user types', async () => {
@@ -270,5 +273,71 @@ describe('NewActivityModal configurable validations', () => {
     await waitFor(() => expect(createActivity).toHaveBeenCalled())
     expect(confirmSpy).not.toHaveBeenCalled()
     confirmSpy.mockRestore()
+  })
+})
+
+describe('NewActivityModal work item effort', () => {
+  beforeEach(() => {
+    vi.mocked(createActivity).mockReset()
+    vi.mocked(createActivity).mockResolvedValue({} as never)
+    vi.mocked(getActivityValidationSettings).mockReset()
+    vi.mocked(getActivityValidationSettings).mockResolvedValue(ALL_VALIDATIONS_OFF)
+    vi.mocked(fetchWorkItemEffort).mockReset()
+    vi.mocked(fetchWorkItemEffort).mockImplementation(async ids => ({
+      org: 'my-org',
+      items: ids.map(id => ({
+        id,
+        original_estimate: 10,
+        uploaded_hours: 6,
+        local_hours: 0.5,
+        remaining: 3.5,
+        has_estimate: true,
+      })),
+    }))
+  })
+
+  it('shows the effort of the default work item when no activity is picked', async () => {
+    renderModal()
+
+    expect(await screen.findByTestId('work-item-effort')).toHaveTextContent(
+      'Estimado 10h · Registrado 6h (+0.5h sin subir) · Quedan 3.5h',
+    )
+    expect(fetchWorkItemEffort).toHaveBeenCalledWith([4521])
+  })
+
+  it('fetches the effort of the selected work item', async () => {
+    const user = userEvent.setup()
+    renderModal()
+    await screen.findByTestId('work-item-effort')
+
+    const input = screen.getByRole('combobox', { name: 'Actividad de Azure' })
+    await user.click(input)
+    await user.click(screen.getByRole('option', { name: /Deploy pipeline/ }))
+
+    await waitFor(() => expect(fetchWorkItemEffort).toHaveBeenLastCalledWith([9001]))
+  })
+
+  it('warns without blocking when the entered hours exceed the remaining hours', async () => {
+    const user = userEvent.setup()
+    renderModal()
+    await screen.findByTestId('work-item-effort')
+
+    await fillRequiredFields(user) // 2h, within the 3.5h left
+    expect(screen.queryByText(/superan lo que queda/i)).not.toBeInTheDocument()
+
+    await user.clear(screen.getByPlaceholderText('0.00'))
+    await user.type(screen.getByPlaceholderText('0.00'), '4')
+    expect(screen.getByText('Estas horas superan lo que queda en el work item (quedan 3.5h).')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Crear actividad' }))
+    expect(createActivity).toHaveBeenCalledWith(expect.objectContaining({ hours: 4 }))
+  })
+
+  it('shows nothing when the effort fetch fails', async () => {
+    vi.mocked(fetchWorkItemEffort).mockRejectedValue(new Error('503'))
+    renderModal()
+
+    await waitFor(() => expect(fetchWorkItemEffort).toHaveBeenCalled())
+    expect(screen.queryByTestId('work-item-effort')).not.toBeInTheDocument()
   })
 })

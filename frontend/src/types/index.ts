@@ -343,6 +343,27 @@ export interface AssignedAzureWorkItemsResponse {
   items: AssignedAzureWorkItem[]
 }
 
+// WorkItemEffort is one work item's effort snapshot from
+// GET /api/activities/azure-work-items/effort. uploaded_hours is already in
+// Azure TimeLog; local_hours is Mintag activities (pending/approved) not
+// uploaded yet; remaining = max(0, estimate - uploaded - local).
+export interface WorkItemEffort {
+  id: number
+  original_estimate: number
+  uploaded_hours: number
+  local_hours: number
+  remaining: number
+  has_estimate: boolean
+}
+
+export interface WorkItemEffortResponse {
+  org: string
+  items: WorkItemEffort[]
+  // Non-empty when the TimeLog snapshot could not be read; uploaded_hours is
+  // then unreliable (estimates and local hours still are).
+  timelog_error?: string
+}
+
 export interface UploadResult {
   uploaded_count: number
   failed_ids: number[]

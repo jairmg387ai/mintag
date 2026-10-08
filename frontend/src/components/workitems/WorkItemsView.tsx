@@ -20,6 +20,8 @@ import { Card, CardHeader } from '../ui/Card'
 import { CreateWorkItemModal } from './CreateWorkItemModal'
 import { CreateBugCorrectionTaskModal } from './CreateBugCorrectionTaskModal'
 import { AzureWorkItemStateBadge } from './AzureWorkItemStateBadge'
+import { WorkItemEffort } from '../shared/WorkItemEffort'
+import { useWorkItemEffort } from '../../hooks/useWorkItemEffort'
 
 const PAGE_SIZE = 20
 
@@ -99,6 +101,8 @@ export function WorkItemsView() {
   const [editCategory, setEditCategory] = useState('')
   const [catalogBusyId, setCatalogBusyId] = useState<number | null>(null)
   const [catalogError, setCatalogError] = useState('')
+  // Bumped by "Refrescar estados" so the effort of the current page reloads too.
+  const [effortReloadKey, setEffortReloadKey] = useState(0)
 
   const loadAzureActivities = useCallback((includeInactive: boolean) => {
     setActivitiesLoading(true)
@@ -165,6 +169,41 @@ export function WorkItemsView() {
     return assignee.trim().toLowerCase() === me.trim().toLowerCase()
   }
 
+  const normalizedSearch = searchQuery.trim().toLowerCase()
+  const visibleActivities = azureActivities.filter(a => {
+    if (hideBugs && a.work_item_type === 'Bug') return false
+    if (hideTasks && a.work_item_type === 'Task') return false
+    // A row whose state hasn't been fetched yet is never hidden
+    // by this filter — unknown is not "closed".
+    if (hideClosed && isClosedAzureState(knownState(a))) return false
+    if (normalizedSearch) {
+      const haystack = [
+        String(a.work_item_id),
+        a.org,
+        a.label,
+        a.work_item_type,
+        a.project ?? '',
+        categoryName(a.category_id),
+      ].join(' ').toLowerCase()
+      if (!haystack.includes(normalizedSearch)) return false
+    }
+    return true
+  })
+  const totalPages = Math.max(1, Math.ceil(visibleActivities.length / PAGE_SIZE))
+  const currentPage = Math.min(page, totalPages)
+  const pageStart = (currentPage - 1) * PAGE_SIZE
+  const pagedActivities = visibleActivities.slice(pageStart, pageStart + PAGE_SIZE)
+  // Effort is only fetched for the rows on screen, not the whole catalog.
+  const effort = useWorkItemEffort(
+    activitiesLoading ? [] : pagedActivities.map(a => a.work_item_id),
+    effortReloadKey,
+  )
+  const effortNotice = effort.error
+    ? 'No se pudieron cargar las horas de los work items.'
+    : effort.timelogError
+      ? `Horas registradas en TimeLog no disponibles: ${effort.timelogError}`
+      : ''
+
   async function refreshStates() {
     setStatesLoading(true)
     try {
@@ -173,6 +212,7 @@ export function WorkItemsView() {
       const byId: Record<number, AssignedAzureWorkItem> = {}
       for (const item of items) byId[item.id] = item
       setLiveStates(byId)
+      setEffortReloadKey(k => k + 1)
       // The backend persists each item's live state/type and parent work item
       // into the catalog (see SyncAzureActivityLiveState/SyncAzureActivityParent)
       // — reload so a work item reclassified in Azure (e.g. Bug -> Task) picks
@@ -640,27 +680,6 @@ export function WorkItemsView() {
               </div>
             )}
             {(() => {
-              const normalizedSearch = searchQuery.trim().toLowerCase()
-              const visibleActivities = azureActivities.filter(a => {
-                if (hideBugs && a.work_item_type === 'Bug') return false
-                if (hideTasks && a.work_item_type === 'Task') return false
-                // A row whose state hasn't been fetched yet is never hidden
-                // by this filter — unknown is not "closed".
-                if (hideClosed && isClosedAzureState(knownState(a))) return false
-                if (normalizedSearch) {
-                  const haystack = [
-                    String(a.work_item_id),
-                    a.org,
-                    a.label,
-                    a.work_item_type,
-                    a.project ?? '',
-                    categoryName(a.category_id),
-                  ].join(' ').toLowerCase()
-                  if (!haystack.includes(normalizedSearch)) return false
-                }
-                return true
-              })
-
               if (activitiesLoading) {
                 return (
                   <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--fg3)', font: 'var(--text-body)' }}>
@@ -683,13 +702,23 @@ export function WorkItemsView() {
                 )
               }
 
-              const totalPages = Math.max(1, Math.ceil(visibleActivities.length / PAGE_SIZE))
-              const currentPage = Math.min(page, totalPages)
-              const pageStart = (currentPage - 1) * PAGE_SIZE
-              const pagedActivities = visibleActivities.slice(pageStart, pageStart + PAGE_SIZE)
-
               return (
                 <>
+                  {effortNotice && (
+                    <div
+                      role="status"
+                      style={{
+                        padding: '6px 10px',
+                        marginBottom: 8,
+                        background: 'var(--amber-50)',
+                        color: 'var(--amber-700)',
+                        borderRadius: 'var(--radius-md)',
+                        font: 'var(--text-caption)',
+                      }}
+                    >
+                      {effortNotice}
+                    </div>
+                  )}
                   <div style={{ overflowX: 'auto' }}>
                     <table className="mt-table">
                       <thead>
@@ -700,6 +729,7 @@ export function WorkItemsView() {
                           <th>PROYECTO</th>
                           <th>CATEGORÍA</th>
                           <th>ESTADO</th>
+                          <th>HORAS</th>
                           <th>CATÁLOGO</th>
                           <th>AZURE</th>
                         </tr>
@@ -837,6 +867,11 @@ export function WorkItemsView() {
                               <td>
                                 {knownState(a)
                                   ? <AzureWorkItemStateBadge state={knownState(a)!} />
+                                  : <span style={{ color: 'var(--fg3)' }}>—</span>}
+                              </td>
+                              <td style={{ minWidth: 160 }}>
+                                {effort.byId[a.work_item_id]
+                                  ? <WorkItemEffort effort={effort.byId[a.work_item_id]} />
                                   : <span style={{ color: 'var(--fg3)' }}>—</span>}
                               </td>
                               <td>

@@ -19,6 +19,7 @@ import type {
   CatalogRetentionSettings,
   ActivityValidationSettings,
   AssignedAzureWorkItemsResponse,
+  WorkItemEffortResponse,
   AzureTimeLogConfigStatus,
   AzureDeviceCodeStartResponse,
   AzureDeviceCodeCompleteResponse,
@@ -457,6 +458,30 @@ export function fetchAzureWorkItemStates(ids: number[]): Promise<AssignedAzureWo
   if (ids.length === 0) return Promise.resolve({ org: '', items: [] })
   const qs = new URLSearchParams({ ids: ids.join(',') })
   return request<AssignedAzureWorkItemsResponse>(`/api/activities/azure-work-items/states?${qs}`)
+}
+
+// The effort endpoint accepts at most this many ids per call.
+const WORK_ITEM_EFFORT_CHUNK = 200
+
+// fetchWorkItemEffort reads estimate / logged / remaining hours for the given
+// work item ids. Read-only. Ids are de-duplicated and split into chunks of
+// WORK_ITEM_EFFORT_CHUNK, merging the results (first non-empty timelog_error wins).
+export async function fetchWorkItemEffort(ids: number[]): Promise<WorkItemEffortResponse> {
+  const unique = Array.from(new Set(ids.filter(id => id > 0)))
+  if (unique.length === 0) return { org: '', items: [] }
+  const chunks: number[][] = []
+  for (let i = 0; i < unique.length; i += WORK_ITEM_EFFORT_CHUNK) {
+    chunks.push(unique.slice(i, i + WORK_ITEM_EFFORT_CHUNK))
+  }
+  const responses = await Promise.all(chunks.map(chunk => {
+    const qs = new URLSearchParams({ ids: chunk.join(',') })
+    return request<WorkItemEffortResponse>(`/api/activities/azure-work-items/effort?${qs}`)
+  }))
+  return {
+    org: responses[0]?.org ?? '',
+    items: responses.flatMap(r => r.items ?? []),
+    timelog_error: responses.find(r => r.timelog_error)?.timelog_error ?? '',
+  }
 }
 
 // closeAzureWorkItem closes a Task in Azure DevOps, syncing Completed/Remaining
