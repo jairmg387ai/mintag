@@ -31,6 +31,7 @@ Correction task 171306 (parent Bug 171191), created by CMMI:
 ## Tasks
 - [x] T1 — Backend: bug prefill endpoint (bug title/area/team project/assignee/iteration), Subárea allowed-values endpoint, create-correction-task endpoint (parent link + fields above) + tests (httptest; never hit real Azure). Route: delegated writer.
 - [x] T2 — Frontend: correction-task form modal + entry points + tests. Route: delegated writer.
+- [x] T3 — Frontend follow-up: `ClassificationTreePicker` `teamProject` prop, tree pickers for Iteración/Área in the correction form, and fix R3-draft-effect-refetch-clobbers-edits. Route: delegated writer.
 
 ## Checks
 `go vet ./...`, `go test ./...`; in `frontend/`: `npm test`, `npx tsc -b`, `npm run lint` (baseline 32 errors).
@@ -46,6 +47,12 @@ Correction task 171306 (parent Bug 171191), created by CMMI:
   - RED observed for the WorkItemsView entry-point tests before wiring; modal tests were written before the component but passed on its first run (no separate RED run).
   - `npm test` 16 files / 139 tests pass; `npx tsc -b` clean; `npm run lint` 32 errors (= baseline, none in touched files).
   - Deviation: Iteración/Área use a `<select>` of flattened tree paths for the bug's team project instead of `ClassificationTreePicker`, because that picker has no team-project prop and `ClassificationTreePicker.tsx` was outside the authorized edit surface. Follow-up: add an optional `teamProject` prop to it and reuse it here.
+- T3 — commit `9cf8b22` feat(web): tree pickers and stable draft in bug correction form. Route: delegated writer.
+  - `ClassificationTreePicker` gains optional `teamProject`; loads `fetchClassificationTree(kind, teamProject)` (single-arg call when omitted, so `CreateWorkItemModal` is unchanged), reloads on change, clears its load error on success.
+  - `CreateBugCorrectionTaskModal`: Iteración (required) and Área (prefilled with the bug's area) now use `ClassificationTreePicker` with `teamProject={draft.team_project}`; the in-modal `usePathOptions` tree loading was removed.
+  - R3 fix: the draft/subárea effect depends only on `[open, bugId]`; `loadError` is cleared on a successful load; "Agregar al catálogo" is derived (`userChoice ?? assignee == identity`) so a late `currentUserDisplayName` applies the default without clobbering an explicit toggle, and title/area/assignee edits are never refetched over. No synchronous setState in effects.
+  - Tests: new `ClassificationTreePicker.test.tsx` (default vs teamProject call, reload on change); modal tests for pickers, custom title submitted, identity change keeps edits (single draft/subárea fetch), late identity default, load error cleared; `client.test.ts` covers the `team_project` query string.
+  - RED observed: 10 failing (picker reload + modal tests) before implementation; the client query-string tests passed immediately because `fetchClassificationTree` already accepted `teamProject` from T1. GREEN: `npm test` 17 files / 148 tests pass; `npx tsc -b` clean; `npm run lint` 32 errors (= baseline, none in touched files).
 
 ## Next step
 Native review / PR decision by the user; optional follow-up for `ClassificationTreePicker` team-project support.
