@@ -156,6 +156,44 @@ export interface CreatedWorkItemResponse {
   catalog_error?: string
 }
 
+// BugCorrectionTaskDraft is the prefill for the bug correction Task form
+// (GET /api/azure/bugs/{id}/correction-task-draft).
+export interface BugCorrectionTaskDraft {
+  org: string
+  bug_id: number
+  bug_title: string
+  bug_state: string
+  team_project: string
+  area_path: string
+  iteration_path: string
+  assigned_to: { id: string; display_name: string; unique_name: string }
+  suggested_title: string
+  existing_correction_tasks: { id: number; title: string; state: string }[]
+  // Set when the duplicate lookup failed: existing_correction_tasks is then
+  // unknown rather than empty.
+  existing_tasks_error?: string
+}
+
+export interface CreateBugCorrectionTaskInput {
+  title: string
+  description?: string
+  subarea: string
+  original_estimate: number
+  area_path: string
+  iteration_path: string
+  assigned_to: string
+  add_to_catalog: boolean
+  project?: string
+  category_id?: number
+}
+
+export interface CreatedBugCorrectionTaskResponse {
+  id: number
+  state: string
+  azure_activity_id?: number
+  catalog_error?: string
+}
+
 export interface CloseWorkItemResponse {
   state: string
   hours_synced: number

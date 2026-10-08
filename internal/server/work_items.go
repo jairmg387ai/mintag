@@ -387,10 +387,12 @@ func (srv *Server) reassignAzureWorkItemCatalogEntry(ctx context.Context, oldWor
 	resp["azure_activity_id"] = reassigned.ID
 }
 
-// GET /api/activities/azure-classification-nodes/{kind}
+// GET /api/activities/azure-classification-nodes/{kind}?team_project=X
 // Returns the full Area or Iteration path tree for the configured team
 // project (kind must be "areas" or "iterations"), so the frontend can offer
-// a searchable picker instead of a hand-typed path.
+// a searchable picker instead of a hand-typed path. The optional
+// team_project query param targets another team project (e.g. a Bug's own,
+// for its correction Task); omitted, the configured one is used.
 func (srv *Server) handleGetAzureClassificationTree(w http.ResponseWriter, r *http.Request) {
 	kind := chi.URLParam(r, "kind")
 	if kind != "areas" && kind != "iterations" {
@@ -410,7 +412,7 @@ func (srv *Server) handleGetAzureClassificationTree(w http.ResponseWriter, r *ht
 		return
 	}
 
-	tree, err := az.FetchClassificationTree(r.Context(), kind)
+	tree, err := az.FetchClassificationTreeForProject(r.Context(), strings.TrimSpace(r.URL.Query().Get("team_project")), kind)
 	if err != nil {
 		http.Error(w, sanitizePublicError(err), http.StatusBadGateway)
 		return

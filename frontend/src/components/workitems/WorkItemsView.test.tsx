@@ -22,6 +22,13 @@ vi.mock('../../api/client', () => ({
   addAzureActivity: vi.fn(),
 }))
 
+// The correction-task modal has its own tests; here only the entry points
+// matter, so it is stubbed to expose which bug it was opened for.
+vi.mock('./CreateBugCorrectionTaskModal', () => ({
+  CreateBugCorrectionTaskModal: ({ open, bugId }: { open: boolean; bugId: number | null }) =>
+    open ? <div role="dialog" aria-label="Crear tarea de corrección">bug {bugId}</div> : null,
+}))
+
 const pushToast = vi.fn()
 const openModal = vi.fn()
 const setActiveBugEvidenceId = vi.fn()
@@ -161,6 +168,50 @@ describe('WorkItemsView', () => {
 
     expect(setActiveBugEvidenceId).toHaveBeenCalledWith(101)
     expect(openModal).toHaveBeenCalledWith('bug-evidence')
+  })
+
+  it('offers "Crear tarea de corrección" only on Bug rows and opens the form for that bug', async () => {
+    vi.mocked(listAzureActivities).mockResolvedValue([
+      { ...oneActivity[0], id: 1, work_item_id: 101, work_item_type: 'Bug' },
+      { ...oneActivity[0], id: 2, work_item_id: 202, work_item_type: 'Task' },
+    ])
+    const user = userEvent.setup()
+
+    render(<WorkItemsView />)
+    await screen.findByText('101')
+
+    const rows = screen.getAllByRole('row')
+    const bugRow = rows.find(r => r.textContent?.includes('101'))!
+    const taskRow = rows.find(r => r.textContent?.includes('202'))!
+    expect(within(taskRow).queryByRole('button', { name: /crear tarea de corrección/i })).not.toBeInTheDocument()
+
+    await user.click(within(bugRow).getByRole('button', { name: /crear tarea de corrección/i }))
+
+    expect(screen.getByRole('dialog', { name: 'Crear tarea de corrección' })).toHaveTextContent('bug 101')
+  })
+
+  it('offers "Crear tarea de corrección" on assigned-but-uncatalogued Bug items', async () => {
+    vi.mocked(listAzureActivities).mockResolvedValue([])
+    vi.mocked(listAssignedAzureWorkItems).mockResolvedValue({
+      org: 'ORG',
+      items: [
+        { id: 171191, title: 'Assigned bug', type: 'Bug', state: 'Active' },
+        { id: 505, title: 'New assigned task', type: 'Task', state: 'New' },
+      ],
+    })
+    const user = userEvent.setup()
+    render(<WorkItemsView />)
+    await screen.findByText(/no hay work items registrados/i)
+
+    await user.click(screen.getByRole('button', { name: /sincronizar asignados/i }))
+    const pendingSection = screen.getByText('Asignados en Azure sin catalogar').closest('.card') as HTMLElement
+    await within(pendingSection).findByText('Assigned bug')
+
+    const buttons = within(pendingSection).getAllByRole('button', { name: /crear tarea de corrección/i })
+    expect(buttons).toHaveLength(1)
+    await user.click(buttons[0])
+
+    expect(screen.getByRole('dialog', { name: 'Crear tarea de corrección' })).toHaveTextContent('bug 171191')
   })
 
   it('closes a work item after confirmation and shows the synced hours', async () => {
