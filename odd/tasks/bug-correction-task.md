@@ -32,6 +32,7 @@ Correction task 171306 (parent Bug 171191), created by CMMI:
 - [x] T1 — Backend: bug prefill endpoint (bug title/area/team project/assignee/iteration), Subárea allowed-values endpoint, create-correction-task endpoint (parent link + fields above) + tests (httptest; never hit real Azure). Route: delegated writer.
 - [x] T2 — Frontend: correction-task form modal + entry points + tests. Route: delegated writer.
 - [x] T3 — Frontend follow-up: `ClassificationTreePicker` `teamProject` prop, tree pickers for Iteración/Área in the correction form, and fix R3-draft-effect-refetch-clobbers-edits. Route: delegated writer.
+- [x] T4 — Review fixes R3-children-read-blocks-create + R3-missing-server-failure-path-tests: best-effort duplicate lookup with `existing_tasks_error`, create independent of the children read, server failure-path tests, UI warning. Route: delegated writer (scope addition authorized by the user).
 
 ## Checks
 `go vet ./...`, `go test ./...`; in `frontend/`: `npm test`, `npx tsc -b`, `npm run lint` (baseline 32 errors).
@@ -53,6 +54,12 @@ Correction task 171306 (parent Bug 171191), created by CMMI:
   - R3 fix: the draft/subárea effect depends only on `[open, bugId]`; `loadError` is cleared on a successful load; "Agregar al catálogo" is derived (`userChoice ?? assignee == identity`) so a late `currentUserDisplayName` applies the default without clobbering an explicit toggle, and title/area/assignee edits are never refetched over. No synchronous setState in effects.
   - Tests: new `ClassificationTreePicker.test.tsx` (default vs teamProject call, reload on change); modal tests for pickers, custom title submitted, identity change keeps edits (single draft/subárea fetch), late identity default, load error cleared; `client.test.ts` covers the `team_project` query string.
   - RED observed: 10 failing (picker reload + modal tests) before implementation; the client query-string tests passed immediately because `fetchClassificationTree` already accepted `teamProject` from T1. GREEN: `npm test` 17 files / 148 tests pass; `npx tsc -b` clean; `npm run lint` 32 errors (= baseline, none in touched files).
+- T4 — commit `efbeefb` fix(azure): make duplicate check best-effort in bug correction task. Route: delegated writer.
+  - `internal/azure`: new `FetchBugForCorrectionTask` (bug read only, no children); `FetchBugCorrectionTaskDraft` builds on it and treats the children batch read as best-effort, setting `ExistingTasksError` instead of failing.
+  - `internal/server`: draft returns 200 with bug data, empty `existing_correction_tasks` and `existing_tasks_error` (sanitized) on a children failure; POST correction-task now uses `FetchBugForCorrectionTask`, so it never reads the children.
+  - Frontend: `existing_tasks_error?` on `BugCorrectionTaskDraft`; the modal shows "No se pudo verificar si ya existe una tarea de corrección" and still allows creating.
+  - Tests: azure (children failure is best-effort; bug-only read skips children); server (bug read 500→502 / 404→404 on draft and create, children failure on draft → 200 + warning, on create → created with zero children calls, Azure create failure → 502 with no catalog entry, Subárea failure → 502; the existing catalog-failure test covers `catalog_error`); modal (warning shown / absent).
+  - RED observed: Go build failure on the missing symbols; server draft and create returned 502 on a children failure; the modal warning test failed. GREEN: `go vet ./...` clean; `go test ./...` all ok; `npm test` 17 files / 150 tests pass; `npx tsc -b` clean; `npm run lint` 32 errors (= baseline, none in touched files).
 
 ## Next step
 Native review / PR decision by the user; optional follow-up for `ClassificationTreePicker` team-project support.
