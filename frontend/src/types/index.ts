@@ -319,6 +319,9 @@ export interface AzureActivity {
   parent_work_item_id?: number | null
   parent_title?: string
   parent_type?: string
+  // Azure OriginalEstimate (hours) cached locally; 0 = no estimate. Refreshed
+  // on work item creation and on "Refrescar estados".
+  original_estimate?: number
 }
 
 export interface AssignedAzureWorkItem {
@@ -356,12 +359,10 @@ export interface WorkItemEffort {
   has_estimate: boolean
 }
 
+// Computed from the Mintag DB only (no Azure call): estimate cached on the
+// catalog, hours from local activities.
 export interface WorkItemEffortResponse {
-  org: string
   items: WorkItemEffort[]
-  // Non-empty when the TimeLog snapshot could not be read; uploaded_hours is
-  // then unreliable (estimates and local hours still are).
-  timelog_error?: string
 }
 
 export interface UploadResult {

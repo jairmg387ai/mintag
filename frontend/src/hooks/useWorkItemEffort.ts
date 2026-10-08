@@ -6,10 +6,8 @@ export interface WorkItemEffortState {
   // Effort keyed by work item id; empty while loading or after a failure.
   byId: Record<number, WorkItemEffort>
   loading: boolean
-  // Set when the call failed (e.g. Azure not configured).
+  // Set when the call failed.
   error: string
-  // Set when the TimeLog snapshot could not be read (uploaded hours unreliable).
-  timelogError: string
 }
 
 interface FetchResult {
@@ -17,10 +15,9 @@ interface FetchResult {
   requestKey: string
   byId: Record<number, WorkItemEffort>
   error: string
-  timelogError: string
 }
 
-const NO_RESULT: FetchResult = { requestKey: '', byId: {}, error: '', timelogError: '' }
+const NO_RESULT: FetchResult = { requestKey: '', byId: {}, error: '' }
 
 // useWorkItemEffort loads effort for the given work item ids, refetching when
 // the set of ids or reloadKey changes. A result is only exposed while it still
@@ -38,16 +35,16 @@ export function useWorkItemEffort(ids: number[], reloadKey: number = 0): WorkIte
         if (cancelled) return
         const byId: Record<number, WorkItemEffort> = {}
         for (const item of res?.items ?? []) byId[item.id] = item
-        setResult({ requestKey, byId, error: '', timelogError: res?.timelog_error ?? '' })
+        setResult({ requestKey, byId, error: '' })
       })
       .catch((e: unknown) => {
         if (cancelled) return
-        setResult({ requestKey, byId: {}, error: e instanceof Error ? e.message : 'error', timelogError: '' })
+        setResult({ requestKey, byId: {}, error: e instanceof Error ? e.message : 'error' })
       })
     return () => { cancelled = true }
   }, [idsKey, requestKey])
 
-  if (!requestKey) return { byId: {}, loading: false, error: '', timelogError: '' }
-  if (result.requestKey !== requestKey) return { byId: {}, loading: true, error: '', timelogError: '' }
-  return { byId: result.byId, loading: false, error: result.error, timelogError: result.timelogError }
+  if (!requestKey) return { byId: {}, loading: false, error: '' }
+  if (result.requestKey !== requestKey) return { byId: {}, loading: true, error: '' }
+  return { byId: result.byId, loading: false, error: result.error }
 }

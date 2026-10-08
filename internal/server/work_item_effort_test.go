@@ -7,13 +7,13 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Gentleman-Programming/mintag/internal/store"
 )
 
 type effortResponse struct {
-	Org   string `json:"org"`
 	Items []struct {
 		ID               int     `json:"id"`
 		OriginalEstimate float64 `json:"original_estimate"`
@@ -22,46 +22,51 @@ type effortResponse struct {
 		Remaining        float64 `json:"remaining"`
 		HasEstimate      bool    `json:"has_estimate"`
 	} `json:"items"`
-	TimelogError string `json:"timelog_error"`
 }
 
-func newEffortAzureStub(t *testing.T, timelogStatus int) *httptest.Server {
+// newNoCallAzureStub fails the test on any outbound Azure request and counts
+// them, proving the effort endpoint is computed from the local DB only.
+func newNoCallAzureStub(t *testing.T) (*httptest.Server, *int32) {
 	t.Helper()
+	var calls int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case strings.Contains(r.URL.Path, "connectiondata"):
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"authenticatedUser":{"id":"route-user-id","providerDisplayName":"Route User"}}`))
-		case strings.Contains(r.URL.Path, "TimeLogData/Documents"):
-			w.WriteHeader(timelogStatus)
-			if timelogStatus == http.StatusOK {
-				// 1001: 600+480 minutes = 18h; 1002: 60 minutes = 1h.
-				_, _ = w.Write([]byte(`[{"workItemId":1001,"minutes":600},{"workItemId":1001,"minutes":480},{"workItemId":1002,"minutes":60}]`))
-			}
-		case strings.Contains(r.URL.Path, "/_apis/wit/workitems"):
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"value":[
-				{"id":1001,"fields":{"Microsoft.VSTS.Scheduling.OriginalEstimate":24}},
-				{"id":1002,"fields":{}}
-			]}`))
-		default:
-			t.Errorf("unexpected azure path: %s", r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-		}
+		atomic.AddInt32(&calls, 1)
+		t.Errorf("unexpected azure request: %s %s", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	t.Cleanup(srv.Close)
-	return srv
+	return srv, &calls
 }
 
+// seedLocalEffort registers work item 1001 (estimate 24, plus a second
+// catalog row with a lower estimate) with 18h uploaded and 2.5h local, and
+// work item 1002 (no estimate) with 1h uploaded.
 func seedLocalEffort(t *testing.T, st *store.Store) {
 	t.Helper()
 	ctx := context.Background()
 	wi, err := st.AddAzureActivity(ctx, "RUNT2QA", 1001, "Task A", "Task", store.AzureActivityMapping{})
 	mustNoErr(t, err)
-	a, err := st.CreateActivity(ctx, "2026-06-12", 2.5, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo", "manual")
+	_, err = st.AddAzureActivity(ctx, "RUNT2QA", 1001, "Task A alias", "Task", store.AzureActivityMapping{})
 	mustNoErr(t, err)
-	mustNoErr(t, st.SetActivityAzureActivity(ctx, a.ID, &wi.ID))
+	mustNoErr(t, st.SetAzureActivityEstimate(ctx, 1001, 24))
+	wiB, err := st.AddAzureActivity(ctx, "RUNT2QA", 1002, "Task B", "Task", store.AzureActivityMapping{})
+	mustNoErr(t, err)
+
+	link := func(hours float64, azureID int64, upload bool) {
+		t.Helper()
+		a, err := st.CreateActivity(ctx, "2026-06-12", hours, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo", "manual")
+		mustNoErr(t, err)
+		mustNoErr(t, st.SetActivityAzureActivity(ctx, a.ID, &azureID))
+		if upload {
+			_, err := st.ApproveActivities(ctx, []int64{a.ID})
+			mustNoErr(t, err)
+			mustNoErr(t, st.MarkUploaded(ctx, a.ID, "doc-"+strconv.FormatInt(a.ID, 10)))
+		}
+	}
+	link(10, wi.ID, true)
+	link(8, wi.ID, true)
+	link(2.5, wi.ID, false)
+	link(1, wiB.ID, true)
 }
 
 func getEffort(t *testing.T, url string) (*http.Response, effortResponse) {
@@ -76,73 +81,59 @@ func getEffort(t *testing.T, url string) (*http.Response, effortResponse) {
 	return resp, body
 }
 
-func configureAzureToken(t *testing.T, base string) {
-	t.Helper()
-	putResp := doJSON(t, http.MethodPut, base+"/api/activities/azure-config", map[string]any{"token": "db-token", "auth_mode": "bearer"})
-	assertStatus(t, putResp, http.StatusOK)
-}
-
-func TestGetAzureWorkItemEffort_CombinesEstimateTimeLogAndLocal(t *testing.T) {
+func TestGetAzureWorkItemEffort_ComputedFromLocalDBWithoutAzure(t *testing.T) {
 	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
 	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
-	azureServer := newEffortAzureStub(t, http.StatusOK)
+	azureServer, calls := newNoCallAzureStub(t)
+	// Azure is deliberately NOT configured: the endpoint must still answer.
 	base, st := newTestServerWithAzureRedirect(t, azureServer.URL)
-
-	unconfigured, err := http.Get(base + "/api/activities/azure-work-items/effort?ids=1001")
-	mustNoErr(t, err)
-	assertStatus(t, unconfigured, http.StatusServiceUnavailable)
-
-	configureAzureToken(t, base)
 	seedLocalEffort(t, st)
 
-	resp, body := getEffort(t, base+"/api/activities/azure-work-items/effort?ids=1001,1002")
+	resp, body := getEffort(t, base+"/api/activities/azure-work-items/effort?ids=1001,1002,1003")
 	assertStatus(t, resp, http.StatusOK)
-	if body.TimelogError != "" {
-		t.Errorf("unexpected timelog_error: %q", body.TimelogError)
+	if len(body.Items) != 3 {
+		t.Fatalf("expected 3 items, got %+v", body.Items)
 	}
-	if body.Org == "" {
-		t.Errorf("expected org in response")
-	}
-	if len(body.Items) != 2 {
-		t.Fatalf("expected 2 items, got %+v", body.Items)
-	}
-	a, b := body.Items[0], body.Items[1]
+	a, b, c := body.Items[0], body.Items[1], body.Items[2]
 	if a.ID != 1001 || a.OriginalEstimate != 24 || a.UploadedHours != 18 || a.LocalHours != 2.5 || a.Remaining != 3.5 || !a.HasEstimate {
 		t.Errorf("unexpected item 1001: %+v", a)
 	}
 	if b.ID != 1002 || b.OriginalEstimate != 0 || b.UploadedHours != 1 || b.LocalHours != 0 || b.Remaining != 0 || b.HasEstimate {
 		t.Errorf("unexpected item 1002: %+v", b)
 	}
+	if c.ID != 1003 || c.OriginalEstimate != 0 || c.UploadedHours != 0 || c.LocalHours != 0 || c.HasEstimate {
+		t.Errorf("unexpected uncatalogued item 1003: %+v", c)
+	}
+	if n := atomic.LoadInt32(calls); n != 0 {
+		t.Errorf("expected no outbound Azure calls, got %d", n)
+	}
 }
 
-func TestGetAzureWorkItemEffort_TimeLogFailureIsBestEffort(t *testing.T) {
+func TestGetAzureWorkItemEffort_RemainingNeverNegative(t *testing.T) {
 	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
 	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
-	azureServer := newEffortAzureStub(t, http.StatusInternalServerError)
+	azureServer, _ := newNoCallAzureStub(t)
 	base, st := newTestServerWithAzureRedirect(t, azureServer.URL)
-	configureAzureToken(t, base)
-	seedLocalEffort(t, st)
+	ctx := context.Background()
+	wi, err := st.AddAzureActivity(ctx, "RUNT2QA", 4001, "Over", "Task", store.AzureActivityMapping{})
+	mustNoErr(t, err)
+	mustNoErr(t, st.SetAzureActivityEstimate(ctx, 4001, 2))
+	act, err := st.CreateActivity(ctx, "2026-06-12", 3, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo", "manual")
+	mustNoErr(t, err)
+	mustNoErr(t, st.SetActivityAzureActivity(ctx, act.ID, &wi.ID))
 
-	resp, body := getEffort(t, base+"/api/activities/azure-work-items/effort?ids=1001")
+	resp, body := getEffort(t, base+"/api/activities/azure-work-items/effort?ids=4001")
 	assertStatus(t, resp, http.StatusOK)
-	if body.TimelogError == "" {
-		t.Errorf("expected timelog_error to be set")
-	}
-	if len(body.Items) != 1 {
-		t.Fatalf("expected 1 item, got %+v", body.Items)
-	}
-	it := body.Items[0]
-	if it.UploadedHours != 0 || it.LocalHours != 2.5 || it.Remaining != 21.5 || !it.HasEstimate {
-		t.Errorf("unexpected item: %+v", it)
+	if len(body.Items) != 1 || body.Items[0].Remaining != 0 || body.Items[0].LocalHours != 3 || !body.Items[0].HasEstimate {
+		t.Errorf("unexpected over-estimate item: %+v", body.Items)
 	}
 }
 
 func TestGetAzureWorkItemEffort_InvalidIDs(t *testing.T) {
 	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
 	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
-	azureServer := newEffortAzureStub(t, http.StatusOK)
+	azureServer, _ := newNoCallAzureStub(t)
 	base, _ := newTestServerWithAzureRedirect(t, azureServer.URL)
-	configureAzureToken(t, base)
 
 	tooMany := make([]string, 201)
 	for i := range tooMany {

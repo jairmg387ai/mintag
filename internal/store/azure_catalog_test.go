@@ -945,3 +945,105 @@ func TestMigrate_AzureActivitiesGetsParentColumnsIdempotently(t *testing.T) {
 		}
 	}
 }
+
+func TestMigrate_AzureActivitiesGetsOriginalEstimateColumn(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	if !columnExists(t, s.db, "azure_activities", "original_estimate") {
+		t.Fatal("expected azure_activities.original_estimate column to exist")
+	}
+	// Re-running migrate must be a no-op (idempotent ALTER).
+	if err := s.migrate(); err != nil {
+		t.Fatalf("re-running migrate: %v", err)
+	}
+}
+
+func TestSetAzureActivityEstimate_UpdatesAllRowsForWorkItem(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+
+	a, err := s.AddAzureActivity(ctx, "RUNT2QA", 3001, "Task A", "Task", AzureActivityMapping{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.OriginalEstimate != 0 {
+		t.Errorf("new catalog entry should default to estimate 0, got %v", a.OriginalEstimate)
+	}
+	b, err := s.AddAzureActivity(ctx, "RUNT2QA", 3001, "Task A (alias)", "Task", AzureActivityMapping{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := s.AddAzureActivity(ctx, "RUNT2QA", 3002, "Task B", "Task", AzureActivityMapping{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.SetAzureActivityEstimate(ctx, 3001, 12.5); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []int64{a.ID, b.ID} {
+		got, err := s.GetAzureActivity(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.OriginalEstimate != 12.5 {
+			t.Errorf("row %d: want estimate 12.5, got %v", id, got.OriginalEstimate)
+		}
+	}
+	untouched, err := s.GetAzureActivity(ctx, other.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if untouched.OriginalEstimate != 0 {
+		t.Errorf("other work item must stay untouched, got %v", untouched.OriginalEstimate)
+	}
+
+	// Azure saying 0 (estimate removed) is applied as-is.
+	if err := s.SetAzureActivityEstimate(ctx, 3001, 0); err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := s.GetAzureActivity(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleared.OriginalEstimate != 0 {
+		t.Errorf("want estimate cleared to 0, got %v", cleared.OriginalEstimate)
+	}
+
+	// Listed entries carry the estimate too.
+	if err := s.SetAzureActivityEstimate(ctx, 3002, 8); err != nil {
+		t.Fatal(err)
+	}
+	all, err := s.ListAzureActivities(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range all {
+		if e.ID == other.ID {
+			found = true
+			if e.OriginalEstimate != 8 {
+				t.Errorf("listed entry: want estimate 8, got %v", e.OriginalEstimate)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected listed entry for work item 3002")
+	}
+
+	// Unknown work item and negative values.
+	if err := s.SetAzureActivityEstimate(ctx, 999999, 4); err != nil {
+		t.Errorf("unknown work item must be a silent no-op, got %v", err)
+	}
+	if err := s.SetAzureActivityEstimate(ctx, 3002, -1); err == nil {
+		t.Error("expected an error for a negative estimate")
+	}
+}

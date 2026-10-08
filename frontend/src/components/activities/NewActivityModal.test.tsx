@@ -82,7 +82,7 @@ describe('NewActivityModal Azure activity picker', () => {
     vi.mocked(getActivityValidationSettings).mockReset()
     vi.mocked(getActivityValidationSettings).mockResolvedValue(ALL_VALIDATIONS_OFF)
     vi.mocked(fetchWorkItemEffort).mockReset()
-    vi.mocked(fetchWorkItemEffort).mockResolvedValue({ org: 'my-org', items: [] })
+    vi.mocked(fetchWorkItemEffort).mockResolvedValue({ items: [] })
   })
 
   it('filters the candidate list as the user types', async () => {
@@ -284,7 +284,6 @@ describe('NewActivityModal work item effort', () => {
     vi.mocked(getActivityValidationSettings).mockResolvedValue(ALL_VALIDATIONS_OFF)
     vi.mocked(fetchWorkItemEffort).mockReset()
     vi.mocked(fetchWorkItemEffort).mockImplementation(async ids => ({
-      org: 'my-org',
       items: ids.map(id => ({
         id,
         original_estimate: 10,

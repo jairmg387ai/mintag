@@ -6,17 +6,16 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-
-	"github.com/Gentleman-Programming/mintag/internal/azure"
 )
 
 // maxEffortWorkItemIDs caps how many work items one effort request may ask
-// for — one Azure workitems batch.
+// for.
 const maxEffortWorkItemIDs = 200
 
-// workItemEffort is one work item's effort breakdown: the Azure original
-// estimate, hours already in TimeLog, hours still local to Mintag
-// (pending + approved), and what is left of the estimate.
+// workItemEffort is one work item's effort breakdown, computed entirely from
+// the Mintag DB: the cached Azure original estimate, hours already uploaded
+// to TimeLog, hours still local to Mintag (pending + approved), and what is
+// left of the estimate.
 type workItemEffort struct {
 	ID               int     `json:"id"`
 	OriginalEstimate float64 `json:"original_estimate"`
@@ -27,9 +26,11 @@ type workItemEffort struct {
 }
 
 // GET /api/activities/azure-work-items/effort?ids=1,2,3
-// Read-only: combines the Azure OriginalEstimate, one TimeLog documents
-// snapshot (best-effort — a failure is reported in timelog_error with
-// uploaded_hours 0) and local not-yet-uploaded hours per work item.
+// Read-only and local: the user logs all their time from Mintag (Azure's
+// Completed/Remaining fields are not trustworthy), so effort comes from the
+// DB alone — no Azure or TimeLog call, and Azure need not be configured. The
+// estimate is the one cached on the catalog (refreshed on work item creation
+// and on the states refresh); uncatalogued work items report no estimate.
 func (srv *Server) handleGetAzureWorkItemEffort(w http.ResponseWriter, r *http.Request) {
 	ids, err := parseEffortWorkItemIDs(r.URL.Query().Get("ids"))
 	if err != nil {
@@ -37,28 +38,15 @@ func (srv *Server) handleGetAzureWorkItemEffort(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	az := srv.azureClientOrUnavailable(w, r)
-	if az == nil {
-		return
-	}
-
-	estimates, err := az.FetchWorkItemEstimates(r.Context(), ids)
-	if err != nil {
-		http.Error(w, sanitizePublicError(err), http.StatusBadGateway)
-		return
-	}
-
-	local, err := srv.st.LocalUnuploadedHoursByWorkItem(r.Context(), ids)
+	estimates, err := srv.st.AzureActivityEstimates(r.Context(), ids)
 	if err != nil {
 		writeJSON(w, nil, err)
 		return
 	}
-
-	timelogError := ""
-	docs, err := az.FetchTimeLogDocuments(r.Context())
+	logged, err := srv.st.WorkItemLoggedHours(r.Context(), ids)
 	if err != nil {
-		timelogError = sanitizePublicError(err)
-		docs = nil
+		writeJSON(w, nil, err)
+		return
 	}
 
 	items := make([]workItemEffort, 0, len(ids))
@@ -66,8 +54,8 @@ func (srv *Server) handleGetAzureWorkItemEffort(w http.ResponseWriter, r *http.R
 		item := workItemEffort{
 			ID:               id,
 			OriginalEstimate: estimates[id],
-			UploadedHours:    azure.TimeLogHours(docs, id),
-			LocalHours:       local[id],
+			UploadedHours:    logged[id].Uploaded,
+			LocalHours:       logged[id].Local,
 		}
 		if item.OriginalEstimate > 0 {
 			item.HasEstimate = true
@@ -76,7 +64,7 @@ func (srv *Server) handleGetAzureWorkItemEffort(w http.ResponseWriter, r *http.R
 		items = append(items, item)
 	}
 
-	writeJSON(w, map[string]any{"org": az.Config().Org, "items": items, "timelog_error": timelogError}, nil)
+	writeJSON(w, map[string]any{"items": items}, nil)
 }
 
 // parseEffortWorkItemIDs parses a comma-separated list of positive work item

@@ -457,6 +457,13 @@ func (s *Store) migrateActivities() error {
 	if err := s.addColumnIfMissing("azure_activities", "parent_type", "parent_type TEXT"); err != nil {
 		return err
 	}
+	// original_estimate caches the work item's Azure OriginalEstimate (hours)
+	// so effort (estimate vs hours logged in Mintag) is computed from the
+	// local DB alone. Written when Mintag creates the work item and on every
+	// states refresh — see SetAzureActivityEstimate in azure_catalog.go.
+	if err := s.addColumnIfMissing("azure_activities", "original_estimate", "original_estimate REAL NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
 	// backfillCreatedAt for azure_activities runs after seedDefaultAzureActivity
 	// below (not here) — seeding inserts a row without created_at set, and
 	// running backfill before that insert would miss it for a full migrate()

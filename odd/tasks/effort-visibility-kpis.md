@@ -25,9 +25,13 @@ While logging time the user cannot tell whether a work item still has hours avai
 ## Delivery
 - Strategy: `ask-on-risk` (default). Forecast ~900 authored lines > 400: chain strategy to be asked before opening any PR.
 
+## Decision (2026-10-07, user)
+User always logs time from Mintag and is the only person logging on their tasks (others get their own task). Older Mintag versions did not maintain Completed/Remaining Work in Azure, so Azure effort fields are unreliable. => Effort is computed from the Mintag DB: estimate persisted in `azure_activities.original_estimate`, used = all local activities for the work item, remaining = estimate - used. Azure is only read on explicit refresh/sync to update the estimate. T1b (TimeLog per-user filter) was discarded uncommitted.
+
 ## Tasks
 - [x] T1 — Backend: read-only effort endpoint `GET /api/activities/azure-work-items/effort?ids=` (estimate batch fetch + TimeLog snapshot + store local unuploaded hours per work item) + tests. Route: delegated writer (3+ non-trivial files).
-- [ ] T2 — Frontend: effort display in WorkItemsView and NewActivityModal with over-estimate warning + tests. Route: delegated writer.
+- [x] T1c — Backend: persist `original_estimate` on azure_activities (migration; set on Mintag work-item creation and on states refresh); effort endpoint reads DB only (no Azure, no TimeLog) + tests. Also resolves review findings R3-batch-404 and R3-modal-ignores-timelog-error. Route: delegated writer.
+- [x] T2 — Frontend: effort display in WorkItemsView and NewActivityModal with over-estimate warning + tests. Route: delegated writer.
 - [ ] T3 — Frontend: Dashboard period selector + hours by category/project + tests. Route: delegated writer.
 - [ ] T4 — Frontend: Dashboard extra KPIs (pending upload, gap days, work items without hours this week, >=80% consumed) + tests. Route: delegated writer.
 
@@ -42,5 +46,11 @@ While logging time the user cannot tell whether a work item still has hours avai
 - T1 commit `b72dd23` feat(activities): add read-only work item effort endpoint. RED: build failures (FetchWorkItemEstimates/LocalUnuploadedHoursByWorkItem undefined) + 404 on new route; GREEN: go vet ok, go test azure/store/server ok (parent spot check ok).
 - T1 review: assess risk=medium, review_due=true (slice_budget_reached). Preflight STATUS blocked at `intended_untracked_selection_required`; every submitted selection JSON refused with `invalid_request` (schema not exact). Review pending, user decision needed.
 
+- T1 review declined by user (candidate sha256:6b2db294...).
+- T2 commit `4d2b701` feat(workitems): show logged and remaining hours per work item. RED 7 failing tests; GREEN npm test 164 passed, tsc ok, lint 32 errors (baseline).
+- Review of T1+T2 (lineage review-4c5a8e14fc1bbf04): granted, approved, acknowledged. Advisory follow-ups: R3-batch-404-fails-page, R3-modal-ignores-timelog-error, R3-weak-failure-test (NewActivityModal.test.tsx:336-342).
+
+- T1c: effort computed from DB only (`azure_activities.original_estimate`, filled on create/recreate/bug-correction and on states refresh). RED: compile errors (OriginalEstimate / SetAzureActivityEstimate undefined); GREEN: go vet ok, go test ./... ok, npm test 163 passed, tsc ok, lint 32 (baseline). Response shape now `{items}`. Bug-correction estimate persistence has no dedicated test.
+
 ## Next step
-Resolve T1 review block, then T2.
+T3.

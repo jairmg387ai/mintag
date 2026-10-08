@@ -83,7 +83,7 @@ func (srv *Server) handleCreateAzureWorkItem(w http.ResponseWriter, r *http.Requ
 			"state":            created.State,
 			"activation_error": sanitizePublicError(activationErr.Err),
 		}
-		srv.registerAzureWorkItemCatalogEntry(r.Context(), az, created, body.Title, body.Project, body.CategoryID, resp)
+		srv.registerAzureWorkItemCatalogEntry(r.Context(), az, created, body.Title, body.OriginalEstimate, body.Project, body.CategoryID, resp)
 		writeJSON(w, resp, nil)
 		return
 	}
@@ -93,7 +93,7 @@ func (srv *Server) handleCreateAzureWorkItem(w http.ResponseWriter, r *http.Requ
 	}
 
 	resp := map[string]any{"id": created.ID, "state": created.State}
-	srv.registerAzureWorkItemCatalogEntry(r.Context(), az, created, body.Title, body.Project, body.CategoryID, resp)
+	srv.registerAzureWorkItemCatalogEntry(r.Context(), az, created, body.Title, body.OriginalEstimate, body.Project, body.CategoryID, resp)
 	writeJSON(w, resp, nil)
 }
 
@@ -102,7 +102,9 @@ func (srv *Server) handleCreateAzureWorkItem(w http.ResponseWriter, r *http.Requ
 // mutating resp in place with azure_activity_id on success or catalog_error
 // on failure. A nil project and nil categoryID mean the caller did not ask
 // for catalog registration at all — resp is left untouched in that case.
-func (srv *Server) registerAzureWorkItemCatalogEntry(ctx context.Context, az *azure.Client, created azure.CreatedWorkItem, title string, project *string, categoryID *int64, resp map[string]any) {
+// The estimate Azure received (requestedEstimate, or the create default) is
+// cached on the entry best-effort; the next states refresh corrects a miss.
+func (srv *Server) registerAzureWorkItemCatalogEntry(ctx context.Context, az *azure.Client, created azure.CreatedWorkItem, title string, requestedEstimate float64, project *string, categoryID *int64, resp map[string]any) {
 	if project == nil && categoryID == nil {
 		return
 	}
@@ -115,6 +117,7 @@ func (srv *Server) registerAzureWorkItemCatalogEntry(ctx context.Context, az *az
 		return
 	}
 	resp["azure_activity_id"] = a.ID
+	_ = srv.st.SetAzureActivityEstimate(ctx, created.ID, azure.EffectiveOriginalEstimate(requestedEstimate))
 }
 
 // GET /api/activities/azure-work-items/states?ids=1,2,3
@@ -161,8 +164,11 @@ func (srv *Server) handleGetAzureWorkItemStates(w http.ResponseWriter, r *http.R
 	// this manual refresh every time — see SyncAzureActivityLiveState's doc
 	// comment. Best-effort: a write failure here must never turn an
 	// otherwise-successful Azure fetch into an error response.
+	// The same batch carries OriginalEstimate, cached so the effort endpoint
+	// can stay DB-only (see handleGetAzureWorkItemEffort).
 	for _, item := range items {
 		_ = srv.st.SyncAzureActivityLiveState(r.Context(), item.ID, item.State, item.Type, item.AssignedToDisplayName)
+		_ = srv.st.SetAzureActivityEstimate(r.Context(), item.ID, item.OriginalEstimate)
 	}
 	// Parent lookup (Bug a correction Task hangs under) is best-effort too:
 	// a failure must not fail the refresh, and must not touch stored parents
@@ -356,7 +362,7 @@ func (srv *Server) handleRecreateAzureWorkItem(w http.ResponseWriter, r *http.Re
 		resp["state"] = created.State
 	}
 
-	srv.reassignAzureWorkItemCatalogEntry(r.Context(), id, created.ID, resp)
+	srv.reassignAzureWorkItemCatalogEntry(r.Context(), id, created.ID, azure.EffectiveOriginalEstimate(old.OriginalEstimate), resp)
 	writeJSON(w, resp, nil)
 }
 
@@ -365,8 +371,9 @@ func (srv *Server) handleRecreateAzureWorkItem(w http.ResponseWriter, r *http.Re
 // catalog_reassigned/azure_activity_id on success, or catalog_error on
 // failure. Absence of a catalog entry for oldWorkItemID is not an error —
 // not every work item is catalog-registered — and resp reports
-// catalog_reassigned:false in that case.
-func (srv *Server) reassignAzureWorkItemCatalogEntry(ctx context.Context, oldWorkItemID, newWorkItemID int, resp map[string]any) {
+// catalog_reassigned:false in that case. On success the new work item's
+// estimate is cached on the entry (best-effort, like the create path).
+func (srv *Server) reassignAzureWorkItemCatalogEntry(ctx context.Context, oldWorkItemID, newWorkItemID int, estimate float64, resp map[string]any) {
 	existing, err := srv.st.FindAzureActivityByWorkItemID(ctx, oldWorkItemID)
 	if errors.Is(err, store.ErrAzureActivityNotFound) {
 		resp["catalog_reassigned"] = false
@@ -385,6 +392,7 @@ func (srv *Server) reassignAzureWorkItemCatalogEntry(ctx context.Context, oldWor
 	}
 	resp["catalog_reassigned"] = true
 	resp["azure_activity_id"] = reassigned.ID
+	_ = srv.st.SetAzureActivityEstimate(ctx, newWorkItemID, estimate)
 }
 
 // GET /api/activities/azure-classification-nodes/{kind}?team_project=X

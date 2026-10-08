@@ -49,16 +49,19 @@ type AzureActivity struct {
 	ParentWorkItemID *int   `json:"parent_work_item_id,omitempty"`
 	ParentTitle      string `json:"parent_title,omitempty"`
 	ParentType       string `json:"parent_type,omitempty"`
+	// OriginalEstimate is the work item's Azure OriginalEstimate in hours as
+	// last known locally (0 = no estimate). See SetAzureActivityEstimate.
+	OriginalEstimate float64 `json:"original_estimate"`
 }
 
 // azureActivityColumns is the shared SELECT list for AzureActivity reads;
 // keep it in sync with azureActivityScanDest.
-const azureActivityColumns = `id, org, work_item_id, label, COALESCE(work_item_type, ''), is_active, is_default, project, category_id, COALESCE(last_known_state, ''), COALESCE(last_known_assigned_to, ''), parent_work_item_id, COALESCE(parent_title, ''), COALESCE(parent_type, '')`
+const azureActivityColumns = `id, org, work_item_id, label, COALESCE(work_item_type, ''), is_active, is_default, project, category_id, COALESCE(last_known_state, ''), COALESCE(last_known_assigned_to, ''), parent_work_item_id, COALESCE(parent_title, ''), COALESCE(parent_type, ''), original_estimate`
 
 // azureActivityScanDest returns the Scan destinations matching
 // azureActivityColumns, in order.
 func azureActivityScanDest(a *AzureActivity) []any {
-	return []any{&a.ID, &a.Org, &a.WorkItemID, &a.Label, &a.WorkItemType, &a.IsActive, &a.IsDefault, &a.Project, &a.CategoryID, &a.LastKnownState, &a.LastKnownAssignedTo, &a.ParentWorkItemID, &a.ParentTitle, &a.ParentType}
+	return []any{&a.ID, &a.Org, &a.WorkItemID, &a.Label, &a.WorkItemType, &a.IsActive, &a.IsDefault, &a.Project, &a.CategoryID, &a.LastKnownState, &a.LastKnownAssignedTo, &a.ParentWorkItemID, &a.ParentTitle, &a.ParentType, &a.OriginalEstimate}
 }
 
 // AzureActivityMapping is the optional, independent project/category autofill
@@ -398,6 +401,24 @@ func (s *Store) SyncAzureActivityParent(ctx context.Context, workItemID, parentI
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE azure_activities SET parent_work_item_id = ?, parent_title = ?, parent_type = ? WHERE work_item_id = ?`,
 		pid, t, typ, workItemID,
+	)
+	return err
+}
+
+// SetAzureActivityEstimate stores estimate (hours) as the OriginalEstimate of
+// every catalog entry referencing workItemID. It is only called with a value
+// Azure is known to hold — the estimate Mintag just sent on creation, or the
+// one a states refresh just read — and that value is applied exactly,
+// including 0, so an estimate removed in Azure is cleared locally too. A
+// negative estimate is rejected; an uncatalogued workItemID is a silent no-op
+// (same contract as SyncAzureActivityLiveState).
+func (s *Store) SetAzureActivityEstimate(ctx context.Context, workItemID int, estimate float64) error {
+	if estimate < 0 {
+		return fmt.Errorf("original_estimate must not be negative, got %v", estimate)
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE azure_activities SET original_estimate = ? WHERE work_item_id = ?`,
+		estimate, workItemID,
 	)
 	return err
 }

@@ -198,11 +198,7 @@ export function WorkItemsView() {
     activitiesLoading ? [] : pagedActivities.map(a => a.work_item_id),
     effortReloadKey,
   )
-  const effortNotice = effort.error
-    ? 'No se pudieron cargar las horas de los work items.'
-    : effort.timelogError
-      ? `Horas registradas en TimeLog no disponibles: ${effort.timelogError}`
-      : ''
+  const effortNotice = effort.error ? 'No se pudieron cargar las horas de los work items.' : ''
 
   async function refreshStates() {
     setStatesLoading(true)
