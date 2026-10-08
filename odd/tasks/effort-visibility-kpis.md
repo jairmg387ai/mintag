@@ -52,5 +52,7 @@ User always logs time from Mintag and is the only person logging on their tasks 
 
 - T1c: effort computed from DB only (`azure_activities.original_estimate`, filled on create/recreate/bug-correction and on states refresh). RED: compile errors (OriginalEstimate / SetAzureActivityEstimate undefined); GREEN: go vet ok, go test ./... ok, npm test 163 passed, tsc ok, lint 32 (baseline). Response shape now `{items}`. Bug-correction estimate persistence has no dedicated test.
 
+- T1c review (lineage review-ea9cd3338da5b9b5): granted, approved, acknowledged. Follow-ups: R3-bugfix-estimate-not-effective fixed (bug correction caches azure.EffectiveOriginalEstimate); R3-no-estimate-backfill accepted: existing catalog rows show "Sin estimado" until the user runs "Refrescar estados" once (communicated to user).
+
 ## Next step
 T3.

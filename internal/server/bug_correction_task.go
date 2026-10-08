@@ -233,5 +233,5 @@ func (srv *Server) catalogBugCorrectionTask(r *http.Request, az *azure.Client, w
 	// Best-effort: the entry exists; a failed parent or estimate write only
 	// means they show up after the next states refresh instead.
 	_ = srv.st.SyncAzureActivityParent(ctx, workItemID, bug.BugID, bug.BugTitle, bug.Type)
-	_ = srv.st.SetAzureActivityEstimate(ctx, workItemID, body.OriginalEstimate)
+	_ = srv.st.SetAzureActivityEstimate(ctx, workItemID, azure.EffectiveOriginalEstimate(body.OriginalEstimate))
 }
