@@ -26,7 +26,7 @@ While logging time the user cannot tell whether a work item still has hours avai
 - Strategy: `ask-on-risk` (default). Forecast ~900 authored lines > 400: chain strategy to be asked before opening any PR.
 
 ## Tasks
-- [ ] T1 — Backend: read-only effort endpoint `GET /api/activities/azure-work-items/effort?ids=` (estimate batch fetch + TimeLog snapshot + store local unuploaded hours per work item) + tests. Route: delegated writer (3+ non-trivial files).
+- [x] T1 — Backend: read-only effort endpoint `GET /api/activities/azure-work-items/effort?ids=` (estimate batch fetch + TimeLog snapshot + store local unuploaded hours per work item) + tests. Route: delegated writer (3+ non-trivial files).
 - [ ] T2 — Frontend: effort display in WorkItemsView and NewActivityModal with over-estimate warning + tests. Route: delegated writer.
 - [ ] T3 — Frontend: Dashboard period selector + hours by category/project + tests. Route: delegated writer.
 - [ ] T4 — Frontend: Dashboard extra KPIs (pending upload, gap days, work items without hours this week, >=80% consumed) + tests. Route: delegated writer.
@@ -39,5 +39,8 @@ While logging time the user cannot tell whether a work item still has hours avai
 - Branch `feat/effort-visibility-kpis` created from master 48874e7.
 - RDD: on (global). Per-commit `gentle-ai review assess` recorded per task.
 
+- T1 commit `b72dd23` feat(activities): add read-only work item effort endpoint. RED: build failures (FetchWorkItemEstimates/LocalUnuploadedHoursByWorkItem undefined) + 404 on new route; GREEN: go vet ok, go test azure/store/server ok (parent spot check ok).
+- T1 review: assess risk=medium, review_due=true (slice_budget_reached). Preflight STATUS blocked at `intended_untracked_selection_required`; every submitted selection JSON refused with `invalid_request` (schema not exact). Review pending, user decision needed.
+
 ## Next step
-T1.
+Resolve T1 review block, then T2.
