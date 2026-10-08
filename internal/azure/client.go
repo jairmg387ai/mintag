@@ -602,18 +602,30 @@ func (c *Client) CreateWorkItem(ctx context.Context, in CreateWorkItemInput) (Cr
 		patchOp{Op: "add", Path: "/fields/Custom.FinOptimista", Value: toOptimisticDate(lastDayOfMonth)},
 	)
 
+	id, err := c.postNewWorkItem(ctx, c.cfg.TeamProject, "Task", ops)
+	if err != nil {
+		return CreatedWorkItem{}, err
+	}
+	return CreatedWorkItem{ID: id, State: "Proposed"}, nil
+}
+
+// postNewWorkItem POSTs a json-patch document creating a new work item of
+// workItemType in the given team project and returns the created id. Shared
+// by CreateWorkItem (configured TeamProject) and CreateBugCorrectionTask
+// (the bug's own team project) so the request/error handling exists once.
+func (c *Client) postNewWorkItem(ctx context.Context, project, workItemType string, ops []patchOp) (int, error) {
 	body, err := json.Marshal(ops)
 	if err != nil {
-		return CreatedWorkItem{}, fmt.Errorf("azure: marshal create work item payload: %w", err)
+		return 0, fmt.Errorf("azure: marshal create work item payload: %w", err)
 	}
 
-	url := fmt.Sprintf(
-		"https://dev.azure.com/%s/%s/_apis/wit/workitems/$Task?api-version=7.1-preview.3",
-		c.cfg.Org, c.cfg.TeamProject,
+	endpoint := fmt.Sprintf(
+		"https://dev.azure.com/%s/%s/_apis/wit/workitems/$%s?api-version=7.1-preview.3",
+		c.cfg.Org, url.PathEscape(project), url.PathEscape(workItemType),
 	)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return CreatedWorkItem{}, fmt.Errorf("azure: build create work item request: %w", err)
+		return 0, fmt.Errorf("azure: build create work item request: %w", err)
 	}
 	c.setAuthHeader(req)
 	req.Header.Set("Content-Type", "application/json-patch+json")
@@ -621,28 +633,28 @@ func (c *Client) CreateWorkItem(ctx context.Context, in CreateWorkItemInput) (Cr
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return CreatedWorkItem{}, fmt.Errorf("azure: create work item http request: %w", err)
+		return 0, fmt.Errorf("azure: create work item http request: %w", err)
 	}
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return CreatedWorkItem{}, fmt.Errorf("azure: unexpected create work item status %d%s", resp.StatusCode, sanitizedResponseMessage(respBody))
+		return 0, fmt.Errorf("azure: unexpected create work item status %d%s", resp.StatusCode, sanitizedResponseMessage(respBody))
 	}
 	if isHTMLResponse(resp.Header.Get("Content-Type"), respBody) {
-		return CreatedWorkItem{}, fmt.Errorf("azure: Azure returned HTML/sign-in response; token may be expired or auth mode invalid")
+		return 0, fmt.Errorf("azure: Azure returned HTML/sign-in response; token may be expired or auth mode invalid")
 	}
 
 	var created struct {
 		ID int `json:"id"`
 	}
 	if err := json.Unmarshal(respBody, &created); err != nil {
-		return CreatedWorkItem{}, fmt.Errorf("azure: decode create work item response: %w", err)
+		return 0, fmt.Errorf("azure: decode create work item response: %w", err)
 	}
 	if created.ID == 0 {
-		return CreatedWorkItem{}, fmt.Errorf("azure: success response missing work item id")
+		return 0, fmt.Errorf("azure: success response missing work item id")
 	}
-	return CreatedWorkItem{ID: created.ID, State: "Proposed"}, nil
+	return created.ID, nil
 }
 
 // ActivateWorkItem transitions a Task from Proposed to Active/Accepted. This
@@ -765,6 +777,16 @@ func (c *Client) patchWorkItemWithResponse(ctx context.Context, project string, 
 // callers can offer a searchable picker instead of requiring a hand-typed
 // path.
 func (c *Client) FetchClassificationTree(ctx context.Context, kind string) (ClassificationNode, error) {
+	return c.FetchClassificationTreeForProject(ctx, c.cfg.TeamProject, kind)
+}
+
+// FetchClassificationTreeForProject is FetchClassificationTree for an explicit
+// team project — e.g. a Bug's own System.TeamProject, which may differ from
+// the configured one. A blank project falls back to the configured one.
+func (c *Client) FetchClassificationTreeForProject(ctx context.Context, project, kind string) (ClassificationNode, error) {
+	if strings.TrimSpace(project) == "" {
+		project = c.cfg.TeamProject
+	}
 	if kind != "areas" && kind != "iterations" {
 		return ClassificationNode{}, fmt.Errorf("azure: kind must be %q or %q, got %q", "areas", "iterations", kind)
 	}
@@ -772,11 +794,11 @@ func (c *Client) FetchClassificationTree(ctx context.Context, kind string) (Clas
 		return ClassificationNode{}, fmt.Errorf("Azure TimeLog token is not configured")
 	}
 
-	url := fmt.Sprintf(
+	endpoint := fmt.Sprintf(
 		"https://dev.azure.com/%s/%s/_apis/wit/classificationnodes/%s?$depth=10&api-version=7.1-preview.2",
-		c.cfg.Org, c.cfg.TeamProject, kind,
+		c.cfg.Org, url.PathEscape(project), kind,
 	)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return ClassificationNode{}, fmt.Errorf("azure: build classification nodes request: %w", err)
 	}
