@@ -134,6 +134,22 @@ describe('CreateBugCorrectionTaskModal', () => {
     expect(screen.getByRole('button', { name: 'Crear tarea de corrección' })).toBeEnabled()
   })
 
+  it('warns when the duplicate check could not run but still allows creating', async () => {
+    vi.mocked(getBugCorrectionTaskDraft).mockResolvedValue({ ...draft, existing_tasks_error: 'azure: timeout' })
+    const user = userEvent.setup()
+    renderModal()
+
+    expect(await screen.findByText('No se pudo verificar si ya existe una tarea de corrección')).toBeInTheDocument()
+    await fillRequired(user)
+    expect(screen.getByRole('button', { name: 'Crear tarea de corrección' })).toBeEnabled()
+  })
+
+  it('shows no duplicate-check warning when the check succeeded', async () => {
+    renderModal()
+    await screen.findByDisplayValue('Atención y/o Corrección del defecto 171191')
+    expect(screen.queryByText(/No se pudo verificar/)).not.toBeInTheDocument()
+  })
+
   it('submits the expected payload and reports the created task', async () => {
     const user = userEvent.setup()
     const { onCreated } = renderModal({ me: 'Dev Uno' })

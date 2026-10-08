@@ -65,6 +65,12 @@ type BugCorrectionTaskDraft struct {
 	AssignedTo              IdentityRef
 	SuggestedTitle          string
 	ExistingCorrectionTasks []CorrectionTaskSummary
+	// ExistingTasksError is set when the duplicate lookup (reading the
+	// bug's children) failed; ExistingCorrectionTasks is then unknown, not
+	// empty. The lookup is best-effort and never fails the draft.
+	ExistingTasksError string
+
+	childIDs []int
 }
 
 // IsBug reports whether the drafted work item is actually a Bug.
@@ -72,11 +78,34 @@ func (d *BugCorrectionTaskDraft) IsBug() bool { return isBugType(d.Type) }
 
 // FetchBugCorrectionTaskDraft reads work item bugID with $expand=relations
 // and, when it is a Bug, batch-reads its children to list existing
-// correction Tasks. A 400/404 means the work item does not exist and is
-// reported as (nil, nil), same contract as FetchWorkItemHierarchy. A non-Bug
-// work item is returned as-is (no children read) so callers can reject it
-// with a specific error.
+// correction Tasks. The children read is best-effort: on failure the draft
+// is still returned with ExistingTasksError set. A 400/404 means the work
+// item does not exist and is reported as (nil, nil), same contract as
+// FetchWorkItemHierarchy. A non-Bug work item is returned as-is (no
+// children read) so callers can reject it with a specific error.
 func (c *Client) FetchBugCorrectionTaskDraft(ctx context.Context, bugID int) (*BugCorrectionTaskDraft, error) {
+	d, err := c.FetchBugForCorrectionTask(ctx, bugID)
+	if err != nil || d == nil || !d.IsBug() || len(d.childIDs) == 0 {
+		return d, err
+	}
+	children, err := c.fetchWorkItemDetails(ctx, d.childIDs)
+	if err != nil {
+		d.ExistingTasksError = err.Error()
+		return d, nil
+	}
+	for _, ch := range children {
+		if strings.EqualFold(strings.TrimSpace(ch.Type), "Task") && IsCorrectionTaskTitle(ch.Title) {
+			d.ExistingCorrectionTasks = append(d.ExistingCorrectionTasks, CorrectionTaskSummary{ID: ch.ID, Title: ch.Title, State: ch.State})
+		}
+	}
+	return d, nil
+}
+
+// FetchBugForCorrectionTask reads only work item bugID (type, team project,
+// area, assignee) without the duplicate lookup, which is all creating the
+// correction Task depends on. Same (nil, nil) not-found contract as
+// FetchBugCorrectionTaskDraft.
+func (c *Client) FetchBugForCorrectionTask(ctx context.Context, bugID int) (*BugCorrectionTaskDraft, error) {
 	if !c.Enabled() {
 		return nil, fmt.Errorf("Azure TimeLog token is not configured")
 	}
@@ -127,29 +156,12 @@ func (c *Client) FetchBugCorrectionTaskDraft(ctx context.Context, bugID int) (*B
 	if a := parsed.Fields.AssignedTo; a != nil {
 		d.AssignedTo = IdentityRef{ID: a.ID, DisplayName: a.DisplayName, UniqueName: a.UniqueName}
 	}
-	if !d.IsBug() {
-		return d, nil
-	}
-
-	var childIDs []int
 	for _, r := range parsed.Relations {
 		if r.Rel != relHierarchyForward {
 			continue
 		}
 		if id, ok := workItemIDFromURL(r.URL); ok {
-			childIDs = append(childIDs, id)
-		}
-	}
-	if len(childIDs) == 0 {
-		return d, nil
-	}
-	children, err := c.fetchWorkItemDetails(ctx, childIDs)
-	if err != nil {
-		return nil, err
-	}
-	for _, ch := range children {
-		if strings.EqualFold(strings.TrimSpace(ch.Type), "Task") && IsCorrectionTaskTitle(ch.Title) {
-			d.ExistingCorrectionTasks = append(d.ExistingCorrectionTasks, CorrectionTaskSummary{ID: ch.ID, Title: ch.Title, State: ch.State})
+			d.childIDs = append(d.childIDs, id)
 		}
 	}
 	return d, nil

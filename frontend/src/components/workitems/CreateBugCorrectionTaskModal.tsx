@@ -240,6 +240,17 @@ export function CreateBugCorrectionTaskModal({
                 <span style={{ font: 'var(--text-caption)', color: 'var(--fg3)' }}>{draft.team_project}</span>
               </div>
 
+              {draft.existing_tasks_error && (
+                <div
+                  role="alert"
+                  title={draft.existing_tasks_error}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 14px', background: 'var(--amber-50, var(--bg-sunken))', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', font: 'var(--text-sm)', color: 'var(--fg1)', marginBottom: 14 }}
+                >
+                  <AlertTriangle size={14} strokeWidth={1.75} />
+                  No se pudo verificar si ya existe una tarea de corrección
+                </div>
+              )}
+
               {draft.existing_correction_tasks.length > 0 && (
                 <div
                   role="alert"

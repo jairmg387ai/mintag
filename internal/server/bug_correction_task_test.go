@@ -41,10 +41,17 @@ type correctionAzureFake struct {
 	t       *testing.T
 	bugJSON string
 
-	mu         sync.Mutex
-	createPath string
-	createOps  []map[string]any
-	treePath   string
+	// Non-zero statuses make the matching Azure call fail with that status.
+	bugStatus      int
+	childrenStatus int
+	createStatus   int
+	fieldsStatus   int
+
+	mu            sync.Mutex
+	childrenCalls int
+	createPath    string
+	createOps     []map[string]any
+	treePath      string
 }
 
 func (f *correctionAzureFake) handler(w http.ResponseWriter, r *http.Request) {
@@ -55,17 +62,38 @@ func (f *correctionAzureFake) handler(w http.ResponseWriter, r *http.Request) {
 	case strings.Contains(r.URL.Path, "connectiondata"):
 		azureConnectionDataOK(w)
 	case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/_apis/wit/workitems/171191"):
+		if f.bugStatus != 0 {
+			w.WriteHeader(f.bugStatus)
+			w.Write([]byte(`{"message":"bug read failed"}`)) //nolint:errcheck
+			return
+		}
 		w.Write([]byte(f.bugJSON)) //nolint:errcheck
 	case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/_apis/wit/workitems"):
+		f.childrenCalls++
+		if f.childrenStatus != 0 {
+			w.WriteHeader(f.childrenStatus)
+			w.Write([]byte(`{"message":"children read failed"}`)) //nolint:errcheck
+			return
+		}
 		w.Write([]byte(correctionChildrenJSON)) //nolint:errcheck
 	case strings.Contains(r.URL.Path, "/_apis/wit/workitemtypes/Task/fields/"):
 		f.treePath = r.URL.Path
+		if f.fieldsStatus != 0 {
+			w.WriteHeader(f.fieldsStatus)
+			w.Write([]byte(`{"message":"fields read failed"}`)) //nolint:errcheck
+			return
+		}
 		w.Write([]byte(`{"allowedValues":["Desarrollo","QA"]}`)) //nolint:errcheck
 	case strings.Contains(r.URL.Path, "/_apis/wit/classificationnodes/"):
 		f.treePath = r.URL.Path
 		w.Write([]byte(`{"name":"ControlesDeCambio"}`)) //nolint:errcheck
 	case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/_apis/wit/workitems/$Task"):
 		f.createPath = r.URL.Path
+		if f.createStatus != 0 {
+			w.WriteHeader(f.createStatus)
+			w.Write([]byte(`{"message":"create failed"}`)) //nolint:errcheck
+			return
+		}
 		body, _ := io.ReadAll(r.Body)
 		json.Unmarshal(body, &f.createOps) //nolint:errcheck
 		w.Write([]byte(`{"id":171400}`))   //nolint:errcheck
@@ -340,4 +368,128 @@ func TestCreateBugCorrectionTask_CatalogFailureIsNonFatal(t *testing.T) {
 	if _, ok := body["catalog_error"]; !ok {
 		t.Errorf("expected catalog_error, got %v", body)
 	}
+}
+
+func TestGetBugCorrectionTaskDraft_BugReadFailures(t *testing.T) {
+	cases := []struct {
+		name       string
+		azure      int
+		wantStatus int
+	}{
+		{"azure error maps to 502", http.StatusInternalServerError, http.StatusBadGateway},
+		{"missing bug maps to 404", http.StatusNotFound, http.StatusNotFound},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			base, _, fake := setupCorrectionTaskServer(t, correctionBugJSON)
+			fake.bugStatus = tc.azure
+			resp, err := http.Get(base + "/api/azure/bugs/171191/correction-task-draft")
+			mustNoErr(t, err)
+			defer resp.Body.Close()
+			assertStatus(t, resp, tc.wantStatus)
+		})
+	}
+}
+
+func TestGetBugCorrectionTaskDraft_ChildrenReadFailureIsAWarning(t *testing.T) {
+	base, _, fake := setupCorrectionTaskServer(t, correctionBugJSON)
+	fake.childrenStatus = http.StatusInternalServerError
+
+	resp := get(t, base+"/api/azure/bugs/171191/correction-task-draft")
+	assertStatus(t, resp, http.StatusOK)
+	var body struct {
+		BugID              int               `json:"bug_id"`
+		TeamProject        string            `json:"team_project"`
+		Existing           []json.RawMessage `json:"existing_correction_tasks"`
+		ExistingTasksError string            `json:"existing_tasks_error"`
+	}
+	decodeJSON(t, resp, &body)
+	if body.BugID != 171191 || body.TeamProject != "ControlesDeCambio" {
+		t.Errorf("expected bug data despite children failure, got %+v", body)
+	}
+	if body.Existing == nil || len(body.Existing) != 0 {
+		t.Errorf("expected empty existing_correction_tasks array, got %v", body.Existing)
+	}
+	if body.ExistingTasksError == "" {
+		t.Error("expected existing_tasks_error to be set")
+	}
+}
+
+func TestGetBugCorrectionTaskDraft_OmitsWarningWhenChildrenReadSucceeds(t *testing.T) {
+	base, _, _ := setupCorrectionTaskServer(t, correctionBugJSON)
+	resp := get(t, base+"/api/azure/bugs/171191/correction-task-draft")
+	assertStatus(t, resp, http.StatusOK)
+	var body map[string]any
+	decodeJSON(t, resp, &body)
+	if _, ok := body["existing_tasks_error"]; ok {
+		t.Errorf("expected no existing_tasks_error, got %v", body["existing_tasks_error"])
+	}
+}
+
+func TestCreateBugCorrectionTask_DoesNotDependOnChildrenRead(t *testing.T) {
+	base, _, fake := setupCorrectionTaskServer(t, correctionBugJSON)
+	fake.childrenStatus = http.StatusInternalServerError
+
+	resp := doJSON(t, http.MethodPost, base+"/api/azure/bugs/171191/correction-task", validCorrectionBody())
+	assertStatus(t, resp, http.StatusOK)
+	var body map[string]any
+	decodeJSON(t, resp, &body)
+	if body["id"] != float64(171400) {
+		t.Errorf("expected task created despite children failure, got %v", body)
+	}
+	if fake.childrenCalls != 0 {
+		t.Errorf("create must not read the bug's children, got %d calls", fake.childrenCalls)
+	}
+}
+
+func TestCreateBugCorrectionTask_BugReadFailures(t *testing.T) {
+	cases := []struct {
+		name       string
+		azure      int
+		wantStatus int
+	}{
+		{"azure error maps to 502", http.StatusInternalServerError, http.StatusBadGateway},
+		{"missing bug maps to 404", http.StatusNotFound, http.StatusNotFound},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			base, _, fake := setupCorrectionTaskServer(t, correctionBugJSON)
+			fake.bugStatus = tc.azure
+			resp := doJSON(t, http.MethodPost, base+"/api/azure/bugs/171191/correction-task", validCorrectionBody())
+			defer resp.Body.Close()
+			assertStatus(t, resp, tc.wantStatus)
+			if fake.createPath != "" {
+				t.Error("no work item must be created when the bug cannot be read")
+			}
+		})
+	}
+}
+
+func TestCreateBugCorrectionTask_AzureCreateFailureIs502(t *testing.T) {
+	base, st, fake := setupCorrectionTaskServer(t, correctionBugJSON)
+	fake.createStatus = http.StatusInternalServerError
+
+	b := validCorrectionBody()
+	b["add_to_catalog"] = true
+	resp := doJSON(t, http.MethodPost, base+"/api/azure/bugs/171191/correction-task", b)
+	defer resp.Body.Close()
+	assertStatus(t, resp, http.StatusBadGateway)
+
+	list, err := st.ListAzureActivities(context.Background(), true)
+	mustNoErr(t, err)
+	for _, a := range list {
+		if a.WorkItemID == 171400 {
+			t.Errorf("expected no catalog entry after a failed create, got %+v", a)
+		}
+	}
+}
+
+func TestGetSubareaAllowedValues_AzureFailureIs502(t *testing.T) {
+	base, _, fake := setupCorrectionTaskServer(t, correctionBugJSON)
+	fake.fieldsStatus = http.StatusInternalServerError
+
+	resp, err := http.Get(base + "/api/azure/work-item-fields/subarea/allowed-values?team_project=ControlesDeCambio")
+	mustNoErr(t, err)
+	defer resp.Body.Close()
+	assertStatus(t, resp, http.StatusBadGateway)
 }

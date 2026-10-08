@@ -169,6 +169,9 @@ export interface BugCorrectionTaskDraft {
   assigned_to: { id: string; display_name: string; unique_name: string }
   suggested_title: string
   existing_correction_tasks: { id: number; title: string; state: string }[]
+  // Set when the duplicate lookup failed: existing_correction_tasks is then
+  // unknown rather than empty.
+  existing_tasks_error?: string
 }
 
 export interface CreateBugCorrectionTaskInput {

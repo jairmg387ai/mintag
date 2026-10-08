@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -37,10 +38,11 @@ func (srv *Server) azureClientOrUnavailable(w http.ResponseWriter, r *http.Reque
 	return az
 }
 
-// fetchBugDraftOrError reads the bug draft and writes 404 / 502 / 400
-// not_a_bug as appropriate, returning nil when the handler must stop.
-func fetchBugDraftOrError(w http.ResponseWriter, r *http.Request, az *azure.Client, id int) *azure.BugCorrectionTaskDraft {
-	d, err := az.FetchBugCorrectionTaskDraft(r.Context(), id)
+// fetchBugDraftOrError runs fetch (the full draft, or the bug-only read)
+// and writes 404 / 502 / 400 not_a_bug as appropriate, returning nil when
+// the handler must stop.
+func fetchBugDraftOrError(w http.ResponseWriter, id int, fetch func() (*azure.BugCorrectionTaskDraft, error)) *azure.BugCorrectionTaskDraft {
+	d, err := fetch()
 	if err != nil {
 		http.Error(w, sanitizePublicError(err), http.StatusBadGateway)
 		return nil
@@ -69,7 +71,9 @@ func (srv *Server) handleGetBugCorrectionTaskDraft(w http.ResponseWriter, r *htt
 	if az == nil {
 		return
 	}
-	d := fetchBugDraftOrError(w, r, az, id)
+	d := fetchBugDraftOrError(w, id, func() (*azure.BugCorrectionTaskDraft, error) {
+		return az.FetchBugCorrectionTaskDraft(r.Context(), id)
+	})
 	if d == nil {
 		return
 	}
@@ -77,7 +81,7 @@ func (srv *Server) handleGetBugCorrectionTaskDraft(w http.ResponseWriter, r *htt
 	if existing == nil {
 		existing = []azure.CorrectionTaskSummary{}
 	}
-	writeJSON(w, map[string]any{
+	resp := map[string]any{
 		"org":                       az.Config().Org,
 		"bug_id":                    d.BugID,
 		"bug_title":                 d.BugTitle,
@@ -88,7 +92,13 @@ func (srv *Server) handleGetBugCorrectionTaskDraft(w http.ResponseWriter, r *htt
 		"assigned_to":               d.AssignedTo,
 		"suggested_title":           d.SuggestedTitle,
 		"existing_correction_tasks": existing,
-	}, nil)
+	}
+	// The duplicate lookup is best-effort: a failed children read is a
+	// warning for the UI, not a failed draft.
+	if d.ExistingTasksError != "" {
+		resp["existing_tasks_error"] = sanitizePublicError(errors.New(d.ExistingTasksError))
+	}
+	writeJSON(w, resp, nil)
 }
 
 // GET /api/azure/work-item-fields/subarea/allowed-values?team_project=X
@@ -168,7 +178,11 @@ func (srv *Server) handleCreateBugCorrectionTask(w http.ResponseWriter, r *http.
 	if az == nil {
 		return
 	}
-	bug := fetchBugDraftOrError(w, r, az, id)
+	// Creating depends only on the bug itself (type, team project, area),
+	// never on the duplicate lookup.
+	bug := fetchBugDraftOrError(w, id, func() (*azure.BugCorrectionTaskDraft, error) {
+		return az.FetchBugForCorrectionTask(r.Context(), id)
+	})
 	if bug == nil {
 		return
 	}

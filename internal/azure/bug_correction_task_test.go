@@ -347,3 +347,55 @@ func TestIsCorrectionTaskTitle(t *testing.T) {
 		}
 	}
 }
+
+func TestFetchBugCorrectionTaskDraft_ChildrenReadFailureIsBestEffort(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/ORG/_apis/wit/workitems/171191":
+			w.Write([]byte(bugWithChildrenJSON)) //nolint:errcheck
+		case "/ORG/_apis/wit/workitems":
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"message":"boom"}`)) //nolint:errcheck
+		default:
+			t.Fatalf("unexpected request %s", r.URL.String())
+		}
+	}))
+	defer srv.Close()
+
+	d, err := newCorrectionTestClient(srv.URL).FetchBugCorrectionTaskDraft(context.Background(), 171191)
+	if err != nil {
+		t.Fatalf("children failure must not fail the draft: %v", err)
+	}
+	if d == nil || d.BugID != 171191 || d.TeamProject != "ControlesDeCambio" {
+		t.Fatalf("expected bug data, got %+v", d)
+	}
+	if len(d.ExistingCorrectionTasks) != 0 {
+		t.Errorf("expected no existing tasks, got %+v", d.ExistingCorrectionTasks)
+	}
+	if d.ExistingTasksError == "" {
+		t.Error("expected ExistingTasksError to be set")
+	}
+}
+
+func TestFetchBugForCorrectionTask_SkipsChildrenRead(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/ORG/_apis/wit/workitems/171191" {
+			t.Fatalf("unexpected request %s", r.URL.String())
+		}
+		w.Write([]byte(bugWithChildrenJSON)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	d, err := newCorrectionTestClient(srv.URL).FetchBugForCorrectionTask(context.Background(), 171191)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if d == nil || !d.IsBug() || d.TeamProject != "ControlesDeCambio" || d.AreaPath != `ControlesDeCambio\RNET` {
+		t.Fatalf("unexpected bug %+v", d)
+	}
+	if d.ExistingCorrectionTasks != nil || d.ExistingTasksError != "" {
+		t.Errorf("expected no duplicate lookup, got %+v", d)
+	}
+}
