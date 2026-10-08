@@ -1,15 +1,14 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { AlertTriangle, ExternalLink, X } from 'lucide-react'
 import type { ActivityCatalog, BugCorrectionTaskDraft, CreatedBugCorrectionTaskResponse } from '../../types'
 import {
   BugEvidenceApiError,
   createBugCorrectionTask,
-  fetchClassificationTree,
   fetchSubareaAllowedValues,
   getBugCorrectionTaskDraft,
 } from '../../api/client'
 import { azureWorkItemUrl } from '../activities/azureActivity'
-import { flattenClassificationTree } from './classificationTree'
+import { ClassificationTreePicker } from './ClassificationTreePicker'
 
 interface CreateBugCorrectionTaskModalProps {
   open: boolean
@@ -64,22 +63,6 @@ function errorMessage(e: unknown, fallback: string): string {
   return e instanceof Error && e.message ? e.message : fallback
 }
 
-// usePathOptions loads an Area/Iteration tree for a team project and
-// flattens it into selectable full paths.
-function usePathOptions(kind: 'areas' | 'iterations', teamProject: string | undefined) {
-  const [paths, setPaths] = useState<string[]>([])
-  const [error, setError] = useState('')
-  useEffect(() => {
-    if (!teamProject) return
-    let cancelled = false
-    fetchClassificationTree(kind, teamProject)
-      .then(tree => { if (!cancelled) setPaths(flattenClassificationTree(tree)) })
-      .catch((e: unknown) => { if (!cancelled) setError(errorMessage(e, 'No se pudo cargar el árbol')) })
-    return () => { cancelled = true }
-  }, [kind, teamProject])
-  return { paths, error }
-}
-
 // CreateBugCorrectionTaskModal creates a Bug's correction Task ("Atención
 // y/o Corrección del defecto <bugId>") in the bug's own team project, linked
 // to the bug as parent, as the CMMI team does today. Subárea has no default
@@ -106,7 +89,10 @@ export function CreateBugCorrectionTaskModal({
   const [areaPath, setAreaPath] = useState('')
   const [assignedTo, setAssignedTo] = useState('')
   const [description, setDescription] = useState('')
-  const [addToCatalog, setAddToCatalog] = useState(false)
+  // null until the user toggles the checkbox; until then the default is
+  // derived from the connected identity so a late-arriving identity still
+  // applies without overwriting an explicit choice.
+  const [addToCatalogChoice, setAddToCatalogChoice] = useState<boolean | null>(null)
   const [project, setProject] = useState('')
   const [category, setCategory] = useState('')
 
@@ -114,22 +100,17 @@ export function CreateBugCorrectionTaskModal({
   const [submitError, setSubmitError] = useState('')
   const [created, setCreated] = useState<CreatedBugCorrectionTaskResponse | null>(null)
 
-  const teamProject = draft?.team_project
-  const iterations = usePathOptions('iterations', teamProject)
-  const areas = usePathOptions('areas', teamProject)
-
   useEffect(() => {
     if (!open || bugId === null) return
     let cancelled = false
     getBugCorrectionTaskDraft(bugId)
       .then(d => {
         if (cancelled) return
+        setLoadError('')
         setDraft(d)
         setTitle(d.suggested_title)
         setAreaPath(d.area_path)
         setAssignedTo(d.assigned_to.unique_name)
-        const me = currentUserDisplayName?.trim()
-        setAddToCatalog(!!me && d.assigned_to.display_name.trim() === me)
         fetchSubareaAllowedValues(d.team_project)
           .then(values => { if (!cancelled) setSubareas(values) })
           .catch((e: unknown) => { if (!cancelled) setSubareaError(errorMessage(e, 'No se pudieron cargar las subáreas')) })
@@ -138,13 +119,11 @@ export function CreateBugCorrectionTaskModal({
         if (!cancelled) setLoadError(errorMessage(e, 'No se pudo cargar el bug'))
       })
     return () => { cancelled = true }
-  }, [open, bugId, currentUserDisplayName])
+  }, [open, bugId])
 
-  // A prefilled area must stay selectable even before (or without) the tree.
-  const areaOptions = useMemo(
-    () => (areaPath && !areas.paths.includes(areaPath) ? [areaPath, ...areas.paths] : areas.paths),
-    [areaPath, areas.paths],
-  )
+  const me = currentUserDisplayName?.trim()
+  const assigneeIsMe = !!draft && !!me && draft.assigned_to.display_name.trim() === me
+  const addToCatalog = addToCatalogChoice ?? assigneeIsMe
 
   if (!open || bugId === null) return null
 
@@ -312,19 +291,26 @@ export function CreateBugCorrectionTaskModal({
                     </Field>
                   </div>
 
-                  <Field label="Iteración *" htmlFor="bct-iteration">
-                    <select id="bct-iteration" aria-label="Iteración *" value={iterationPath} onChange={e => setIterationPath(e.target.value)} style={fieldStyle}>
-                      <option value="">Selecciona la iteración</option>
-                      {iterations.paths.map(p => <option key={p} value={p}>{p}</option>)}
-                    </select>
-                    {iterations.error && <div style={{ font: 'var(--text-caption)', color: 'var(--block-solid)', marginTop: 4 }}>{iterations.error}</div>}
+                  <Field label="Iteración *">
+                    <ClassificationTreePicker
+                      kind="iterations"
+                      ariaLabel="Iteración *"
+                      value={iterationPath}
+                      onChange={setIterationPath}
+                      inputStyle={fieldStyle}
+                      teamProject={draft.team_project}
+                    />
                   </Field>
 
-                  <Field label="Área" htmlFor="bct-area">
-                    <select id="bct-area" aria-label="Área" value={areaPath} onChange={e => setAreaPath(e.target.value)} style={fieldStyle}>
-                      {areaOptions.map(p => <option key={p} value={p}>{p}</option>)}
-                    </select>
-                    {areas.error && <div style={{ font: 'var(--text-caption)', color: 'var(--block-solid)', marginTop: 4 }}>{areas.error}</div>}
+                  <Field label="Área">
+                    <ClassificationTreePicker
+                      kind="areas"
+                      ariaLabel="Área"
+                      value={areaPath}
+                      onChange={setAreaPath}
+                      inputStyle={fieldStyle}
+                      teamProject={draft.team_project}
+                    />
                   </Field>
 
                   <Field label="Asignado a *" htmlFor="bct-assignee">
@@ -348,7 +334,7 @@ export function CreateBugCorrectionTaskModal({
                   </Field>
 
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, font: 'var(--text-body)', color: 'var(--fg1)', marginBottom: 12 }}>
-                    <input type="checkbox" checked={addToCatalog} onChange={e => setAddToCatalog(e.target.checked)} />
+                    <input type="checkbox" checked={addToCatalog} onChange={e => setAddToCatalogChoice(e.target.checked)} />
                     Agregar al catálogo
                   </label>
 

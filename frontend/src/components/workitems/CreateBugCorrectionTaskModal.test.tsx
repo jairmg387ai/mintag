@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import {
   createBugCorrectionTask,
@@ -11,6 +11,7 @@ import { CreateBugCorrectionTaskModal } from './CreateBugCorrectionTaskModal'
 import type { BugCorrectionTaskDraft } from '../../types'
 
 vi.mock('../../api/client', () => ({
+  BugEvidenceApiError: class BugEvidenceApiError extends Error {},
   createBugCorrectionTask: vi.fn(),
   fetchClassificationTree: vi.fn(),
   fetchSubareaAllowedValues: vi.fn(),
@@ -38,26 +39,40 @@ const catalog = {
   categories: [{ id: 7, name: 'Desarrollo', is_active: true }],
 }
 
-function renderModal(opts: { me?: string } = {}) {
+interface ModalOpts {
+  me?: string
+  bugId?: number
+}
+
+function renderModal(opts: ModalOpts = {}) {
   const onCreated = vi.fn()
   const onClose = vi.fn()
-  render(
+  const element = (o: ModalOpts) => (
     <CreateBugCorrectionTaskModal
       open
-      bugId={171191}
+      bugId={o.bugId ?? 171191}
       onClose={onClose}
       onCreated={onCreated}
       catalog={catalog}
-      currentUserDisplayName={opts.me}
-    />,
+      currentUserDisplayName={o.me}
+    />
   )
-  return { onCreated, onClose }
+  const { rerender } = render(element(opts))
+  const rerenderWith = (next: ModalOpts) => rerender(element({ ...opts, ...next }))
+  return { onCreated, onClose, rerenderWith }
+}
+
+async function pickPath(user: ReturnType<typeof userEvent.setup>, comboboxName: string, optionName: string) {
+  await user.click(screen.getByRole('combobox', { name: comboboxName }))
+  await user.click(await screen.findByRole('option', { name: optionName }))
 }
 
 async function fillRequired(user: ReturnType<typeof userEvent.setup>) {
-  await user.selectOptions(await screen.findByRole('combobox', { name: 'Subárea *' }), 'Desarrollo')
+  const subarea = await screen.findByRole('combobox', { name: 'Subárea *' })
+  await within(subarea).findByRole('option', { name: 'Desarrollo' })
+  await user.selectOptions(subarea, 'Desarrollo')
   await user.type(screen.getByLabelText('Estimado en horas *'), '6')
-  await user.selectOptions(screen.getByRole('combobox', { name: 'Iteración *' }), 'ControlesDeCambio\\Sprint 7 Semana 41')
+  await pickPath(user, 'Iteración *', 'ControlesDeCambio\\Sprint 7 Semana 41')
 }
 
 describe('CreateBugCorrectionTaskModal', () => {
@@ -101,7 +116,7 @@ describe('CreateBugCorrectionTaskModal', () => {
     await user.clear(screen.getByLabelText('Estimado en horas *'))
     await user.type(screen.getByLabelText('Estimado en horas *'), '6')
     expect(submit).toBeDisabled()
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Iteración *' }), 'ControlesDeCambio\\Sprint 7 Semana 41')
+    await pickPath(user, 'Iteración *', 'ControlesDeCambio\\Sprint 7 Semana 41')
     expect(submit).toBeEnabled()
   })
 
@@ -162,5 +177,95 @@ describe('CreateBugCorrectionTaskModal', () => {
     await waitFor(() => expect(createBugCorrectionTask).toHaveBeenCalled())
     expect(vi.mocked(createBugCorrectionTask).mock.calls[0][1]).toMatchObject({ add_to_catalog: false })
     expect(vi.mocked(createBugCorrectionTask).mock.calls[0][1]).not.toHaveProperty('project')
+  })
+
+  it('uses tree pickers for iteration and area loaded from the bug team project', async () => {
+    const user = userEvent.setup()
+    renderModal()
+
+    const area = await screen.findByRole('combobox', { name: 'Área' })
+    expect(area).toHaveAttribute('aria-autocomplete', 'list')
+    expect(area).toHaveValue('ControlesDeCambio\\RNET')
+    await pickPath(user, 'Área', 'ControlesDeCambio\\QA')
+    expect(screen.getByRole('combobox', { name: 'Área' })).toHaveValue('ControlesDeCambio\\QA')
+
+    expect(screen.getByRole('combobox', { name: 'Iteración *' })).toHaveAttribute('aria-autocomplete', 'list')
+    expect(fetchClassificationTree).toHaveBeenCalledWith('iterations', 'ControlesDeCambio')
+    expect(fetchClassificationTree).toHaveBeenCalledWith('areas', 'ControlesDeCambio')
+  })
+
+  it('submits a custom title typed by the user', async () => {
+    const user = userEvent.setup()
+    renderModal()
+
+    const title = await screen.findByDisplayValue('Atención y/o Corrección del defecto 171191')
+    await user.clear(title)
+    await user.type(title, 'Corrección manual del radicado')
+    await fillRequired(user)
+    await user.click(screen.getByRole('button', { name: 'Crear tarea de corrección' }))
+
+    await waitFor(() => expect(createBugCorrectionTask).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(createBugCorrectionTask).mock.calls[0][1]).toMatchObject({ title: 'Corrección manual del radicado' })
+  })
+
+  it('keeps user edits when the connected identity arrives after opening', async () => {
+    const user = userEvent.setup()
+    const { rerenderWith } = renderModal()
+
+    const title = await screen.findByDisplayValue('Atención y/o Corrección del defecto 171191')
+    await user.clear(title)
+    await user.type(title, 'Título propio')
+    await pickPath(user, 'Área', 'ControlesDeCambio\\QA')
+    await user.clear(screen.getByLabelText('Asignado a *'))
+    await user.type(screen.getByLabelText('Asignado a *'), 'otro@runt.com.co')
+    const checkbox = screen.getByRole('checkbox', { name: 'Agregar al catálogo' })
+    expect(checkbox).not.toBeChecked()
+    await user.click(checkbox)
+    await user.click(checkbox)
+    expect(checkbox).not.toBeChecked()
+
+    rerenderWith({ me: 'Dev Uno' })
+
+    expect(screen.getByLabelText('Título *')).toHaveValue('Título propio')
+    expect(screen.getByRole('combobox', { name: 'Área' })).toHaveValue('ControlesDeCambio\\QA')
+    expect(screen.getByLabelText('Asignado a *')).toHaveValue('otro@runt.com.co')
+    // The user's explicit choice wins over the identity-derived default.
+    expect(screen.getByRole('checkbox', { name: 'Agregar al catálogo' })).not.toBeChecked()
+
+    await fillRequired(user)
+    expect(screen.getByLabelText('Título *')).toHaveValue('Título propio')
+    expect(getBugCorrectionTaskDraft).toHaveBeenCalledTimes(1)
+    expect(fetchSubareaAllowedValues).toHaveBeenCalledTimes(1)
+    await user.click(screen.getByRole('button', { name: 'Crear tarea de corrección' }))
+    await waitFor(() => expect(createBugCorrectionTask).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(createBugCorrectionTask).mock.calls[0][1]).toMatchObject({
+      title: 'Título propio',
+      area_path: 'ControlesDeCambio\\QA',
+      assigned_to: 'otro@runt.com.co',
+      add_to_catalog: false,
+    })
+  })
+
+  it('derives the catalog default from an identity that arrives late when the user has not toggled it', async () => {
+    const { rerenderWith } = renderModal()
+    await screen.findByDisplayValue('Atención y/o Corrección del defecto 171191')
+    expect(screen.getByRole('checkbox', { name: 'Agregar al catálogo' })).not.toBeChecked()
+
+    rerenderWith({ me: 'Dev Uno' })
+
+    expect(screen.getByRole('checkbox', { name: 'Agregar al catálogo' })).toBeChecked()
+    await waitFor(() => expect(fetchSubareaAllowedValues).toHaveBeenCalledTimes(1))
+    expect(getBugCorrectionTaskDraft).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears a previous load error once a draft loads successfully', async () => {
+    vi.mocked(getBugCorrectionTaskDraft).mockRejectedValueOnce(new Error('bug no disponible'))
+    const { rerenderWith } = renderModal({ bugId: 1 })
+    expect(await screen.findByText('bug no disponible')).toBeInTheDocument()
+
+    rerenderWith({ bugId: 171191 })
+
+    expect(await screen.findByDisplayValue('Atención y/o Corrección del defecto 171191')).toBeInTheDocument()
+    expect(screen.queryByText('bug no disponible')).not.toBeInTheDocument()
   })
 })

@@ -8,6 +8,8 @@ interface ClassificationTreePickerProps {
   value: string
   onChange: (path: string) => void
   inputStyle: CSSProperties
+  // Team project whose tree to load; omitted means the configured default.
+  teamProject?: string
 }
 
 // A single reusable Area/Iteration path picker (used once per kind). Design
@@ -16,7 +18,7 @@ interface ClassificationTreePickerProps {
 // through the same accessible filter+keyboard-listbox pattern already
 // implemented by AzureActivityCombobox, so mintag ends up with one combobox
 // UI instead of two.
-export function ClassificationTreePicker({ kind, ariaLabel, value, onChange, inputStyle }: ClassificationTreePickerProps) {
+export function ClassificationTreePicker({ kind, ariaLabel, value, onChange, inputStyle, teamProject }: ClassificationTreePickerProps) {
   const [allPaths, setAllPaths] = useState<string[]>([])
   const [loadError, setLoadError] = useState('')
   const [query, setQuery] = useState('')
@@ -31,15 +33,20 @@ export function ClassificationTreePicker({ kind, ariaLabel, value, onChange, inp
 
   useEffect(() => {
     let cancelled = false
-    fetchClassificationTree(kind)
+    const load = teamProject ? fetchClassificationTree(kind, teamProject) : fetchClassificationTree(kind)
+    load
       .then(tree => {
-        if (!cancelled) setAllPaths(flattenClassificationTree(tree))
+        if (cancelled) return
+        setAllPaths(flattenClassificationTree(tree))
+        setLoadError('')
       })
       .catch((e: unknown) => {
-        if (!cancelled) setLoadError(e instanceof Error ? e.message : 'No se pudo cargar el árbol')
+        if (cancelled) return
+        setAllPaths([])
+        setLoadError(e instanceof Error ? e.message : 'No se pudo cargar el árbol')
       })
     return () => { cancelled = true }
-  }, [kind])
+  }, [kind, teamProject])
 
   const matches = useMemo(() => filterClassificationPaths(allPaths, query), [allPaths, query])
   const safeIndex = Math.min(activeIndex, matches.length - 1)

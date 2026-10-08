@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { fetchBugEvidence, patchBugEvidence, addBugComment, BugEvidenceApiError } from './client'
+import { fetchBugEvidence, patchBugEvidence, addBugComment, BugEvidenceApiError, fetchClassificationTree } from './client'
 
 // This file closes a coverage gap flagged by PR4's verify: BugEvidenceApiError's
 // parsing/classification logic in requestBugEvidence (client.ts) had zero
@@ -85,5 +85,29 @@ describe('BugEvidenceApiError parsing (requestBugEvidence)', () => {
     vi.mocked(fetch).mockResolvedValue(new Response('not json', { status: 500 }))
 
     await expect(addBugComment(170277, 'key-1', 'hola')).rejects.not.toBeInstanceOf(BugEvidenceApiError)
+  })
+})
+
+describe('fetchClassificationTree', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(() =>
+      Promise.resolve(new Response(JSON.stringify({ name: 'X' }), { status: 200, headers: { 'Content-Type': 'application/json' } })),
+    ))
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('requests the default team project tree without a query string', async () => {
+    await fetchClassificationTree('areas')
+    expect(String(vi.mocked(fetch).mock.calls[0][0])).toBe('/api/activities/azure-classification-nodes/areas')
+  })
+
+  it('passes teamProject as the team_project query parameter', async () => {
+    await fetchClassificationTree('iterations', 'Controles De Cambio')
+    expect(String(vi.mocked(fetch).mock.calls[0][0])).toBe(
+      '/api/activities/azure-classification-nodes/iterations?team_project=Controles+De+Cambio',
+    )
   })
 })
