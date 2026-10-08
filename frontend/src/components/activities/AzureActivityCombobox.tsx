@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import type { AzureActivity } from '../../types'
-import { filterAzureActivities, findDefaultAzureActivity, formatAzureActivityLabel } from './azureActivity'
+import { filterAzureActivities, findDefaultAzureActivity, formatAzureActivityLabel, formatAzureParentLabel } from './azureActivity'
 
 interface AzureActivityComboboxProps {
   azureActivities: AzureActivity[] // active-only (server already filters; see D4)
@@ -13,6 +13,8 @@ interface ComboOption {
   key: string
   value: string
   label: string
+  // Tooltip, e.g. the parent bug (see formatAzureParentLabel).
+  title?: string
 }
 
 const DEFAULT_VALUE = ''
@@ -36,7 +38,7 @@ export function AzureActivityCombobox({ azureActivities, value, onChange, inputS
 
   const options: ComboOption[] = [
     defaultOption,
-    ...matches.map(a => ({ key: String(a.id), value: String(a.id), label: formatAzureActivityLabel(a) })),
+    ...matches.map(a => ({ key: String(a.id), value: String(a.id), label: formatAzureActivityLabel(a), title: formatAzureParentLabel(a) })),
   ]
 
   const assignedActivity = value ? azureActivities.find(a => String(a.id) === value) : undefined
@@ -117,6 +119,7 @@ export function AzureActivityCombobox({ azureActivities, value, onChange, inputS
         autoComplete="off"
         type="text"
         value={open ? query : selectedLabel}
+        title={assignedActivity ? formatAzureParentLabel(assignedActivity) : undefined}
         placeholder={open ? selectedLabel : undefined}
         onFocus={openList}
         onClick={openList}
@@ -155,6 +158,7 @@ export function AzureActivityCombobox({ azureActivities, value, onChange, inputS
               id={`azure-activity-option-${opt.key}`}
               role="option"
               aria-selected={opt.value === value}
+              title={opt.title}
               data-index={index}
               onMouseDown={e => {
                 e.preventDefault()

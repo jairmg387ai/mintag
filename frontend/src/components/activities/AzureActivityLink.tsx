@@ -3,6 +3,7 @@ import type { AzureActivity } from '../../types'
 import {
   azureWorkItemUrl,
   formatAzureActivityLabel,
+  formatAzureParentLabel,
   resolveAzureActivity,
   resolveAzureActivityLabel,
 } from './azureActivity'
@@ -16,6 +17,9 @@ interface AzureWorkItemLinkProps {
 
 export function AzureWorkItemLink({ activity, children, className, style }: AzureWorkItemLinkProps) {
   const label = formatAzureActivityLabel(activity)
+  const parent = formatAzureParentLabel(activity)
+  const title = `Abrir work item de Azure #${activity.work_item_id}${parent ? `
+${parent}` : ''}`
   return (
     <a
       href={azureWorkItemUrl(activity)}
@@ -23,7 +27,7 @@ export function AzureWorkItemLink({ activity, children, className, style }: Azur
       rel="noreferrer"
       className={className}
       style={{ color: 'inherit', textDecoration: 'underline', textUnderlineOffset: 2, ...style }}
-      title={`Abrir work item de Azure #${activity.work_item_id}`}
+      title={title}
       aria-label={`Abrir work item de Azure #${activity.work_item_id} en una pestaña nueva`}
     >
       {children ?? label}

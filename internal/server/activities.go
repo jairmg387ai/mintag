@@ -563,6 +563,9 @@ func (srv *Server) handleListAssignedAzureWorkItems(w http.ResponseWriter, r *ht
 		http.Error(w, sanitizePublicError(err), http.StatusBadGateway)
 		return
 	}
+	// Best-effort: the list stays useful without parent info, so a failed
+	// parent lookup just leaves parent_* unset.
+	_ = az.AttachWorkItemParents(r.Context(), items)
 	writeJSON(w, map[string]any{"org": az.Config().Org, "items": items}, nil)
 }
 
@@ -842,6 +845,12 @@ func (srv *Server) handleAddAzureActivity(w http.ResponseWriter, r *http.Request
 		WorkItemType string  `json:"work_item_type"`
 		Project      *string `json:"project"`
 		CategoryID   *int64  `json:"category_id"`
+		// Optional parent work item already known to the caller (e.g. from
+		// the assigned list), so the new entry shows its parent Bug without
+		// waiting for the next states refresh.
+		ParentWorkItemID *int   `json:"parent_work_item_id"`
+		ParentTitle      string `json:"parent_title"`
+		ParentType       string `json:"parent_type"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -852,6 +861,15 @@ func (srv *Server) handleAddAzureActivity(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
+	}
+	if body.ParentWorkItemID != nil && *body.ParentWorkItemID > 0 {
+		// Best-effort: the entry already exists; a failed parent write only
+		// means the parent shows up after the next states refresh instead.
+		if err := srv.st.SyncAzureActivityParent(r.Context(), a.WorkItemID, *body.ParentWorkItemID, body.ParentTitle, body.ParentType); err == nil {
+			if refreshed, err := srv.st.GetAzureActivity(r.Context(), a.ID); err == nil {
+				a = refreshed
+			}
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)

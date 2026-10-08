@@ -164,6 +164,14 @@ func (srv *Server) handleGetAzureWorkItemStates(w http.ResponseWriter, r *http.R
 	for _, item := range items {
 		_ = srv.st.SyncAzureActivityLiveState(r.Context(), item.ID, item.State, item.Type, item.AssignedToDisplayName)
 	}
+	// Parent lookup (Bug a correction Task hangs under) is best-effort too:
+	// a failure must not fail the refresh, and must not touch stored parents
+	// — only a successful lookup is authoritative enough to set or clear them.
+	if err := az.AttachWorkItemParents(r.Context(), items); err == nil {
+		for _, item := range items {
+			_ = srv.st.SyncAzureActivityParent(r.Context(), item.ID, item.ParentID, item.ParentTitle, item.ParentType)
+		}
+	}
 	writeJSON(w, map[string]any{"org": az.Config().Org, "team_project": az.Config().TeamProject, "items": items}, nil)
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -1074,5 +1075,190 @@ func TestRecreateAzureWorkItem_ActivationPartialFailure(t *testing.T) {
 	decodeJSON(t, resp, &body)
 	if body.ID != 444 || body.State != "Proposed" || body.ActivationError == "" {
 		t.Errorf("expected partial success (444, Proposed, non-empty activation_error), got %+v", body)
+	}
+}
+
+// parentAwareAzureServer fakes the work item reads used by the parent lookup:
+// a batch read with $expand=relations returns relations for each requested
+// id, and a plain fields batch returns title/type/state. Ids absent from
+// the map are simply omitted. wiqlIDs answers WIQL queries.
+// failRelations makes every $expand=relations read return 500.
+func parentAwareAzureServer(t *testing.T, fields, relations map[int]string, wiqlIDs string, failRelations bool) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "connectiondata"):
+			w.Write([]byte(`{"authenticatedUser":{"id":"id","providerDisplayName":"Name"}}`)) //nolint:errcheck
+		case strings.Contains(r.URL.Path, "/_apis/wit/wiql"):
+			w.Write([]byte(`{"workItems":[` + wiqlIDs + `]}`)) //nolint:errcheck
+		case strings.Contains(r.URL.Path, "/_apis/wit/workitems"):
+			source := fields
+			if r.URL.Query().Get("$expand") == "relations" {
+				if failRelations {
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+				source = relations
+			}
+			var parts []string
+			for _, s := range strings.Split(r.URL.Query().Get("ids"), ",") {
+				if id, err := strconv.Atoi(s); err == nil {
+					if body, ok := source[id]; ok {
+						parts = append(parts, body)
+					}
+				}
+			}
+			w.Write([]byte(`{"value":[` + strings.Join(parts, ",") + `]}`)) //nolint:errcheck
+		default:
+			t.Fatalf("unexpected azure request: %s", r.URL.Path)
+		}
+	}))
+}
+
+var parentTestFields = map[int]string{
+	171306: `{"id":171306,"fields":{"System.Title":"Atención y/o Corrección del defecto 171191","System.WorkItemType":"Task","System.State":"Active"}}`,
+	171191: `{"id":171191,"fields":{"System.Title":"Login falla","System.WorkItemType":"Bug","System.State":"Active"}}`,
+}
+
+var parentTestRelations = map[int]string{
+	171306: `{"id":171306,"fields":{},"relations":[{"rel":"System.LinkTypes.Hierarchy-Reverse","url":"https://dev.azure.com/ORG/_apis/wit/workItems/171191"}]}`,
+	171191: `{"id":171191,"fields":{}}`,
+}
+
+func configureParentTestAzure(t *testing.T, base string) {
+	t.Helper()
+	assertStatus(t, doJSON(t, http.MethodPut, base+"/api/activities/azure-config", map[string]any{"token": "db-token", "auth_mode": "bearer"}), http.StatusOK)
+}
+
+type parentItemsBody struct {
+	Items []struct {
+		ID          int    `json:"id"`
+		ParentID    int    `json:"parent_id"`
+		ParentTitle string `json:"parent_title"`
+		ParentType  string `json:"parent_type"`
+	} `json:"items"`
+}
+
+func TestGetAzureWorkItemStates_PersistsAndReturnsParent(t *testing.T) {
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
+
+	azureServer := parentAwareAzureServer(t, parentTestFields, parentTestRelations, "", false)
+	defer azureServer.Close()
+	base, st := newTestServerWithAzureRedirect(t, azureServer.URL)
+	configureParentTestAzure(t, base)
+
+	ctx := context.Background()
+	added, err := st.AddAzureActivity(ctx, "RUNT2QA", 171306, "Atención", "Task", store.AzureActivityMapping{})
+	mustNoErr(t, err)
+
+	resp := get(t, base+"/api/activities/azure-work-items/states?ids=171306")
+	assertStatus(t, resp, http.StatusOK)
+	var body parentItemsBody
+	decodeJSON(t, resp, &body)
+	if len(body.Items) != 1 || body.Items[0].ParentID != 171191 || body.Items[0].ParentTitle != "Login falla" || body.Items[0].ParentType != "Bug" {
+		t.Fatalf("expected parent in states response, got %+v", body.Items)
+	}
+
+	updated, err := st.GetAzureActivity(ctx, added.ID)
+	mustNoErr(t, err)
+	if updated.ParentWorkItemID == nil || *updated.ParentWorkItemID != 171191 || updated.ParentTitle != "Login falla" || updated.ParentType != "Bug" {
+		t.Errorf("expected parent persisted in catalog, got %+v", updated)
+	}
+	if updated.LastKnownState != "Active" {
+		t.Errorf("expected state still synced, got %q", updated.LastKnownState)
+	}
+}
+
+func TestGetAzureWorkItemStates_ClearsParentWhenLinkRemoved(t *testing.T) {
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
+
+	relations := map[int]string{171306: `{"id":171306,"fields":{}}`}
+	azureServer := parentAwareAzureServer(t, parentTestFields, relations, "", false)
+	defer azureServer.Close()
+	base, st := newTestServerWithAzureRedirect(t, azureServer.URL)
+	configureParentTestAzure(t, base)
+
+	ctx := context.Background()
+	added, err := st.AddAzureActivity(ctx, "RUNT2QA", 171306, "Atención", "Task", store.AzureActivityMapping{})
+	mustNoErr(t, err)
+	mustNoErr(t, st.SyncAzureActivityParent(ctx, 171306, 171191, "Login falla", "Bug"))
+
+	resp := get(t, base+"/api/activities/azure-work-items/states?ids=171306")
+	assertStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	updated, err := st.GetAzureActivity(ctx, added.ID)
+	mustNoErr(t, err)
+	if updated.ParentWorkItemID != nil || updated.ParentTitle != "" {
+		t.Errorf("expected parent cleared, got %+v", updated)
+	}
+}
+
+func TestGetAzureWorkItemStates_ParentLookupFailureKeepsRefreshAndStoredParent(t *testing.T) {
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
+
+	azureServer := parentAwareAzureServer(t, parentTestFields, parentTestRelations, "", true)
+	defer azureServer.Close()
+	base, st := newTestServerWithAzureRedirect(t, azureServer.URL)
+	configureParentTestAzure(t, base)
+
+	ctx := context.Background()
+	added, err := st.AddAzureActivity(ctx, "RUNT2QA", 171306, "Atención", "Task", store.AzureActivityMapping{})
+	mustNoErr(t, err)
+	mustNoErr(t, st.SyncAzureActivityParent(ctx, 171306, 171191, "Login falla", "Bug"))
+
+	resp := get(t, base+"/api/activities/azure-work-items/states?ids=171306")
+	assertStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	updated, err := st.GetAzureActivity(ctx, added.ID)
+	mustNoErr(t, err)
+	if updated.LastKnownState != "Active" {
+		t.Errorf("expected state synced despite parent failure, got %q", updated.LastKnownState)
+	}
+	if updated.ParentWorkItemID == nil || *updated.ParentWorkItemID != 171191 {
+		t.Errorf("expected stored parent kept on lookup failure, got %+v", updated)
+	}
+}
+
+func TestListAssignedAzureWorkItems_ReturnsParent(t *testing.T) {
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
+
+	azureServer := parentAwareAzureServer(t, parentTestFields, parentTestRelations, `{"id":171306}`, false)
+	defer azureServer.Close()
+	base, _ := newTestServerWithAzureRedirect(t, azureServer.URL)
+	configureParentTestAzure(t, base)
+
+	resp := get(t, base+"/api/activities/azure-work-items/assigned")
+	assertStatus(t, resp, http.StatusOK)
+	var body parentItemsBody
+	decodeJSON(t, resp, &body)
+	if len(body.Items) != 1 || body.Items[0].ParentID != 171191 || body.Items[0].ParentTitle != "Login falla" || body.Items[0].ParentType != "Bug" {
+		t.Fatalf("expected parent on assigned item, got %+v", body.Items)
+	}
+}
+
+func TestAddAzureActivity_PersistsOptionalParent(t *testing.T) {
+	base, st := newTestServerWithAzureRedirect(t, "http://127.0.0.1:1")
+
+	resp := doJSON(t, http.MethodPost, base+"/api/activities/azure-catalog", map[string]any{
+		"org": "RUNT2QA", "work_item_id": 171306, "label": "Atención", "work_item_type": "Task",
+		"parent_work_item_id": 171191, "parent_title": "Login falla", "parent_type": "Bug",
+	})
+	assertStatus(t, resp, http.StatusCreated)
+	var created store.AzureActivity
+	decodeJSON(t, resp, &created)
+	if created.ParentWorkItemID == nil || *created.ParentWorkItemID != 171191 || created.ParentTitle != "Login falla" || created.ParentType != "Bug" {
+		t.Fatalf("expected parent in add response, got %+v", created)
+	}
+	stored, err := st.GetAzureActivity(context.Background(), created.ID)
+	mustNoErr(t, err)
+	if stored.ParentWorkItemID == nil || *stored.ParentWorkItemID != 171191 {
+		t.Errorf("expected parent persisted, got %+v", stored)
 	}
 }

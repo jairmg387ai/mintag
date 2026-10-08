@@ -298,6 +298,12 @@ type AssignedWorkItem struct {
 	State                 string `json:"state"` // System.State, e.g. "Active", "New"
 	AssignedToID          string `json:"assigned_to_id,omitempty"`
 	AssignedToDisplayName string `json:"assigned_to_display_name,omitempty"`
+	// Parent* describe the item's parent work item (e.g. the Bug a
+	// correction Task hangs under). Only populated by AttachWorkItemParents;
+	// zero/blank when the item has no parent or the lookup wasn't run.
+	ParentID    int    `json:"parent_id,omitempty"`
+	ParentTitle string `json:"parent_title,omitempty"`
+	ParentType  string `json:"parent_type,omitempty"`
 }
 
 // azureIdentityRef is the identity reference shape Azure DevOps embeds for

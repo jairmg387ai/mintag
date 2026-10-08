@@ -14,7 +14,7 @@ import {
   reactivateAzureActivity,
   setDefaultAzureActivity,
 } from '../../api/client'
-import { friendlyCatalogErrorMessage } from '../activities/azureActivity'
+import { azureWorkItemUrl, formatAzureParentLabel, friendlyCatalogErrorMessage } from '../activities/azureActivity'
 import { useAppActions, useAppState } from '../../store/AppContext'
 import { Card, CardHeader } from '../ui/Card'
 import { CreateWorkItemModal } from './CreateWorkItemModal'
@@ -59,10 +59,6 @@ export function WorkItemsView() {
   const [liveStates, setLiveStates] = useState<Record<number, AssignedAzureWorkItem>>({})
   const [statesLoading, setStatesLoading] = useState(false)
   const [rowBusy, setRowBusy] = useState<Record<number, boolean>>({})
-  // org/team_project are only known once a states refresh has run at least
-  // once — until then we omit the "open in Azure DevOps" link rather than
-  // guess at a fallback org/project.
-  const [azureLinkBase, setAzureLinkBase] = useState<{ org: string; teamProject: string } | null>(null)
   const [hideClosed, setHideClosed] = useState(false)
   const [hideBugs, setHideBugs] = useState(false)
   const [hideTasks, setHideTasks] = useState(false)
@@ -128,6 +124,11 @@ export function WorkItemsView() {
     setAssignedPage(1)
   }, [assignedSearchQuery, pendingAssigned])
 
+  function openBugEvidence(bugId: number) {
+    setActiveBugEvidenceId(bugId)
+    openModal('bug-evidence')
+  }
+
   function categoryName(categoryId: AzureActivity['category_id']): string {
     if (!categoryId || !catalog) return '—'
     return catalog.categories.find(c => c.id === categoryId)?.name ?? '—'
@@ -165,15 +166,14 @@ export function WorkItemsView() {
     setStatesLoading(true)
     try {
       const ids = azureActivities.map(a => a.work_item_id)
-      const { items, org, team_project } = await fetchAzureWorkItemStates(ids)
+      const { items } = await fetchAzureWorkItemStates(ids)
       const byId: Record<number, AssignedAzureWorkItem> = {}
       for (const item of items) byId[item.id] = item
       setLiveStates(byId)
-      if (org && team_project) setAzureLinkBase({ org, teamProject: team_project })
-      // The backend persists each item's live state/type into the catalog
-      // (see SyncAzureActivityLiveState) — reload so a work item reclassified
-      // in Azure (e.g. Bug -> Task) picks up its corrected type here too,
-      // not just its state.
+      // The backend persists each item's live state/type and parent work item
+      // into the catalog (see SyncAzureActivityLiveState/SyncAzureActivityParent)
+      // — reload so a work item reclassified in Azure (e.g. Bug -> Task) picks
+      // up its corrected type and parent here too, not just its state.
       loadAzureActivities(showInactive)
     } catch (e: unknown) {
       pushToast(e instanceof Error ? e.message : 'No se pudo refrescar el estado de los work items', true)
@@ -204,7 +204,17 @@ export function WorkItemsView() {
   async function handleAddAssigned(item: AssignedAzureWorkItem) {
     setAddingWorkItemId(item.id)
     try {
-      await addAzureActivity({ org: assignedOrg, work_item_id: item.id, label: item.title, work_item_type: item.type })
+      await addAzureActivity({
+        org: assignedOrg,
+        work_item_id: item.id,
+        label: item.title,
+        work_item_type: item.type,
+        // Persist the parent already resolved by the assigned list, so the
+        // new catalog row shows it without waiting for a states refresh.
+        ...(item.parent_id
+          ? { parent_work_item_id: item.parent_id, parent_title: item.parent_title, parent_type: item.parent_type }
+          : {}),
+      })
       setPendingAssigned(prev => (prev ? prev.filter(p => p.id !== item.id) : prev))
       loadAzureActivities(showInactive)
       pushToast(`Work item ${item.id} agregado al catálogo.`, false)
@@ -715,17 +725,7 @@ export function WorkItemsView() {
                                     <ListTodo size={14} strokeWidth={1.75} style={{ color: 'var(--fg3)', flexShrink: 0 }} aria-label="Task" />
                                   ) : null}
                                   {a.work_item_id}
-                                  {azureLinkBase && (
-                                    <a
-                                      href={`https://dev.azure.com/${azureLinkBase.org}/${azureLinkBase.teamProject}/_workitems/edit/${a.work_item_id}`}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      title="Abrir en Azure DevOps"
-                                      style={{ color: 'var(--fg3)', display: 'inline-flex' }}
-                                    >
-                                      <ExternalLink size={13} strokeWidth={1.75} />
-                                    </a>
-                                  )}
+                                  <AzureOpenLink org={a.org} workItemId={a.work_item_id} />
                                 </div>
                               </td>
                               {isEditing ? (
@@ -807,6 +807,15 @@ export function WorkItemsView() {
                                     {!a.is_active && (
                                       <span className="chip chip-todo" style={{ fontSize: '0.7em', marginLeft: 6 }}>Inactivo</span>
                                     )}
+                                    {a.parent_work_item_id ? (
+                                      <ParentWorkItemLine
+                                        org={a.org}
+                                        parentId={a.parent_work_item_id}
+                                        title={a.parent_title}
+                                        type={a.parent_type}
+                                        onOpenBugEvidence={openBugEvidence}
+                                      />
+                                    ) : null}
                                   </td>
                                   <td style={{ color: 'var(--fg2)' }}>{a.project || '—'}</td>
                                   <td style={{ color: 'var(--fg2)' }}>{categoryName(a.category_id)}</td>
@@ -920,10 +929,7 @@ export function WorkItemsView() {
                                   <button
                                     className="btn btn-ghost btn-sm"
                                     disabled={isEditing}
-                                    onClick={() => {
-                                      setActiveBugEvidenceId(a.work_item_id)
-                                      openModal('bug-evidence')
-                                    }}
+                                    onClick={() => openBugEvidence(a.work_item_id)}
                                   >
                                     Evidencia DSW-PR-017
                                   </button>
@@ -1044,8 +1050,16 @@ export function WorkItemsView() {
                           background: 'var(--bg-sunken)',
                         }}
                       >
-                        <span style={{ font: 'var(--text-mono)', color: 'var(--fg1)' }}>#{item.id}</span>
-                        <span style={{ flex: 1, color: 'var(--fg1)', font: 'var(--text-sm)' }}>{item.title}</span>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, font: 'var(--text-mono)', color: 'var(--fg1)' }}>
+                          #{item.id}
+                          {assignedOrg && <AzureOpenLink org={assignedOrg} workItemId={item.id} />}
+                        </span>
+                        <span style={{ flex: 1, color: 'var(--fg1)', font: 'var(--text-sm)' }}>
+                          {item.title}
+                          {item.parent_id && assignedOrg ? (
+                            <ParentWorkItemLine org={assignedOrg} parentId={item.parent_id} title={item.parent_title} type={item.parent_type} onOpenBugEvidence={openBugEvidence} />
+                          ) : null}
+                        </span>
                         <span style={{ color: 'var(--fg3)', font: 'var(--text-caption)' }}>{item.type}</span>
                         <button
                           className="btn btn-ghost btn-sm"
@@ -1097,6 +1111,74 @@ export function WorkItemsView() {
         onCreated={handleCreated}
         catalog={catalog}
       />
+    </div>
+  )
+}
+
+// AzureOpenLink is the small "open in Azure DevOps" icon link shown next to
+// a work item id. Built from the org alone (azureWorkItemUrl), so it renders
+// on load without needing a states refresh to learn the team project.
+function AzureOpenLink({ org, workItemId }: { org: string; workItemId: number }) {
+  return (
+    <a
+      href={azureWorkItemUrl({ org, work_item_id: workItemId })}
+      target="_blank"
+      rel="noreferrer"
+      title="Abrir en Azure DevOps"
+      style={{ color: 'var(--fg3)', display: 'inline-flex' }}
+    >
+      <ExternalLink size={13} strokeWidth={1.75} />
+    </a>
+  )
+}
+
+// ParentWorkItemLine is the secondary line under a work item's label that
+// names its parent (e.g. the Bug a correction Task hangs under), linked to
+// Azure. The Bug icon is reserved for Bug parents; any other parent type is
+// shown as a plain text prefix. Bug parents also get the DSW-PR-017 evidence
+// action when onOpenBugEvidence is given, since only the child Task (not the
+// Bug itself) is catalogued once hours must go to the correction Task.
+function ParentWorkItemLine({ org, parentId, title, type, onOpenBugEvidence }: {
+  org: string
+  parentId: number
+  title?: string
+  type?: string
+  onOpenBugEvidence?: (bugId: number) => void
+}) {
+  const trimmedType = type?.trim()
+  const isBug = trimmedType?.toLowerCase() === 'bug'
+  const trimmedTitle = title?.trim()
+  return (
+    <div style={{ marginTop: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
+      <a
+        href={azureWorkItemUrl({ org, work_item_id: parentId })}
+        target="_blank"
+        rel="noreferrer"
+        title={formatAzureParentLabel({ parent_work_item_id: parentId, parent_title: title, parent_type: type })}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--fg3)', font: 'var(--text-caption)', textDecoration: 'none' }}
+      >
+        {isBug ? (
+          <Bug size={12} strokeWidth={1.75} style={{ color: 'var(--block-solid)', flexShrink: 0 }} aria-label="Bug" />
+        ) : trimmedType ? (
+          <span>{trimmedType}</span>
+        ) : null}
+        <span>
+          #{parentId}
+          {trimmedTitle ? ` — ${trimmedTitle}` : ''}
+        </span>
+      </a>
+      {isBug && onOpenBugEvidence && (
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={() => onOpenBugEvidence(parentId)}
+          title="Ver seguimiento, comentarios y causa raíz del bug"
+          aria-label={`Evidencia del bug #${parentId}`}
+          style={{ padding: '0 6px', font: 'var(--text-caption)' }}
+        >
+          Evidencia
+        </button>
+      )}
     </div>
   )
 }

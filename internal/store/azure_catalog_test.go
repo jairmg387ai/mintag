@@ -863,3 +863,85 @@ func TestSyncAzureActivityLiveState_UnknownWorkItemIDIsNotAnError(t *testing.T) 
 		t.Fatalf("expected no error syncing an uncataloged work item id, got %v", err)
 	}
 }
+
+// --- Parent work item (workitem-parent-bug) ---
+
+func TestSyncAzureActivityParent_PersistsListsAndClears(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+
+	added, err := s.AddAzureActivity(ctx, "RUNT2QA", 171306, "Atención y/o Corrección del defecto 171191", "Task", AzureActivityMapping{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added.ParentWorkItemID != nil || added.ParentTitle != "" || added.ParentType != "" {
+		t.Fatalf("expected no parent on a new entry, got %+v", added)
+	}
+
+	if err := s.SyncAzureActivityParent(ctx, 171306, 171191, " Login falla ", "Bug"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	all, err := s.ListAzureActivities(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed *AzureActivity
+	for _, a := range all {
+		if a.ID == added.ID {
+			listed = a
+		}
+	}
+	if listed == nil || listed.ParentWorkItemID == nil || *listed.ParentWorkItemID != 171191 || listed.ParentTitle != "Login falla" || listed.ParentType != "Bug" {
+		t.Fatalf("expected parent Bug 171191 'Login falla' in list, got %+v", listed)
+	}
+	found, err := s.FindAzureActivityByWorkItemID(ctx, 171306)
+	if err != nil || found.ParentWorkItemID == nil || *found.ParentWorkItemID != 171191 {
+		t.Fatalf("expected parent via FindAzureActivityByWorkItemID, got %+v (%v)", found, err)
+	}
+
+	if err := s.SyncAzureActivityParent(ctx, 171306, 0, "ignored", "ignored"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	cleared, err := s.GetAzureActivity(ctx, added.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleared.ParentWorkItemID != nil || cleared.ParentTitle != "" || cleared.ParentType != "" {
+		t.Errorf("expected parent cleared, got %+v", cleared)
+	}
+}
+
+func TestSyncAzureActivityParent_UnknownWorkItemIsNoOp(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.SyncAzureActivityParent(context.Background(), 424242, 1, "x", "Bug"); err != nil {
+		t.Errorf("expected silent no-op for an uncatalogued work item, got %v", err)
+	}
+}
+
+func TestMigrate_AzureActivitiesGetsParentColumnsIdempotently(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.migrate(); err != nil {
+		t.Fatalf("second migrate must be idempotent: %v", err)
+	}
+	for _, col := range []string{"parent_work_item_id", "parent_title", "parent_type"} {
+		var n int
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('azure_activities') WHERE name = ?`, col).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 1 {
+			t.Errorf("expected column %s on azure_activities", col)
+		}
+	}
+}
