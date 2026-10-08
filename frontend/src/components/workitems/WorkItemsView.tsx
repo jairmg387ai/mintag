@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, type CSSProperties } from 'react'
 import { Plus, FilePlus2, RefreshCw, ExternalLink, UserPlus, Pencil, Check, X, Star, Trash2, RotateCcw, Search, ChevronLeft, ChevronRight, Bug, ListTodo } from 'lucide-react'
-import type { ActivityCatalog, AzureActivity, AssignedAzureWorkItem, CreatedWorkItemResponse } from '../../types'
+import type { ActivityCatalog, AzureActivity, AssignedAzureWorkItem, CreatedBugCorrectionTaskResponse, CreatedWorkItemResponse } from '../../types'
 import {
   getActivityCatalog,
   listAzureActivities,
@@ -18,6 +18,7 @@ import { azureWorkItemUrl, formatAzureParentLabel, friendlyCatalogErrorMessage }
 import { useAppActions, useAppState } from '../../store/AppContext'
 import { Card, CardHeader } from '../ui/Card'
 import { CreateWorkItemModal } from './CreateWorkItemModal'
+import { CreateBugCorrectionTaskModal } from './CreateBugCorrectionTaskModal'
 import { AzureWorkItemStateBadge } from './AzureWorkItemStateBadge'
 
 const PAGE_SIZE = 20
@@ -52,6 +53,8 @@ export function WorkItemsView() {
   const { pushToast, openModal, setActiveBugEvidenceId } = useAppActions()
   const { azureConfig } = useAppState()
   const [modalOpen, setModalOpen] = useState(false)
+  // Bug whose correction-task form is open; null when closed.
+  const [correctionBugId, setCorrectionBugId] = useState<number | null>(null)
   const [lastResult, setLastResult] = useState<CreatedWorkItemResponse | null>(null)
   const [catalog, setCatalog] = useState<ActivityCatalog | null>(null)
   const [azureActivities, setAzureActivities] = useState<AzureActivity[]>([])
@@ -407,6 +410,16 @@ export function WorkItemsView() {
       pushToast(e instanceof Error ? e.message : 'No se pudo recrear el work item', true)
     } finally {
       setRowBusy(prev => ({ ...prev, [workItemId]: false }))
+    }
+  }
+
+  function handleCorrectionTaskCreated(result: CreatedBugCorrectionTaskResponse) {
+    pushToast(`Tarea de corrección #${result.id} creada`, false)
+    if (result.catalog_error) {
+      pushToast(`No se pudo registrar la tarea en el catálogo: ${result.catalog_error}`, true)
+    }
+    if (result.azure_activity_id) {
+      loadAzureActivities(showInactive)
     }
   }
 
@@ -926,13 +939,22 @@ export function WorkItemsView() {
                                     </button>
                                   </div>
                                 ) : isBug ? (
-                                  <button
-                                    className="btn btn-ghost btn-sm"
-                                    disabled={isEditing}
-                                    onClick={() => openBugEvidence(a.work_item_id)}
-                                  >
-                                    Evidencia DSW-PR-017
-                                  </button>
+                                  <div style={{ display: 'flex', gap: 6 }}>
+                                    <button
+                                      className="btn btn-ghost btn-sm"
+                                      disabled={isEditing}
+                                      onClick={() => openBugEvidence(a.work_item_id)}
+                                    >
+                                      Evidencia DSW-PR-017
+                                    </button>
+                                    <button
+                                      className="btn btn-ghost btn-sm"
+                                      disabled={isEditing}
+                                      onClick={() => setCorrectionBugId(a.work_item_id)}
+                                    >
+                                      Crear tarea de corrección
+                                    </button>
+                                  </div>
                                 ) : (
                                   <span style={{ color: 'var(--fg3)' }}>—</span>
                                 )}
@@ -1061,6 +1083,11 @@ export function WorkItemsView() {
                           ) : null}
                         </span>
                         <span style={{ color: 'var(--fg3)', font: 'var(--text-caption)' }}>{item.type}</span>
+                        {item.type.trim().toLowerCase() === 'bug' && (
+                          <button className="btn btn-ghost btn-sm" onClick={() => setCorrectionBugId(item.id)}>
+                            Crear tarea de corrección
+                          </button>
+                        )}
                         <button
                           className="btn btn-ghost btn-sm"
                           disabled={addingWorkItemId === item.id}
@@ -1111,6 +1138,18 @@ export function WorkItemsView() {
         onCreated={handleCreated}
         catalog={catalog}
       />
+
+      {correctionBugId !== null && (
+        <CreateBugCorrectionTaskModal
+          key={correctionBugId}
+          open
+          bugId={correctionBugId}
+          onClose={() => setCorrectionBugId(null)}
+          onCreated={handleCorrectionTaskCreated}
+          catalog={catalog}
+          currentUserDisplayName={azureConfig?.user_display_name}
+        />
+      )}
     </div>
   )
 }

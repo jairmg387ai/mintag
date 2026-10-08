@@ -38,6 +38,9 @@ import type {
   BugEvidenceUpdate,
   BugEvidencePatchResponse,
   BugComment,
+  BugCorrectionTaskDraft,
+  CreateBugCorrectionTaskInput,
+  CreatedBugCorrectionTaskResponse,
 } from '../types'
 
 async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
@@ -417,9 +420,34 @@ export function createAzureWorkItem(input: CreateWorkItemInput): Promise<Created
 }
 
 // fetchClassificationTree returns the full Area or Iteration path tree for
-// the configured Azure DevOps team project.
-export function fetchClassificationTree(kind: 'areas' | 'iterations'): Promise<ClassificationNode> {
-  return request<ClassificationNode>(`/api/activities/azure-classification-nodes/${kind}`)
+// the configured Azure DevOps team project, or for teamProject when given
+// (e.g. a Bug's own team project).
+export function fetchClassificationTree(kind: 'areas' | 'iterations', teamProject?: string): Promise<ClassificationNode> {
+  const qs = teamProject ? `?${new URLSearchParams({ team_project: teamProject })}` : ''
+  return request<ClassificationNode>(`/api/activities/azure-classification-nodes/${kind}${qs}`)
+}
+
+// getBugCorrectionTaskDraft loads the prefill for a bug's correction Task.
+// A non-Bug work item is rejected with BugEvidenceApiError code "not_a_bug".
+export function getBugCorrectionTaskDraft(bugId: number): Promise<BugCorrectionTaskDraft> {
+  return requestBugEvidence<BugCorrectionTaskDraft>(`/api/azure/bugs/${bugId}/correction-task-draft`)
+}
+
+// fetchSubareaAllowedValues lists the Subárea picklist values for Task in
+// the given team project.
+export function fetchSubareaAllowedValues(teamProject: string): Promise<string[]> {
+  const qs = new URLSearchParams({ team_project: teamProject })
+  return request<{ values: string[] }>(`/api/azure/work-item-fields/subarea/allowed-values?${qs}`).then(r => r.values)
+}
+
+// createBugCorrectionTask creates the bug's correction Task (left Proposed)
+// linked to the bug as parent. catalog_error in the response means the task
+// was created but could not be added to the catalog.
+export function createBugCorrectionTask(bugId: number, input: CreateBugCorrectionTaskInput): Promise<CreatedBugCorrectionTaskResponse> {
+  return requestBugEvidence<CreatedBugCorrectionTaskResponse>(`/api/azure/bugs/${bugId}/correction-task`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
 }
 
 // fetchAzureWorkItemStates resolves current title/type/state for an
