@@ -23,7 +23,7 @@ While logging time the user cannot tell whether a work item still has hours avai
 - Holiday calendar, sprint/iteration date fetching from Azure.
 
 ## Delivery
-- Strategy: `ask-on-risk` (default). Forecast ~900 authored lines > 400: chain strategy to be asked before opening any PR.
+- Strategy: `ask-on-risk`; user chose a single PR (#68) despite ~2400 authored lines.
 
 ## Decision (2026-10-07, user)
 User always logs time from Mintag and is the only person logging on their tasks (others get their own task). Older Mintag versions did not maintain Completed/Remaining Work in Azure, so Azure effort fields are unreliable. => Effort is computed from the Mintag DB: estimate persisted in `azure_activities.original_estimate`, used = all local activities for the work item, remaining = estimate - used. Azure is only read on explicit refresh/sync to update the estimate. T1b (TimeLog per-user filter) was discarded uncommitted.
@@ -66,4 +66,4 @@ User always logs time from Mintag and is the only person logging on their tasks 
 - T5 commit `e6b9854`; review (lineage review-3509a1ca9963f233) granted, approved, acknowledged. Fixed R3-stale-backlog-race (cancellation guards). Accepted: R3-backlog-failure-untested, R3-unbounded-backlog-query (approved backlog stays small).
 
 ## Next step
-Rebuild assets, then decide PR strategy (forecast exceeded 400 lines).
+PR #68 open; merge is the user's decision.
