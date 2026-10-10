@@ -63,5 +63,7 @@ User always logs time from Mintag and is the only person logging on their tasks 
 
 - T5: idle grouped by work_item_id, Pendiente de subir over all dates (2000-01-01..today, status approved/pending), no effort call without open ids, todayStr refresh (60s + focus), Go test for bug-correction effective estimate. RED 5/30 dashboard tests failing; GREEN dashboard 30, npm test 193, tsc ok, lint 32, go test server ok. Go test passed first run (covers existing behavior).
 
+- T5 commit `e6b9854`; review (lineage review-3509a1ca9963f233) granted, approved, acknowledged. Fixed R3-stale-backlog-race (cancellation guards). Accepted: R3-backlog-failure-untested, R3-unbounded-backlog-query (approved backlog stays small).
+
 ## Next step
 Rebuild assets, then decide PR strategy (forecast exceeded 400 lines).

@@ -111,22 +111,26 @@ export function Dashboard() {
   // One fetch covers both the current week and month; each period filters it.
   const [loadedActivities, setLoadedActivities] = useState<DailyActivity[]>([])
   useEffect(() => {
+    let cancelled = false
     const range = loadRange(today)
     listActivitiesRange(toYMD(range.from), toYMD(range.to))
-      .then(setLoadedActivities)
-      .catch(() => setLoadedActivities([]))
+      .then((rows) => { if (!cancelled) setLoadedActivities(rows) })
+      .catch(() => { if (!cancelled) setLoadedActivities([]) })
+    return () => { cancelled = true }
   }, [today])
 
   // The upload backlog spans every date, not just the loaded week/month: read
   // approved and pending activities on their own (the API needs a range).
   const [backlog, setBacklog] = useState<DailyActivity[]>([])
   useEffect(() => {
+    let cancelled = false
     Promise.all([
       listActivitiesRange(BACKLOG_FROM, todayStr, 'approved'),
       listActivitiesRange(BACKLOG_FROM, todayStr, 'pending'),
     ])
-      .then(([approved, pending]) => setBacklog([...approved, ...pending]))
-      .catch(() => setBacklog([]))
+      .then(([approved, pending]) => { if (!cancelled) setBacklog([...approved, ...pending]) })
+      .catch(() => { if (!cancelled) setBacklog([]) })
+    return () => { cancelled = true }
   }, [todayStr])
 
   const weekActivities = useMemo(() => {
