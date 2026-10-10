@@ -32,8 +32,8 @@ User always logs time from Mintag and is the only person logging on their tasks 
 - [x] T1 — Backend: read-only effort endpoint `GET /api/activities/azure-work-items/effort?ids=` (estimate batch fetch + TimeLog snapshot + store local unuploaded hours per work item) + tests. Route: delegated writer (3+ non-trivial files).
 - [x] T1c — Backend: persist `original_estimate` on azure_activities (migration; set on Mintag work-item creation and on states refresh); effort endpoint reads DB only (no Azure, no TimeLog) + tests. Also resolves review findings R3-batch-404 and R3-modal-ignores-timelog-error. Route: delegated writer.
 - [x] T2 — Frontend: effort display in WorkItemsView and NewActivityModal with over-estimate warning + tests. Route: delegated writer.
-- [ ] T3 — Frontend: Dashboard period selector + hours by category/project + tests. Route: delegated writer.
-- [ ] T4 — Frontend: Dashboard extra KPIs (pending upload, gap days, work items without hours this week, >=80% consumed) + tests. Route: delegated writer.
+- [x] T3 — Frontend: Dashboard period selector + hours by category/project + tests. Route: delegated writer.
+- [x] T4 — Frontend: Dashboard extra KPIs (pending upload, gap days, work items without hours this week, >=80% consumed) + tests. Route: delegated writer.
 
 ## Checks
 - `go vet ./...`, `go test ./...`
@@ -54,5 +54,7 @@ User always logs time from Mintag and is the only person logging on their tasks 
 
 - T1c review (lineage review-ea9cd3338da5b9b5): granted, approved, acknowledged. Follow-ups: R3-bugfix-estimate-not-effective fixed (bug correction caches azure.EffectiveOriginalEstimate); R3-no-estimate-backfill accepted: existing catalog rows show "Sin estimado" until the user runs "Refrescar estados" once (communicated to user).
 
+- T3+T4 (one delegated writer, one commit since both live in Dashboard): period selector week/month (localStorage), HoursBreakdown by category/project, Pendiente de subir, Dias por debajo de la meta, WorkItemAlerts (no hours this week, >=80% consumed). RED: missing modules + 2 failing Dashboard tests; GREEN: dashboard 26 tests, npm test 189 passed, tsc ok, lint 32 (baseline). Static assets rebuilt with npm run build.
+
 ## Next step
-T3.
+Review slice T1c-fix+T3/T4, then decide PR strategy (forecast exceeded 400 lines).

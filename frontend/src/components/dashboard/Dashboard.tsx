@@ -4,6 +4,8 @@ import {
   CircleDot,
   CircleAlert,
   CalendarCheck,
+  CalendarX,
+  CloudUpload,
   Users,
   Clock,
   Target,
@@ -15,10 +17,39 @@ import { StatCard } from '../shared/StatCard'
 import { StatusBadge } from '../shared/StatusBadge'
 import { Avatar } from '../shared/Avatar'
 import type { DailyActivity, Status, ViewName } from '../../types'
+import {
+  type Period,
+  expectedBusinessHours,
+  filterByRange,
+  gapDays,
+  isBusinessDay,
+  loadRange,
+  pendingUpload,
+  periodRange,
+  round1,
+  sumHours,
+  toYMD,
+} from './timeLogKpis'
+import { PeriodSelector } from './PeriodSelector'
+import { HoursBreakdown } from './HoursBreakdown'
+import { WorkItemAlerts } from './WorkItemAlerts'
 
-// Weekly schedule: Mon-Thu 8h/day, Fri 7.5h/day.
-function dailyTargetHours(day: number): number {
-  return day === 5 ? 7.5 : 8
+const PERIOD_KEY = 'mintag.dashboard.period'
+
+function readStoredPeriod(): Period {
+  try {
+    return localStorage.getItem(PERIOD_KEY) === 'month' ? 'month' : 'week'
+  } catch {
+    return 'week'
+  }
+}
+
+function storePeriod(p: Period) {
+  try {
+    localStorage.setItem(PERIOD_KEY, p)
+  } catch {
+    // Storage unavailable (private mode, blocked site data): keep it in memory only.
+  }
 }
 
 function fmt(dt: string) {
@@ -30,26 +61,10 @@ function fmt(dt: string) {
   }
 }
 
-function toYMD(d: Date): string {
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const dd = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${dd}`
-}
-
-// expectedBusinessHours sums the daily target across Mon-Fri dates in
-// [from, to] inclusive (Mon-Thu 8h, Fri 7.5h). No holiday calendar exists in
-// Mintag, so this is a deliberate approximation — it will overcount expected
-// hours on months with holidays.
-function expectedBusinessHours(from: Date, to: Date): number {
-  let hours = 0
-  const cur = new Date(from)
-  while (cur <= to) {
-    const day = cur.getDay()
-    if (day !== 0 && day !== 6) hours += dailyTargetHours(day)
-    cur.setDate(cur.getDate() + 1)
-  }
-  return hours
+// fmtDay renders a YYYY-MM-DD activity date as a short local weekday + day.
+function fmtDay(ymd: string) {
+  const [y, m, d] = ymd.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString('es-CO', { weekday: 'short', day: '2-digit', month: 'short' })
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -67,33 +82,50 @@ export function Dashboard() {
     [meetings]
   )
 
-  const [monthActivities, setMonthActivities] = useState<DailyActivity[]>([])
+  const [period, setPeriodState] = useState<Period>(readStoredPeriod)
+  function setPeriod(p: Period) {
+    setPeriodState(p)
+    storePeriod(p)
+  }
+
+  // One fetch covers both the current week and month; each period filters it.
+  const [loadedActivities, setLoadedActivities] = useState<DailyActivity[]>([])
   useEffect(() => {
-    const today = new Date()
-    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
-    listActivitiesRange(toYMD(monthStart), toYMD(today))
-      .then(setMonthActivities)
-      .catch(() => setMonthActivities([]))
+    const range = loadRange(new Date())
+    listActivitiesRange(toYMD(range.from), toYMD(range.to))
+      .then(setLoadedActivities)
+      .catch(() => setLoadedActivities([]))
   }, [])
+
+  const weekActivities = useMemo(() => {
+    const r = periodRange('week', new Date())
+    return filterByRange(loadedActivities, r.from, r.to)
+  }, [loadedActivities])
 
   const timeLogKpis = useMemo(() => {
     const today = new Date()
-    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
-    const todayStr = toYMD(today)
-    const isBusinessDayToday = today.getDay() !== 0 && today.getDay() !== 6
+    const range = periodRange(period, today)
+    const activities = filterByRange(loadedActivities, range.from, range.to)
 
-    const expectedHours = expectedBusinessHours(monthStart, today)
-    const registeredHours = monthActivities.reduce((sum, a) => sum + a.hours, 0)
+    const expectedHours = expectedBusinessHours(range.from, range.to)
+    const registeredHours = sumHours(activities)
     const compliancePct = expectedHours > 0 ? Math.round((registeredHours / expectedHours) * 100) : 0
-    const loggedToday = monthActivities.some(a => a.date === todayStr)
+    const todayStr = toYMD(today)
+    const loggedToday = loadedActivities.some(a => a.date === todayStr)
 
     return {
+      activities,
       expectedHours,
       registeredHours,
       compliancePct,
-      showTodayAlert: isBusinessDayToday && !loggedToday,
+      gaps: gapDays(activities, range.from, today),
+      showTodayAlert: isBusinessDay(today) && !loggedToday,
     }
-  }, [monthActivities])
+  }, [loadedActivities, period])
+
+  // Approved-not-uploaded over the whole loaded range (week ∪ month).
+  const upload = useMemo(() => pendingUpload(loadedActivities), [loadedActivities])
+  const periodLabel = period === 'week' ? 'semana' : 'mes'
 
   function openTask(id: number) { setEditingTaskId(id); openModal('task') }
   function openMeeting(id: number) { setActiveMeetingId(id); openModal('meeting') }
@@ -169,12 +201,18 @@ export function Dashboard() {
           </span>
         </button>
       )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+        <h3 style={{ font: 'var(--text-h3)', margin: 0 }}>Registro de horas</h3>
+        <div style={{ marginLeft: 'auto' }}>
+          <PeriodSelector value={period} onChange={setPeriod} />
+        </div>
+      </div>
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
           gap: 16,
-          marginBottom: 24,
+          marginBottom: 16,
         }}
       >
         <StatCard
@@ -182,7 +220,7 @@ export function Dashboard() {
           iconBg="var(--indigo-50)"
           iconFg="var(--indigo-700)"
           value={`${timeLogKpis.registeredHours}h`}
-          label="Horas registradas (mes)"
+          label={`Horas registradas (${periodLabel})`}
           onClick={() => navTo('activities')}
         />
         <StatCard
@@ -190,7 +228,7 @@ export function Dashboard() {
           iconBg="var(--emerald-50)"
           iconFg="var(--emerald-700)"
           value={`${timeLogKpis.expectedHours}h`}
-          label="Meta del mes (L-J 8h, V 7.5h)"
+          label={`Meta ${period === 'week' ? 'de la semana' : 'del mes'} (L-J 8h, V 7.5h)`}
           onClick={() => navTo('activities')}
         />
         <StatCard
@@ -202,6 +240,64 @@ export function Dashboard() {
           emphasize={timeLogKpis.compliancePct < 90}
           onClick={() => navTo('activities')}
         />
+        <StatCard
+          icon={CloudUpload}
+          iconBg="var(--amber-50)"
+          iconFg="var(--amber-700)"
+          value={`${upload.approvedHours}h`}
+          label="Pendiente de subir"
+          delta={`${upload.approvedCount} ${upload.approvedCount === 1 ? 'aprobada' : 'aprobadas'}${
+            upload.pendingHours > 0 ? ` · ${upload.pendingHours}h sin aprobar` : ''
+          }`}
+          onClick={() => navTo('activities')}
+        />
+        <StatCard
+          icon={CalendarX}
+          iconBg={timeLogKpis.gaps.length > 0 ? 'var(--rose-50)' : 'var(--emerald-50)'}
+          iconFg={timeLogKpis.gaps.length > 0 ? 'var(--rose-700)' : 'var(--emerald-700)'}
+          value={timeLogKpis.gaps.length}
+          label="Días por debajo de la meta"
+          emphasize={timeLogKpis.gaps.length > 0}
+          onClick={() => navTo('activities')}
+        />
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <HoursBreakdown activities={timeLogKpis.activities} />
+      </div>
+
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+          gap: 16,
+          alignItems: 'start',
+          marginBottom: 24,
+        }}
+      >
+        <section className="card" style={{ padding: 18 }}>
+          <h3 style={{ font: 'var(--text-h3)', margin: '0 0 10px' }}>Días bajo la meta</h3>
+          {timeLogKpis.gaps.length === 0 ? (
+            <div style={{ font: 'var(--text-sm)', color: 'var(--fg3)' }}>
+              Todos los días hábiles del período cumplen la meta.
+            </div>
+          ) : (
+            <ul
+              aria-label="Días bajo la meta"
+              style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 6 }}
+            >
+              {timeLogKpis.gaps.map(g => (
+                <li key={g.date} style={{ display: 'flex', gap: 8, font: 'var(--text-sm)' }}>
+                  <span style={{ flex: 1, color: 'var(--fg1)' }}>{fmtDay(g.date)}</span>
+                  <span style={{ color: 'var(--rose-700)', fontWeight: 600 }}>
+                    {round1(g.hours)}h / {g.target}h
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+        <WorkItemAlerts weekActivities={weekActivities} />
       </div>
 
       {/* Two-column layout */}
