@@ -304,6 +304,10 @@ type AssignedWorkItem struct {
 	ParentID    int    `json:"parent_id,omitempty"`
 	ParentTitle string `json:"parent_title,omitempty"`
 	ParentType  string `json:"parent_type,omitempty"`
+	// OriginalEstimate is Microsoft.VSTS.Scheduling.OriginalEstimate in
+	// hours (0 when the work item has none). Populated by
+	// fetchWorkItemDetails, so every batch fetch carries it.
+	OriginalEstimate float64 `json:"original_estimate,omitempty"`
 }
 
 // azureIdentityRef is the identity reference shape Azure DevOps embeds for
@@ -433,7 +437,7 @@ func (c *Client) fetchWorkItemDetails(ctx context.Context, ids []int) ([]Assigne
 		}
 
 		url := fmt.Sprintf(
-			"https://dev.azure.com/%s/_apis/wit/workitems?ids=%s&fields=System.Id,System.Title,System.WorkItemType,System.State,System.AssignedTo&api-version=7.1",
+			"https://dev.azure.com/%s/_apis/wit/workitems?ids=%s&fields=System.Id,System.Title,System.WorkItemType,System.State,System.AssignedTo,Microsoft.VSTS.Scheduling.OriginalEstimate&api-version=7.1",
 			c.cfg.Org, strings.Join(idStrs, ","),
 		)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -465,6 +469,7 @@ func (c *Client) fetchWorkItemDetails(ctx context.Context, ids []int) ([]Assigne
 					Type       string            `json:"System.WorkItemType"`
 					State      string            `json:"System.State"`
 					AssignedTo *azureIdentityRef `json:"System.AssignedTo"`
+					Estimate   float64           `json:"Microsoft.VSTS.Scheduling.OriginalEstimate"`
 				} `json:"fields"`
 			} `json:"value"`
 		}
@@ -481,6 +486,7 @@ func (c *Client) fetchWorkItemDetails(ctx context.Context, ids []int) ([]Assigne
 				State:                 v.Fields.State,
 				AssignedToID:          assignedToID,
 				AssignedToDisplayName: assignedToDisplayName,
+				OriginalEstimate:      v.Fields.Estimate,
 			})
 		}
 	}
@@ -505,6 +511,20 @@ type patchOp struct {
 	Op    string `json:"op"`
 	Path  string `json:"path"`
 	Value any    `json:"value"`
+}
+
+// defaultOriginalEstimate is the estimate (hours) CreateWorkItem stamps on a
+// new Task when the caller supplies none.
+const defaultOriginalEstimate = 24
+
+// EffectiveOriginalEstimate is the OriginalEstimate CreateWorkItem actually
+// sends for a requested value: the value itself, or defaultOriginalEstimate
+// when it is <= 0. Callers use it to cache exactly what Azure received.
+func EffectiveOriginalEstimate(requested float64) float64 {
+	if requested <= 0 {
+		return defaultOriginalEstimate
+	}
+	return requested
 }
 
 // CreateWorkItemInput is the caller-provided subset of fields for a new Task
@@ -568,10 +588,7 @@ func (c *Client) CreateWorkItem(ctx context.Context, in CreateWorkItemInput) (Cr
 		return CreatedWorkItem{}, fmt.Errorf("azure: identity not resolved — reconnect the Azure token (FetchIdentity) before creating work items")
 	}
 
-	estimate := in.OriginalEstimate
-	if estimate <= 0 {
-		estimate = 24
-	}
+	estimate := EffectiveOriginalEstimate(in.OriginalEstimate)
 
 	now := timeNow().In(colombiaLocation)
 	lastDayOfMonth := time.Date(now.Year(), now.Month()+1, 0, 0, 0, 0, 0, colombiaLocation)

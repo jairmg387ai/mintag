@@ -9,6 +9,7 @@ import {
   recreateAzureWorkItem,
   listAssignedAzureWorkItems,
   addAzureActivity,
+  fetchWorkItemEffort,
 } from '../../api/client'
 import { WorkItemsView } from './WorkItemsView'
 
@@ -20,6 +21,7 @@ vi.mock('../../api/client', () => ({
   recreateAzureWorkItem: vi.fn(),
   listAssignedAzureWorkItems: vi.fn(),
   addAzureActivity: vi.fn(),
+  fetchWorkItemEffort: vi.fn(),
 }))
 
 // The correction-task modal has its own tests; here only the entry points
@@ -69,6 +71,8 @@ describe('WorkItemsView', () => {
     vi.mocked(recreateAzureWorkItem).mockReset()
     vi.mocked(listAssignedAzureWorkItems).mockReset()
     vi.mocked(addAzureActivity).mockReset()
+    vi.mocked(fetchWorkItemEffort).mockReset()
+    vi.mocked(fetchWorkItemEffort).mockResolvedValue({ items: [] })
     vi.mocked(getActivityCatalog).mockResolvedValue(catalog)
     useAppState.mockReset().mockReturnValue({ azureConfig: null })
   })
@@ -82,6 +86,36 @@ describe('WorkItemsView', () => {
     expect(screen.getByText('Fix login bug')).toBeInTheDocument()
     expect(screen.getByText('Mintag')).toBeInTheDocument()
     expect(screen.getByText('Desarrollo')).toBeInTheDocument()
+  })
+
+  it('renders the HORAS column from the effort of the current page work items', async () => {
+    vi.mocked(listAzureActivities).mockResolvedValue(oneActivity)
+    vi.mocked(fetchWorkItemEffort).mockResolvedValue({
+      items: [{ id: 101, original_estimate: 24, uploaded_hours: 18, local_hours: 2.5, remaining: 3.5, has_estimate: true }],
+    })
+
+    render(<WorkItemsView />)
+
+    const row = (await screen.findByText('Fix login bug')).closest('tr') as HTMLElement
+    expect(screen.getByRole('columnheader', { name: 'HORAS' })).toBeInTheDocument()
+    await waitFor(() =>
+      expect(within(row).getByTestId('work-item-effort')).toHaveTextContent(
+        'Estimado 24h · Registrado 18h (+2.5h sin subir) · Quedan 3.5h',
+      ),
+    )
+    expect(fetchWorkItemEffort).toHaveBeenCalledWith([101])
+  })
+
+  it('shows a dash and a non-blocking notice when the effort call fails', async () => {
+    vi.mocked(listAzureActivities).mockResolvedValue(oneActivity)
+    vi.mocked(fetchWorkItemEffort).mockRejectedValue(new Error('azure not configured'))
+
+    render(<WorkItemsView />)
+
+    expect(await screen.findByText(/no se pudieron cargar las horas/i)).toBeInTheDocument()
+    const row = screen.getByText('Fix login bug').closest('tr') as HTMLElement
+    expect(within(row).queryByTestId('work-item-effort')).not.toBeInTheDocument()
+    expect(screen.getByText('101')).toBeInTheDocument()
   })
 
   it('shows an empty state when the catalog has no entries', async () => {

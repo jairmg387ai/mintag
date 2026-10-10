@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Gentleman-Programming/mintag/internal/store"
@@ -918,6 +919,9 @@ func TestRecreateAzureWorkItem_Success_WithCatalogReassignment(t *testing.T) {
 	if _, err := st.FindAzureActivityByWorkItemID(ctx, 555); !errors.Is(err, store.ErrAzureActivityNotFound) {
 		t.Errorf("expected the old id to no longer resolve, got %v", err)
 	}
+	if reassigned.OriginalEstimate != 8 {
+		t.Errorf("expected the recreated work item's estimate (8) persisted on the catalog row, got %v", reassigned.OriginalEstimate)
+	}
 }
 
 // TestRecreateAzureWorkItem_NoCatalogEntry_NoReassignment verifies recreate
@@ -1260,5 +1264,123 @@ func TestAddAzureActivity_PersistsOptionalParent(t *testing.T) {
 	mustNoErr(t, err)
 	if stored.ParentWorkItemID == nil || *stored.ParentWorkItemID != 171191 {
 		t.Errorf("expected parent persisted, got %+v", stored)
+	}
+}
+
+// TestCreateAzureWorkItem_PersistsEstimateOnCatalogEntry verifies the
+// estimate Mintag sends on creation is stored on the catalog row (the
+// explicit value, or the 24h default CreateWorkItem applies when omitted).
+func TestCreateAzureWorkItem_PersistsEstimateOnCatalogEntry(t *testing.T) {
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
+
+	cases := []struct {
+		name     string
+		estimate any
+		want     float64
+	}{
+		{"explicit", 12, 12},
+		{"default", nil, 24},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			azureServer := azureWorkItemsSuccessServer(t)
+			defer azureServer.Close()
+			base, st := newTestServerWithAzureRedirect(t, azureServer.URL)
+			putResp := doJSON(t, http.MethodPut, base+"/api/activities/azure-config", map[string]any{"token": "db-token", "auth_mode": "bearer"})
+			assertStatus(t, putResp, http.StatusOK)
+
+			req := map[string]any{
+				"title": "Estimated", "area_path": `PROJ\Team`, "iteration_path": `PROJ\Sprint 1`,
+				"project": "Mintag",
+			}
+			if tc.estimate != nil {
+				req["original_estimate"] = tc.estimate
+			}
+			resp := doJSON(t, http.MethodPost, base+"/api/activities/azure-work-items", req)
+			assertStatus(t, resp, http.StatusOK)
+			var body struct {
+				AzureActivityID int64 `json:"azure_activity_id"`
+			}
+			decodeJSON(t, resp, &body)
+			if body.AzureActivityID == 0 {
+				t.Fatal("expected a catalog entry")
+			}
+			a, err := st.GetAzureActivity(context.Background(), body.AzureActivityID)
+			mustNoErr(t, err)
+			if a.OriginalEstimate != tc.want {
+				t.Errorf("want original_estimate %v, got %v", tc.want, a.OriginalEstimate)
+			}
+		})
+	}
+}
+
+// TestGetAzureWorkItemStates_PersistsOriginalEstimate verifies the states
+// refresh requests OriginalEstimate in the same batch fetch and stores it
+// on the catalog row, returning it in the response too.
+func TestGetAzureWorkItemStates_PersistsOriginalEstimate(t *testing.T) {
+	t.Setenv("MINTAG_AZURE_TIMELOG_TOKEN", "")
+	t.Setenv("MINTAG_AZURE_TIMELOG_PAT", "")
+
+	var workItemFetches int32
+	azureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "connectiondata"):
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"authenticatedUser":{"id":"id","providerDisplayName":"Name"}}`)) //nolint:errcheck
+		case strings.HasSuffix(r.URL.Path, "/_apis/wit/workitems") && r.URL.Query().Get("$expand") == "":
+			atomic.AddInt32(&workItemFetches, 1)
+			if !strings.Contains(r.URL.Query().Get("fields"), "Microsoft.VSTS.Scheduling.OriginalEstimate") {
+				t.Errorf("states refresh must request OriginalEstimate, fields=%q", r.URL.Query().Get("fields"))
+			}
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"count":2,"value":[
+				{"id":404,"fields":{"System.Title":"Estimated","System.WorkItemType":"Task","System.State":"Active","Microsoft.VSTS.Scheduling.OriginalEstimate":16}},
+				{"id":405,"fields":{"System.Title":"No estimate","System.WorkItemType":"Task","System.State":"Active"}}
+			]}`)) //nolint:errcheck
+		default:
+			// Parent lookup and anything else is best-effort; fail it.
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer azureServer.Close()
+
+	base, st := newTestServerWithAzureRedirect(t, azureServer.URL)
+	putResp := doJSON(t, http.MethodPut, base+"/api/activities/azure-config", map[string]any{"token": "db-token", "auth_mode": "bearer"})
+	assertStatus(t, putResp, http.StatusOK)
+
+	ctx := context.Background()
+	withEst, err := st.AddAzureActivity(ctx, "RUNT2QA", 404, "Estimated", "Task", store.AzureActivityMapping{})
+	mustNoErr(t, err)
+	noEst, err := st.AddAzureActivity(ctx, "RUNT2QA", 405, "No estimate", "Task", store.AzureActivityMapping{})
+	mustNoErr(t, err)
+	mustNoErr(t, st.SetAzureActivityEstimate(ctx, 405, 5))
+
+	resp := get(t, base+"/api/activities/azure-work-items/states?ids=404,405")
+	assertStatus(t, resp, http.StatusOK)
+	var body struct {
+		Items []struct {
+			ID               int     `json:"id"`
+			OriginalEstimate float64 `json:"original_estimate"`
+		} `json:"items"`
+	}
+	decodeJSON(t, resp, &body)
+	if len(body.Items) != 2 || body.Items[0].OriginalEstimate != 16 {
+		t.Errorf("expected original_estimate in states response, got %+v", body.Items)
+	}
+	if n := atomic.LoadInt32(&workItemFetches); n != 1 {
+		t.Errorf("expected a single batch work item fetch, got %d", n)
+	}
+
+	a, err := st.GetAzureActivity(ctx, withEst.ID)
+	mustNoErr(t, err)
+	if a.OriginalEstimate != 16 {
+		t.Errorf("want persisted estimate 16, got %v", a.OriginalEstimate)
+	}
+	b, err := st.GetAzureActivity(ctx, noEst.ID)
+	mustNoErr(t, err)
+	if b.OriginalEstimate != 0 {
+		t.Errorf("Azure reports no estimate: want 0 persisted, got %v", b.OriginalEstimate)
 	}
 }

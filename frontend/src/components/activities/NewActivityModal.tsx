@@ -4,6 +4,8 @@ import type { ActivityCatalog, ActivityValidationSettings, AzureActivity } from 
 import { createActivity, getActivityValidationSettings } from '../../api/client'
 import { AzureActivityCombobox } from './AzureActivityCombobox'
 import { resolveAutofill } from './activityAutofill'
+import { WorkItemEffort } from '../shared/WorkItemEffort'
+import { useWorkItemEffort } from '../../hooks/useWorkItemEffort'
 
 // Mirrors store.MaxHoursPerActivityEntry (internal/store/activity_validation.go)
 // — the cap itself is fixed, not configurable, so this is a literal, not a
@@ -126,6 +128,16 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
       setCategoryTouched(false)
     }
   }, [open, defaultDate, catalog])
+
+  // The work item hours will land on: the picked Azure activity, or the
+  // default one when nothing is picked (the backend falls back to it too).
+  const effortActivity = azureActivityId
+    ? azureActivities.find(a => String(a.id) === azureActivityId)
+    : azureActivities.find(a => a.is_default)
+  const effortWorkItemId = open && effortActivity ? effortActivity.work_item_id : 0
+  // Effort is informational only: a failed fetch simply shows nothing.
+  const { byId: effortById } = useWorkItemEffort(effortWorkItemId ? [effortWorkItemId] : [])
+  const selectedEffort = effortWorkItemId ? effortById[effortWorkItemId] : undefined
 
   if (!open) return null
 
@@ -309,6 +321,11 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
               onChange={handleAzureActivityChange}
               inputStyle={selectStyle}
             />
+            {selectedEffort && (
+              <div style={{ marginTop: 6 }}>
+                <WorkItemEffort effort={selectedEffort} enteredHours={parseFloat(hours)} />
+              </div>
+            )}
           </Field>
 
           <Field label="Proyecto *" error={errors.project}>

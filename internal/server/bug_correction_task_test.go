@@ -352,6 +352,29 @@ func TestCreateBugCorrectionTask_AddsToCatalogWithParent(t *testing.T) {
 	}
 }
 
+func TestCreateBugCorrectionTask_CatalogStoresEffectiveEstimate(t *testing.T) {
+	base, st, _ := setupCorrectionTaskServer(t, correctionBugJSON)
+
+	b := validCorrectionBody()
+	b["add_to_catalog"] = true
+	b["original_estimate"] = 6
+	resp := doJSON(t, http.MethodPost, base+"/api/azure/bugs/171191/correction-task", b)
+	assertStatus(t, resp, http.StatusOK)
+	var body map[string]any
+	decodeJSON(t, resp, &body)
+	actID, ok := body["azure_activity_id"].(float64)
+	if !ok {
+		t.Fatalf("expected azure_activity_id, got %v", body)
+	}
+
+	a, err := st.GetAzureActivity(context.Background(), int64(actID))
+	mustNoErr(t, err)
+	// Validation rejects estimates <= 0, so the effective estimate is the one sent.
+	if want := azure.EffectiveOriginalEstimate(6); a.OriginalEstimate != want || want != 6 {
+		t.Errorf("catalog OriginalEstimate = %v, want %v", a.OriginalEstimate, want)
+	}
+}
+
 func TestCreateBugCorrectionTask_CatalogFailureIsNonFatal(t *testing.T) {
 	base, _, _ := setupCorrectionTaskServer(t, correctionBugJSON)
 

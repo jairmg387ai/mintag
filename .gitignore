@@ -34,3 +34,7 @@ frontend/dist/
 node_modules/
 package-lock.json
 package.json
+
+# Local release archives and Engram sync data
+*.zip
+.engram/

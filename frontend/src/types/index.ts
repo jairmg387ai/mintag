@@ -319,6 +319,9 @@ export interface AzureActivity {
   parent_work_item_id?: number | null
   parent_title?: string
   parent_type?: string
+  // Azure OriginalEstimate (hours) cached locally; 0 = no estimate. Refreshed
+  // on work item creation and on "Refrescar estados".
+  original_estimate?: number
 }
 
 export interface AssignedAzureWorkItem {
@@ -341,6 +344,25 @@ export interface AssignedAzureWorkItemsResponse {
   // endpoint doesn't return it) — optional so both endpoints share one type.
   team_project?: string
   items: AssignedAzureWorkItem[]
+}
+
+// WorkItemEffort is one work item's effort snapshot from
+// GET /api/activities/azure-work-items/effort. uploaded_hours is already in
+// Azure TimeLog; local_hours is Mintag activities (pending/approved) not
+// uploaded yet; remaining = max(0, estimate - uploaded - local).
+export interface WorkItemEffort {
+  id: number
+  original_estimate: number
+  uploaded_hours: number
+  local_hours: number
+  remaining: number
+  has_estimate: boolean
+}
+
+// Computed from the Mintag DB only (no Azure call): estimate cached on the
+// catalog, hours from local activities.
+export interface WorkItemEffortResponse {
+  items: WorkItemEffort[]
 }
 
 export interface UploadResult {
