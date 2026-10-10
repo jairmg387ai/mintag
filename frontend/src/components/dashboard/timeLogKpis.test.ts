@@ -184,6 +184,22 @@ describe('idleWorkItems', () => {
     const week = [act('2026-10-05', 2, { azure_activity_id: 1 })]
     expect(idleWorkItems(catalog, week).map(w => w.id)).toEqual([2])
   })
+
+  it('groups catalog rows by work item id', () => {
+    const catalog = [
+      wi(1, 101),
+      wi(2, 101), // sibling row of 101 received the hours
+      wi(3, 102),
+      wi(4, 102), // 102 has no hours on any row: listed once
+      wi(5, 103, { is_active: false }),
+      wi(6, 103), // hours went to the inactive sibling row
+    ]
+    const week = [
+      act('2026-10-05', 2, { azure_activity_id: 2 }),
+      act('2026-10-06', 1, { azure_activity_id: 5 }),
+    ]
+    expect(idleWorkItems(catalog, week).map(w => w.work_item_id)).toEqual([102])
+  })
 })
 
 describe('overBudgetWorkItems', () => {

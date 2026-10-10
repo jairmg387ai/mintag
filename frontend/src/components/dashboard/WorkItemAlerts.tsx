@@ -27,6 +27,11 @@ export function WorkItemAlerts({ weekActivities }: WorkItemAlertsProps) {
         if (cancelled) return
         setCatalog(list)
         const ids = Array.from(new Set(openWorkItems(list).map(w => w.work_item_id)))
+        if (ids.length === 0) {
+          // Nothing open to measure: show the normal empty state without a request.
+          setEffort([])
+          return
+        }
         return fetchWorkItemEffort(ids)
           .then(res => { if (!cancelled) setEffort(res.items ?? []) })
           .catch(() => { if (!cancelled) setEffortFailed(true) })

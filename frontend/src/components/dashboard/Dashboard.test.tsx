@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { act as rtlAct, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { fetchWorkItemEffort, listActivitiesRange, listAzureActivities } from '../../api/client'
 import type { DailyActivity } from '../../types'
@@ -46,11 +46,20 @@ describe('Dashboard time-log period', () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date(2026, 9, 7, 10, 0, 0))
     try { localStorage.clear() } catch { /* ignore */ }
-    vi.mocked(listActivitiesRange).mockReset().mockResolvedValue([
-      act('2026-10-01', 4, { status: 'approved' }),
-      act('2026-10-05', 8, { category: 'Reuniones' }),
-      act('2026-10-06', 3),
-    ])
+    vi.mocked(listActivitiesRange).mockReset().mockImplementation(async (_from, _to, status) => {
+      // Upload backlog is read over all dates, outside the loaded week/month.
+      if (status === 'approved') {
+        return [act('2026-08-20', 2.5, { status: 'approved' }), act('2026-10-01', 4, { status: 'approved' })]
+      }
+      if (status === 'pending') {
+        return [act('2026-09-15', 1, { status: 'pending' }), act('2026-10-05', 8), act('2026-10-06', 3)]
+      }
+      return [
+        act('2026-10-01', 4, { status: 'approved' }),
+        act('2026-10-05', 8, { category: 'Reuniones' }),
+        act('2026-10-06', 3),
+      ]
+    })
     vi.mocked(listAzureActivities).mockReset().mockResolvedValue([])
     vi.mocked(fetchWorkItemEffort).mockReset().mockResolvedValue({ items: [] })
   })
@@ -80,11 +89,26 @@ describe('Dashboard time-log period', () => {
     expect(projects[0]).toHaveTextContent('15.0h')
   })
 
-  it('shows approved hours waiting for upload', async () => {
+  it('shows every approved activity waiting for upload, not only the loaded range', async () => {
     render(<Dashboard />)
     await screen.findByText('11h')
-    expect(card(/Pendiente de subir/)).toHaveTextContent('4h')
-    expect(card(/Pendiente de subir/)).toHaveTextContent('1 aprobada')
+    expect(listActivitiesRange).toHaveBeenCalledWith('2000-01-01', '2026-10-07', 'approved')
+    expect(listActivitiesRange).toHaveBeenCalledWith('2000-01-01', '2026-10-07', 'pending')
+    await waitFor(() => expect(card(/Pendiente de subir/)).toHaveTextContent('6.5h'))
+    expect(card(/Pendiente de subir/)).toHaveTextContent('2 aprobadas')
+    expect(card(/Pendiente de subir/)).toHaveTextContent('12h sin aprobar')
+  })
+
+  it('refreshes the time-log range when the day changes', async () => {
+    render(<Dashboard />)
+    await screen.findByText('11h')
+
+    // Past midnight into Thursday 2026-10-08; the window regains focus.
+    vi.setSystemTime(new Date(2026, 9, 8, 0, 5, 0))
+    rtlAct(() => { fireEvent.focus(window) })
+
+    await waitFor(() => expect(listActivitiesRange).toHaveBeenCalledWith('2026-10-01', '2026-10-08'))
+    expect(listActivitiesRange).toHaveBeenCalledWith('2000-01-01', '2026-10-08', 'approved')
   })
 
   it('remembers the selected period', async () => {

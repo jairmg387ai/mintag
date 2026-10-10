@@ -35,6 +35,13 @@ import { HoursBreakdown } from './HoursBreakdown'
 import { WorkItemAlerts } from './WorkItemAlerts'
 
 const PERIOD_KEY = 'mintag.dashboard.period'
+// Lower bound for the upload backlog query; the activities API requires a range.
+const BACKLOG_FROM = '2000-01-01'
+
+function fromYMD(ymd: string): Date {
+  const [y, m, d] = ymd.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
 
 function readStoredPeriod(): Period {
   try {
@@ -63,8 +70,7 @@ function fmt(dt: string) {
 
 // fmtDay renders a YYYY-MM-DD activity date as a short local weekday + day.
 function fmtDay(ymd: string) {
-  const [y, m, d] = ymd.split('-').map(Number)
-  return new Date(y, m - 1, d).toLocaleDateString('es-CO', { weekday: 'short', day: '2-digit', month: 'short' })
+  return fromYMD(ymd).toLocaleDateString('es-CO', { weekday: 'short', day: '2-digit', month: 'short' })
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -88,29 +94,53 @@ export function Dashboard() {
     storePeriod(p)
   }
 
+  // `todayStr` drives every date-dependent memo and fetch. It is re-read on a
+  // timer and on window focus so a dashboard left open past midnight moves on.
+  const [todayStr, setTodayStr] = useState(() => toYMD(new Date()))
+  useEffect(() => {
+    const refresh = () => setTodayStr(toYMD(new Date()))
+    const timer = window.setInterval(refresh, 60_000)
+    window.addEventListener('focus', refresh)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('focus', refresh)
+    }
+  }, [])
+  const today = useMemo(() => fromYMD(todayStr), [todayStr])
+
   // One fetch covers both the current week and month; each period filters it.
   const [loadedActivities, setLoadedActivities] = useState<DailyActivity[]>([])
   useEffect(() => {
-    const range = loadRange(new Date())
+    const range = loadRange(today)
     listActivitiesRange(toYMD(range.from), toYMD(range.to))
       .then(setLoadedActivities)
       .catch(() => setLoadedActivities([]))
-  }, [])
+  }, [today])
+
+  // The upload backlog spans every date, not just the loaded week/month: read
+  // approved and pending activities on their own (the API needs a range).
+  const [backlog, setBacklog] = useState<DailyActivity[]>([])
+  useEffect(() => {
+    Promise.all([
+      listActivitiesRange(BACKLOG_FROM, todayStr, 'approved'),
+      listActivitiesRange(BACKLOG_FROM, todayStr, 'pending'),
+    ])
+      .then(([approved, pending]) => setBacklog([...approved, ...pending]))
+      .catch(() => setBacklog([]))
+  }, [todayStr])
 
   const weekActivities = useMemo(() => {
-    const r = periodRange('week', new Date())
+    const r = periodRange('week', today)
     return filterByRange(loadedActivities, r.from, r.to)
-  }, [loadedActivities])
+  }, [loadedActivities, today])
 
   const timeLogKpis = useMemo(() => {
-    const today = new Date()
     const range = periodRange(period, today)
     const activities = filterByRange(loadedActivities, range.from, range.to)
 
     const expectedHours = expectedBusinessHours(range.from, range.to)
     const registeredHours = sumHours(activities)
     const compliancePct = expectedHours > 0 ? Math.round((registeredHours / expectedHours) * 100) : 0
-    const todayStr = toYMD(today)
     const loggedToday = loadedActivities.some(a => a.date === todayStr)
 
     return {
@@ -121,10 +151,10 @@ export function Dashboard() {
       gaps: gapDays(activities, range.from, today),
       showTodayAlert: isBusinessDay(today) && !loggedToday,
     }
-  }, [loadedActivities, period])
+  }, [loadedActivities, period, today, todayStr])
 
-  // Approved-not-uploaded over the whole loaded range (week ∪ month).
-  const upload = useMemo(() => pendingUpload(loadedActivities), [loadedActivities])
+  // Approved-not-uploaded (and still unapproved) hours across all dates.
+  const upload = useMemo(() => pendingUpload(backlog), [backlog])
   const periodLabel = period === 'week' ? 'semana' : 'mes'
 
   function openTask(id: number) { setEditingTaskId(id); openModal('task') }

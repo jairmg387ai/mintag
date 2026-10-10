@@ -35,6 +35,8 @@ User always logs time from Mintag and is the only person logging on their tasks 
 - [x] T3 — Frontend: Dashboard period selector + hours by category/project + tests. Route: delegated writer.
 - [x] T4 — Frontend: Dashboard extra KPIs (pending upload, gap days, work items without hours this week, >=80% consumed) + tests. Route: delegated writer.
 
+- [x] T5 — Review follow-ups (dashboard slice): idle alert must group by work_item_id (sibling catalog rows); "Pendiente de subir" must count all approved activities (not only loaded range); skip effort call when no open ids; dashboard "today" refresh across midnight (cheap fix only); test bug-correction effective estimate persistence. Route: delegated writer.
+
 ## Checks
 - `go vet ./...`, `go test ./...`
 - `frontend/`: `npm test`, `npx tsc -b`, `npm run lint` (baseline 32 errors, must not grow)
@@ -56,5 +58,10 @@ User always logs time from Mintag and is the only person logging on their tasks 
 
 - T3+T4 (one delegated writer, one commit since both live in Dashboard): period selector week/month (localStorage), HoursBreakdown by category/project, Pendiente de subir, Dias por debajo de la meta, WorkItemAlerts (no hours this week, >=80% consumed). RED: missing modules + 2 failing Dashboard tests; GREEN: dashboard 26 tests, npm test 189 passed, tsc ok, lint 32 (baseline). Static assets rebuilt with npm run build.
 
+- Split commit: `bf05302` feat(dashboard) source + `4d2953f` chore(web) rebuilt assets (first combined candidate hit lens_context_budget_exceeded because of the bundle).
+- Review baa769a..bf05302 (lineage review-2ebb92fb42f512b0): granted, approved, acknowledged. Warnings -> T5.
+
+- T5: idle grouped by work_item_id, Pendiente de subir over all dates (2000-01-01..today, status approved/pending), no effort call without open ids, todayStr refresh (60s + focus), Go test for bug-correction effective estimate. RED 5/30 dashboard tests failing; GREEN dashboard 30, npm test 193, tsc ok, lint 32, go test server ok. Go test passed first run (covers existing behavior).
+
 ## Next step
-Review slice T1c-fix+T3/T4, then decide PR strategy (forecast exceeded 400 lines).
+Rebuild assets, then decide PR strategy (forecast exceeded 400 lines).

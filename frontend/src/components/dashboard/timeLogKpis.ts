@@ -157,11 +157,24 @@ export function openWorkItems(catalog: AzureActivity[]): AzureActivity[] {
   return catalog.filter(w => w.is_active && !isClosedAzureState(w.last_known_state))
 }
 
-// idleWorkItems returns open catalog entries with no activity linked to them
-// (activity.azure_activity_id -> catalog id) among `activities`.
+// idleWorkItems returns open work items with no activity linked to any of their
+// catalog rows (activity.azure_activity_id -> catalog id -> work_item_id) among
+// `activities`. Several catalog rows can share a work item id; each work item
+// is reported once, using its first open row.
 export function idleWorkItems(catalog: AzureActivity[], activities: DailyActivity[]): AzureActivity[] {
-  const used = new Set(activities.map(a => a.azure_activity_id).filter((id): id is number => id != null))
-  return openWorkItems(catalog).filter(w => !used.has(w.id))
+  const workItemByRow = new Map(catalog.map(w => [w.id, w.work_item_id]))
+  const used = new Set<number>()
+  for (const a of activities) {
+    if (a.azure_activity_id == null) continue
+    const workItemId = workItemByRow.get(a.azure_activity_id)
+    if (workItemId != null) used.add(workItemId)
+  }
+  const seen = new Set<number>()
+  return openWorkItems(catalog).filter(w => {
+    if (used.has(w.work_item_id) || seen.has(w.work_item_id)) return false
+    seen.add(w.work_item_id)
+    return true
+  })
 }
 
 export interface OverBudgetItem {

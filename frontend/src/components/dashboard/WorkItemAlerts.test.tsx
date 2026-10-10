@@ -86,6 +86,23 @@ describe('WorkItemAlerts', () => {
     expect(await screen.findByText('No se pudo calcular el consumo de los work items.')).toBeInTheDocument()
   })
 
+  it('skips the effort call when there are no open work items', async () => {
+    vi.mocked(listAzureActivities).mockResolvedValue([wi(3, 103, 'Old closed task', { last_known_state: 'Closed' })])
+    render(<WorkItemAlerts weekActivities={[]} />)
+
+    expect(await screen.findByText('Ningún work item supera el 80% del estimado.')).toBeInTheDocument()
+    expect(screen.getByText('Todos los work items activos tienen horas esta semana.')).toBeInTheDocument()
+    expect(fetchWorkItemEffort).not.toHaveBeenCalled()
+  })
+
+  it('skips the effort call for an empty catalog', async () => {
+    vi.mocked(listAzureActivities).mockResolvedValue([])
+    render(<WorkItemAlerts weekActivities={[]} />)
+
+    expect(await screen.findByText('Ningún work item supera el 80% del estimado.')).toBeInTheDocument()
+    expect(fetchWorkItemEffort).not.toHaveBeenCalled()
+  })
+
   it('shows a muted note when the catalog cannot be loaded', async () => {
     vi.mocked(listAzureActivities).mockRejectedValue(new Error('boom'))
     render(<WorkItemAlerts weekActivities={[]} />)
