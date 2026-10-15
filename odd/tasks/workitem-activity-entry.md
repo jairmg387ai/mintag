@@ -12,8 +12,8 @@ From an active, catalogued Task row in WorkItems, open the existing New Activity
 
 ## Tasks
 - [x] WIA-1 Add test-first support for preselected work item in NewActivityModal; preserve existing defaults. Check: targeted RED then GREEN, project/category mapping and creation payload tested.
-- [ ] WIA-2 Add Task-row activity shortcut and refresh effort on save. Check: targeted RED then GREEN for WorkItems, no action on non-Task/inactive rows, focused suites and typecheck; no generated asset changes. Implementation and functional checks done; review/closure blocked by concurrent unrelated changes.
-- [ ] WIA-3 Reconcile concurrent worktree changes before candidate review; do not include another feature or overwrite its assets.
+- [x] WIA-2 Add Task-row activity shortcut and refresh effort on save. Check: targeted RED then GREEN for WorkItems, no action on non-Task/inactive rows, focused suites and typecheck; no generated asset changes. Commit 907ee15.
+- [x] WIA-3 Reconcile concurrent worktree changes before candidate review; do not include another feature or overwrite its assets. Split into separate work units on branch `feat/activity-calendar-workitem-entry`.
 
 ## Progress and evidence
 - Existing catalog supplies AzureActivity with catalog ID; NewActivityModal owns form state and accepts catalog/azureActivities; WorkItemsView already owns those inputs and effort reload key.
@@ -23,7 +23,9 @@ From an active, catalogued Task row in WorkItems, open the existing New Activity
 - Focused ESLint fails with three pre-existing WorkItemsView effect violations (lines 122, 127, 133); no new lint findings observed. Preserve this baseline separately.
 - Independent verifier: complete frontend suite 198/198 across 22 files, TypeScript `npx tsc --noEmit -p tsconfig.app.json`, and `git diff --check` passed before subsequent concurrent edits. Potential edge case: mapped category can remain blank if the activity catalog resolves after opening; user may fill it manually.
 - Concurrent worktree mutation appeared after verification and before native review START: unrelated App, Activities calendar, store, server and generated assets changed, with new untracked files. START returned `consent-binding-stale`, `lineage_created:false`, `mutation_performed:false`; do not retry START on a mixed candidate. The current scope no longer matches our feature. Review not completed.
-- No work-unit commit made: the working tree contains unrelated prior and concurrent changes. Do not stage those files implicitly.
+- 2026-10-15 reconciliation: the concurrent changes were the activity calendar feature (incl. `activities-calendar` menu option) and the pre-existing WorkItems parent-bug search. Split by hunk into one branch: 3ff9a09 `feat(activities)` calendar, 426d775 parent-bug search, 907ee15 this feature, 71ee409 rebuilt assets.
+- Checks on the combined tree before committing: `go test ./internal/store/... ./internal/server/...` ok, `npx tsc --noEmit -p tsconfig.app.json` ok, `npx vitest run` 209/209. The parent-bug search commit was tested in isolation (WorkItems tests 55/55).
+- Native review was not run on the separated candidate; delivered by user decision via PR.
 
 ## Next step
-Coordinate separation or stabilization of the concurrent changes, then rerun checks on a bounded candidate and review it if eligible; do not claim final closure from the earlier verification.
+Pending PR review and merge. Pre-existing WorkItemsView ESLint baseline remains as a separate follow-up.
