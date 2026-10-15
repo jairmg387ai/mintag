@@ -24,6 +24,14 @@ vi.mock('../../api/client', () => ({
   fetchWorkItemEffort: vi.fn(),
 }))
 
+vi.mock('../activities/NewActivityModal', () => ({
+  NewActivityModal: ({ open, initialAzureActivityId, defaultDate, onClose, onCreated }: { open: boolean; initialAzureActivityId?: number; defaultDate: string; onClose: () => void; onCreated: () => void }) => open ? (
+    <div role="dialog" aria-label="Nueva actividad" data-catalog-id={initialAzureActivityId} data-date={defaultDate}>
+      <button onClick={onCreated}>Guardar actividad</button><button onClick={onClose}>Cancelar actividad</button>
+    </div>
+  ) : null,
+}))
+
 // The correction-task modal has its own tests; here only the entry points
 // matter, so it is stubbed to expose which bug it was opened for.
 vi.mock('./CreateBugCorrectionTaskModal', () => ({
@@ -75,6 +83,46 @@ describe('WorkItemsView', () => {
     vi.mocked(fetchWorkItemEffort).mockResolvedValue({ items: [] })
     vi.mocked(getActivityCatalog).mockResolvedValue(catalog)
     useAppState.mockReset().mockReturnValue({ azureConfig: null })
+  })
+
+  it('opens a catalogued Task with local today and refreshes effort after save, but not on cancel', async () => {
+    vi.mocked(listAzureActivities).mockResolvedValue([{ ...oneActivity[0], id: 8, work_item_id: 202, work_item_type: 'Task' }])
+    const user = userEvent.setup()
+    render(<WorkItemsView />)
+    await screen.findByText('202')
+    await waitFor(() => expect(fetchWorkItemEffort).toHaveBeenCalledWith([202]))
+    const initialCalls = vi.mocked(fetchWorkItemEffort).mock.calls.length
+    await user.click(screen.getByRole('button', { name: 'Registrar actividad para #202' }))
+    const dialog = screen.getByRole('dialog', { name: 'Nueva actividad' })
+    expect(dialog).toHaveAttribute('data-catalog-id', '8')
+    const today = new Date()
+    expect(dialog).toHaveAttribute('data-date', `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`)
+    await user.click(screen.getByRole('button', { name: 'Cancelar actividad' }))
+    expect(screen.queryByRole('dialog', { name: 'Nueva actividad' })).not.toBeInTheDocument()
+    expect(fetchWorkItemEffort).toHaveBeenCalledTimes(initialCalls)
+    await user.click(screen.getByRole('button', { name: 'Registrar actividad para #202' }))
+    await user.click(screen.getByRole('button', { name: 'Guardar actividad' }))
+    expect(screen.queryByRole('dialog', { name: 'Nueva actividad' })).not.toBeInTheDocument()
+    await waitFor(() => expect(vi.mocked(fetchWorkItemEffort).mock.calls.length).toBeGreaterThan(initialCalls))
+  })
+
+  it('does not offer activity entry for Bugs, inactive Tasks, editing rows or uncatalogued assigned Tasks', async () => {
+    vi.mocked(listAzureActivities).mockResolvedValue([
+      oneActivity[0],
+      { ...oneActivity[0], id: 2, work_item_id: 202, label: 'Inactive', work_item_type: 'Task', is_active: false },
+      { ...oneActivity[0], id: 3, work_item_id: 303, label: 'Editable', work_item_type: 'Task' },
+    ])
+    vi.mocked(listAssignedAzureWorkItems).mockResolvedValue({ org: 'ORG', items: [{ id: 404, title: 'Pending', type: 'Task', state: 'Active' }] })
+    const user = userEvent.setup()
+    render(<WorkItemsView />)
+    await screen.findByText('303')
+    await user.click(screen.getByRole('checkbox', { name: /mostrar inactivos/i }))
+    await screen.findByText('Inactive')
+    await user.click(screen.getByRole('button', { name: 'Editar Editable' }))
+    expect(screen.queryByRole('button', { name: /registrar actividad para/i })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /sincronizar asignados/i }))
+    await screen.findByText('Pending')
+    expect(screen.queryByRole('button', { name: /registrar actividad para/i })).not.toBeInTheDocument()
   })
 
   it('renders catalog rows from listAzureActivities', async () => {
