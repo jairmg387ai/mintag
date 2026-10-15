@@ -189,6 +189,8 @@ describe('WorkItemsView', () => {
     const user = userEvent.setup()
     render(<WorkItemsView />)
     await screen.findByText('101')
+    // Closed rows are hidden by default; show them to assert the badge.
+    await user.click(screen.getByRole('checkbox', { name: /ocultar cerrados/i }))
 
     await user.click(screen.getByRole('button', { name: /refrescar estados/i }))
 
@@ -304,8 +306,10 @@ describe('WorkItemsView', () => {
 
     render(<WorkItemsView />)
     await screen.findByText('101')
+    // Closed rows are hidden by default; show them to assert the badge.
+    await user.click(screen.getByRole('checkbox', { name: /ocultar cerrados/i }))
 
-    await user.click(screen.getByRole('button', { name: /cerrar/i }))
+    await user.click(screen.getByRole('button', { name: /^cerrar/i }))
 
     expect(confirmSpy).toHaveBeenCalled()
     expect(closeAzureWorkItem).toHaveBeenCalledWith(101)
@@ -533,6 +537,8 @@ describe('WorkItemsView', () => {
     const user = userEvent.setup()
     render(<WorkItemsView />)
     await screen.findByText('Bug row')
+    // "Ocultar cerrados" starts checked; turn it off to see every row first.
+    await user.click(screen.getByRole('checkbox', { name: /ocultar cerrados/i }))
     await user.click(screen.getByRole('button', { name: /refrescar estados/i }))
     await screen.findByText('Closed')
 
@@ -585,6 +591,58 @@ describe('WorkItemsView', () => {
     expect(within(pendingSection).queryByText('Fix login bug')).not.toBeInTheDocument()
   })
 
+  it('sync-assigned excludes work items catalogued as inactive even when inactive rows are hidden', async () => {
+    vi.mocked(listAzureActivities).mockImplementation(async (includeInactive?: boolean) =>
+      includeInactive
+        ? [...oneActivity, { ...oneActivity[0], id: 2, work_item_id: 764, label: 'Desarrollo backend', work_item_type: 'Task', is_active: false }]
+        : oneActivity,
+    )
+    vi.mocked(listAssignedAzureWorkItems).mockResolvedValue({
+      org: 'ORG',
+      items: [
+        { id: 764, title: 'Desarrollo backend', type: 'Task', state: 'Active' },
+        { id: 505, title: 'New assigned task', type: 'Task', state: 'New' },
+      ],
+    })
+    const user = userEvent.setup()
+    render(<WorkItemsView />)
+    await screen.findByText('101')
+
+    await user.click(screen.getByRole('button', { name: /sincronizar asignados/i }))
+
+    const pendingSection = screen.getByText('Asignados en Azure sin catalogar').closest('.card') as HTMLElement
+    expect(await within(pendingSection).findByText('New assigned task')).toBeInTheDocument()
+    expect(within(pendingSection).queryByText('Desarrollo backend')).not.toBeInTheDocument()
+  })
+
+  it('sync-assigned does not propose work items in the legacy Done state', async () => {
+    vi.mocked(listAzureActivities).mockResolvedValue(oneActivity)
+    vi.mocked(listAssignedAzureWorkItems).mockResolvedValue({
+      org: 'ORG',
+      items: [
+        { id: 707, title: 'Old done task', type: 'Task', state: 'Done' },
+        { id: 505, title: 'New assigned task', type: 'Task', state: 'New' },
+      ],
+    })
+    const user = userEvent.setup()
+    render(<WorkItemsView />)
+    await screen.findByText('101')
+
+    await user.click(screen.getByRole('button', { name: /sincronizar asignados/i }))
+
+    const pendingSection = screen.getByText('Asignados en Azure sin catalogar').closest('.card') as HTMLElement
+    expect(await within(pendingSection).findByText('New assigned task')).toBeInTheDocument()
+    expect(within(pendingSection).queryByText('Old done task')).not.toBeInTheDocument()
+  })
+
+  it('checks "Ocultar cerrados" by default', async () => {
+    vi.mocked(listAzureActivities).mockResolvedValue(oneActivity)
+    render(<WorkItemsView />)
+    await screen.findByText('101')
+
+    expect(screen.getByRole('checkbox', { name: /ocultar cerrados/i })).toBeChecked()
+  })
+
   it('sync-assigned shows an all-caught-up message when nothing is pending', async () => {
     vi.mocked(listAzureActivities).mockResolvedValue(oneActivity)
     vi.mocked(listAssignedAzureWorkItems).mockResolvedValue({
@@ -603,6 +661,7 @@ describe('WorkItemsView', () => {
   it('adding a pending assigned item calls addAzureActivity with the right payload and removes it from the pending list', async () => {
     vi.mocked(listAzureActivities)
       .mockResolvedValueOnce(oneActivity)
+      .mockResolvedValueOnce(oneActivity) // full catalog read by the sync
       .mockResolvedValueOnce([...oneActivity, { ...oneActivity[0], id: 2, work_item_id: 505, label: 'New assigned task', work_item_type: 'Task' }])
     vi.mocked(listAssignedAzureWorkItems).mockResolvedValue({
       org: 'ORG',

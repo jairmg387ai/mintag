@@ -113,3 +113,43 @@ describe('EditActivityModal Azure activity picker', () => {
     expect(screen.getByRole('combobox', { name: 'Categoría *' })).toHaveValue('')
   })
 })
+
+describe('EditActivityModal date', () => {
+  beforeEach(() => {
+    vi.mocked(updateActivity).mockReset()
+    vi.mocked(updateActivity).mockResolvedValue({} as never)
+  })
+
+  it('prefills the activity date and sends a changed date', async () => {
+    const user = userEvent.setup()
+    renderModal()
+
+    const dateInput = screen.getByLabelText('Fecha *') as HTMLInputElement
+    expect(dateInput.value).toBe('2026-08-19')
+    await user.clear(dateInput)
+    await user.type(dateInput, '2026-08-18')
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    expect(vi.mocked(updateActivity).mock.calls[0][1]).toMatchObject({ date: '2026-08-18' })
+  })
+
+  it('omits date when it is untouched', async () => {
+    const user = userEvent.setup()
+    renderModal()
+
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    expect(vi.mocked(updateActivity).mock.calls[0][1]).not.toHaveProperty('date')
+  })
+
+  it('requires a date', async () => {
+    const user = userEvent.setup()
+    renderModal()
+
+    await user.clear(screen.getByLabelText('Fecha *'))
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    expect(screen.getByText('La fecha es obligatoria')).toBeInTheDocument()
+    expect(updateActivity).not.toHaveBeenCalled()
+  })
+})

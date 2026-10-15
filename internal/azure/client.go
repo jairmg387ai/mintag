@@ -366,12 +366,12 @@ func (c *Client) FetchWorkItemsByIDs(ctx context.Context, ids []int) ([]Assigned
 
 // queryAssignedWorkItemIDs runs a WIQL query for work items assigned to the
 // current identity (@Me is resolved by Azure server-side from the
-// credential) that are not in a closed/removed state, most recently changed
-// first.
+// credential) that are not in a closed/removed state (including the legacy
+// "Done" state, superseded by "Cerrado"), most recently changed first.
 func (c *Client) queryAssignedWorkItemIDs(ctx context.Context) ([]int, error) {
 	query := map[string]string{
 		"query": "SELECT [System.Id] FROM WorkItems WHERE [System.AssignedTo] = @Me " +
-			"AND [System.State] <> 'Closed' AND [System.State] <> 'Removed' AND [System.State] <> 'Cerrado' " +
+			"AND [System.State] <> 'Closed' AND [System.State] <> 'Removed' AND [System.State] <> 'Cerrado' AND [System.State] <> 'Done' " +
 			"AND [System.WorkItemType] IN ('Task', 'Bug') " +
 			"ORDER BY [System.ChangedDate] DESC",
 	}

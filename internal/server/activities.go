@@ -314,6 +314,7 @@ func (srv *Server) handlePatchActivity(w http.ResponseWriter, r *http.Request) {
 
 	var body struct {
 		Action          string  `json:"action"`
+		Date            string  `json:"date"`
 		Hours           float64 `json:"hours"`
 		Project         string  `json:"project"`
 		Category        string  `json:"category"`
@@ -367,6 +368,12 @@ func (srv *Server) handlePatchActivity(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "unknown action: "+body.Action, http.StatusBadRequest)
 			return
 		}
+		// Reject a malformed date before UpdateActivity writes anything, so
+		// the PATCH never applies half of its fields.
+		if body.Date != "" && !reActivityDate.MatchString(body.Date) {
+			http.Error(w, fmt.Sprintf("date must be in YYYY-MM-DD format, got %q", body.Date), http.StatusUnprocessableEntity)
+			return
+		}
 		a, err := srv.st.UpdateActivity(ctx, id, body.Hours, body.Project, body.Category, body.RegistroDiario)
 		if err != nil {
 			status := http.StatusUnprocessableEntity
@@ -375,6 +382,13 @@ func (srv *Server) handlePatchActivity(w http.ResponseWriter, r *http.Request) {
 			}
 			http.Error(w, err.Error(), status)
 			return
+		}
+		if body.Date != "" && body.Date != a.Date {
+			if err := srv.st.SetActivityDate(ctx, id, body.Date); err != nil {
+				http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+				return
+			}
+			a.Date = body.Date
 		}
 		if a, err = srv.applyAzureActivityID(w, ctx, a, body.AzureActivityID, azureActivityIDProvided); err != nil {
 			return // response already written by applyAzureActivityID

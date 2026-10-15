@@ -436,6 +436,23 @@ func (s *Store) SetActivityAzureActivity(ctx context.Context, id int64, azureAct
 // reference_id is plain text (Azure work item IDs, Mantis ticket IDs, and
 // LuxFlow numbers all use different formats), so no format validation is
 // applied here.
+// SetActivityDate moves a pending or approved activity to another day.
+// Uploaded activities are immutable, same rule as UpdateActivity.
+func (s *Store) SetActivityDate(ctx context.Context, id int64, date string) error {
+	if !reDate.MatchString(date) {
+		return fmt.Errorf("date must be in YYYY-MM-DD format, got %q", date)
+	}
+	a, err := s.GetActivity(ctx, id)
+	if err != nil {
+		return err
+	}
+	if a.Status == "uploaded" {
+		return fmt.Errorf("activity %d cannot be edited: it has already been uploaded to Azure", id)
+	}
+	_, err = s.db.ExecContext(ctx, `UPDATE daily_activities SET date = ? WHERE id = ?`, date, id)
+	return err
+}
+
 func (s *Store) SetActivityReferenceID(ctx context.Context, id int64, referenceID *string) error {
 	var value any
 	if referenceID != nil {

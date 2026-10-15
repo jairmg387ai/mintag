@@ -40,6 +40,17 @@ describe('azureActivityMatches', () => {
 
     expect(azureActivityMatches(activity, 'login')).toBe(false)
   })
+
+  it.each(['Closed', 'Cerrado', 'Done', 'Removed'])('excludes work items whose last known state is %s', state => {
+    const activity = buildActivity({ last_known_state: state })
+
+    expect(azureActivityMatches(activity, '')).toBe(false)
+  })
+
+  it('keeps work items with an open or unknown state', () => {
+    expect(azureActivityMatches(buildActivity({ last_known_state: 'Active' }), '')).toBe(true)
+    expect(azureActivityMatches(buildActivity({ last_known_state: undefined }), '')).toBe(true)
+  })
 })
 
 describe('filterAzureActivities', () => {
