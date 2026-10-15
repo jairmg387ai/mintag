@@ -179,6 +179,7 @@ export function WorkItemsView() {
     if (normalizedSearch) {
       const haystack = [
         String(a.work_item_id),
+        a.parent_type === 'Bug' && a.parent_work_item_id ? String(a.parent_work_item_id) : '',
         a.org,
         a.label,
         a.work_item_type,
@@ -652,7 +653,7 @@ export function WorkItemsView() {
                     type="search"
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
-                    placeholder="Buscar por ID, etiqueta, tipo, proyecto o categoría..."
+                    placeholder="Buscar por ID de work item o bug padre, etiqueta, tipo, proyecto o categoría..."
                     aria-label="Buscar work items registrados"
                     style={{ ...inputStyle, paddingLeft: 28 }}
                   />

@@ -382,6 +382,24 @@ describe('WorkItemsView', () => {
     expect(within(parentLink).getByLabelText('Bug')).toBeInTheDocument()
   })
 
+  it('finds a catalogued task by its parent bug ID without matching unrelated rows', async () => {
+    vi.mocked(listAzureActivities).mockResolvedValue([
+      {
+        ...oneActivity[0], id: 1, work_item_id: 171306, label: 'Correct login', work_item_type: 'Task',
+        parent_work_item_id: 171191, parent_title: 'Login fails', parent_type: 'Bug',
+      },
+      { ...oneActivity[0], id: 2, work_item_id: 202, label: 'Other task', work_item_type: 'Task' },
+    ])
+    const user = userEvent.setup()
+    render(<WorkItemsView />)
+    await screen.findByText('171306')
+
+    await user.type(screen.getByRole('searchbox', { name: /buscar work items registrados/i }), '171191')
+
+    expect(screen.getByText('171306')).toBeInTheDocument()
+    expect(screen.queryByText('Other task')).not.toBeInTheDocument()
+  })
+
   it('opens the parent bug evidence panel from a bug child task row', async () => {
     vi.mocked(listAzureActivities).mockResolvedValue([
       {
