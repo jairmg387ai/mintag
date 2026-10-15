@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ActivityCatalog, ActivityValidationSettings, AzureActivity } from '../../types'
 import { createActivity, fetchWorkItemEffort, getActivityValidationSettings } from '../../api/client'
@@ -124,6 +124,41 @@ describe('NewActivityModal Azure activity picker', () => {
 
     const call = vi.mocked(createActivity).mock.calls[0][0]
     expect(call).not.toHaveProperty('azure_activity_id')
+  })
+})
+
+describe('NewActivityModal preselected catalog activity', () => {
+  beforeEach(() => {
+    vi.mocked(createActivity).mockReset().mockResolvedValue({} as never)
+    vi.mocked(getActivityValidationSettings).mockReset().mockResolvedValue(ALL_VALIDATIONS_OFF)
+    vi.mocked(fetchWorkItemEffort).mockReset().mockResolvedValue({ items: [] })
+  })
+
+  it('initializes the catalog ID and mapped fields and submits them', async () => {
+    const user = userEvent.setup()
+    render(<NewActivityModal open onClose={vi.fn()} onCreated={vi.fn()} catalog={catalog} defaultDate="2026-08-19" azureActivities={azureActivities} initialAzureActivityId={3} />)
+    expect(screen.getByRole('combobox', { name: 'Actividad de Azure' })).toHaveValue('Mapped work item (#7777)')
+    expect(screen.getByRole('combobox', { name: 'Proyecto *' })).toHaveValue('Project A')
+    expect(screen.getByRole('combobox', { name: 'Categoría *' })).toHaveValue('Development')
+    await user.type(screen.getByPlaceholderText('0.00'), '2')
+    await user.type(screen.getByPlaceholderText('Descripción de la actividad...'), 'Trabajo')
+    await user.click(screen.getByRole('button', { name: 'Crear actividad' }))
+    expect(createActivity).toHaveBeenCalledWith(expect.objectContaining({ azure_activity_id: 3, project: 'Project A', category: 'Development' }))
+  })
+
+  it('clears the selection and mappings on reopen without a preselection', async () => {
+    const props = { onClose: vi.fn(), onCreated: vi.fn(), catalog, defaultDate: '2026-08-19', azureActivities }
+    const { rerender } = render(<NewActivityModal {...props} open initialAzureActivityId={3} />)
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Proyecto *' })).toHaveValue('Project A'))
+    await act(async () => {
+      rerender(<NewActivityModal {...props} open={false} />)
+    })
+    await act(async () => {
+      rerender(<NewActivityModal {...props} open />)
+    })
+    expect(screen.getByRole('combobox', { name: 'Proyecto *' })).toHaveValue('')
+    expect(screen.getByRole('combobox', { name: 'Categoría *' })).toHaveValue('')
+    expect(screen.getByRole('combobox', { name: 'Actividad de Azure' })).toHaveValue('Usar predeterminada (Fix login bug (#4521))')
   })
 })
 

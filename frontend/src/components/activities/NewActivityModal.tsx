@@ -36,6 +36,7 @@ interface NewActivityModalProps {
   catalog: ActivityCatalog | null
   defaultDate: string // YYYY-MM-DD
   azureActivities: AzureActivity[]
+  initialAzureActivityId?: number // Catalog ID, not Azure work_item_id
 }
 
 const selectStyle: CSSProperties = {
@@ -81,8 +82,9 @@ function Field({ label, children, error }: { label: string; children: React.Reac
   )
 }
 
-export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDate, azureActivities }: NewActivityModalProps) {
+export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDate, azureActivities, initialAzureActivityId }: NewActivityModalProps) {
   const pressedOnOverlay = useRef(false)
+  const wasOpen = useRef(false)
   const [date, setDate] = useState(defaultDate)
   const [hours, setHours] = useState('')
   const [project, setProject] = useState('')
@@ -110,24 +112,27 @@ export function NewActivityModal({ open, onClose, onCreated, catalog, defaultDat
 
   // Reset form when modal opens
   useEffect(() => {
-    if (open) {
+    if (open && !wasOpen.current) {
       setDate(defaultDate)
       setHours('')
       // Left blank (not pre-seeded to the catalog's first entry) so that an
       // Azure work item without a mapped project/category leaves these
       // fields empty and the required-field validation catches it, instead
       // of silently submitting whatever happened to be first in the list.
-      setProject('')
-      setCategory('')
+      const initialActivity = azureActivities.find(a => a.id === initialAzureActivityId)
+      const patch = initialActivity ? resolveAutofill({ activity: initialActivity, catalog, projectTouched: false, categoryTouched: false }) : {}
+      setProject(patch.project ?? '')
+      setCategory(patch.category ?? '')
       setDescription('')
-      setAzureActivityId('')
+      setAzureActivityId(initialActivity ? String(initialActivity.id) : '')
       setReferenceId('')
       setErrors({})
       setSubmitError('')
       setProjectTouched(false)
       setCategoryTouched(false)
     }
-  }, [open, defaultDate, catalog])
+    wasOpen.current = open
+  }, [open, defaultDate, catalog, azureActivities, initialAzureActivityId])
 
   // The work item hours will land on: the picked Azure activity, or the
   // default one when nothing is picked (the backend falls back to it too).

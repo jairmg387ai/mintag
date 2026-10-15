@@ -22,7 +22,7 @@ import { EditActivityModal } from './EditActivityModal'
 import { CatalogManagementModal } from './CatalogManagementModal'
 import { ActivityDetailModal } from './ActivityDetailModal'
 import { ExportActivitiesModal } from './ExportActivitiesModal'
-import { useAppActions } from '../../store/AppContext'
+import { useAppActions, useAppState } from '../../store/AppContext'
 
 function toYMD(d: Date): string {
   const y = d.getFullYear()
@@ -47,7 +47,8 @@ function truncateRegistroDiario(value: string): string {
 
 export function ActivitiesView() {
   const { setAzureConfig: setGlobalAzureConfig } = useAppActions()
-  const [date, setDate] = useState<string>(() => toYMD(new Date()))
+  const { activitiesDate } = useAppState()
+  const [date, setDate] = useState<string>(() => activitiesDate ?? toYMD(new Date()))
   const [activities, setActivities] = useState<DailyActivity[]>([])
   const [catalog, setCatalog] = useState<ActivityCatalog | null>(null)
   const [azureActivities, setAzureActivities] = useState<AzureActivity[]>([])

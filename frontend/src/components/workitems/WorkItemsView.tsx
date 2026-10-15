@@ -18,6 +18,7 @@ import { azureWorkItemUrl, formatAzureParentLabel, friendlyCatalogErrorMessage }
 import { useAppActions, useAppState } from '../../store/AppContext'
 import { Card, CardHeader } from '../ui/Card'
 import { CreateWorkItemModal } from './CreateWorkItemModal'
+import { NewActivityModal } from '../activities/NewActivityModal'
 import { CreateBugCorrectionTaskModal } from './CreateBugCorrectionTaskModal'
 import { AzureWorkItemStateBadge } from './AzureWorkItemStateBadge'
 import { WorkItemEffort } from '../shared/WorkItemEffort'
@@ -55,6 +56,7 @@ export function WorkItemsView() {
   const { pushToast, openModal, setActiveBugEvidenceId } = useAppActions()
   const { azureConfig } = useAppState()
   const [modalOpen, setModalOpen] = useState(false)
+  const [activityEntry, setActivityEntry] = useState<{ catalogId: number; date: string } | null>(null)
   // Bug whose correction-task form is open; null when closed.
   const [correctionBugId, setCorrectionBugId] = useState<number | null>(null)
   const [lastResult, setLastResult] = useState<CreatedWorkItemResponse | null>(null)
@@ -179,6 +181,7 @@ export function WorkItemsView() {
     if (normalizedSearch) {
       const haystack = [
         String(a.work_item_id),
+        a.parent_type === 'Bug' && a.parent_work_item_id ? String(a.parent_work_item_id) : '',
         a.org,
         a.label,
         a.work_item_type,
@@ -199,6 +202,12 @@ export function WorkItemsView() {
     effortReloadKey,
   )
   const effortNotice = effort.error ? 'No se pudieron cargar las horas de los work items.' : ''
+
+  function openActivityEntry(catalogId: number) {
+    const today = new Date()
+    const date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+    setActivityEntry({ catalogId, date })
+  }
 
   async function refreshStates() {
     setStatesLoading(true)
@@ -652,7 +661,7 @@ export function WorkItemsView() {
                     type="search"
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
-                    placeholder="Buscar por ID, etiqueta, tipo, proyecto o categoría..."
+                    placeholder="Buscar por ID de work item o bug padre, etiqueta, tipo, proyecto o categoría..."
                     aria-label="Buscar work items registrados"
                     style={{ ...inputStyle, paddingLeft: 28 }}
                   />
@@ -954,6 +963,11 @@ export function WorkItemsView() {
                               <td>
                                 {isTask ? (
                                   <div style={{ display: 'flex', gap: 6 }}>
+                                    {a.is_active && !isEditing && (
+                                      <button className="btn btn-ghost btn-sm" aria-label={`Registrar actividad para #${a.work_item_id}`} onClick={() => openActivityEntry(a.id)}>
+                                        Registrar actividad
+                                      </button>
+                                    )}
                                     <button
                                       className="btn btn-ghost btn-sm"
                                       disabled={busy || closedAlready || isEditing}
@@ -1162,6 +1176,18 @@ export function WorkItemsView() {
           </div>
         </Card>
       </div>
+
+      {activityEntry && (
+        <NewActivityModal
+          open
+          initialAzureActivityId={activityEntry.catalogId}
+          defaultDate={activityEntry.date}
+          catalog={catalog}
+          azureActivities={azureActivities}
+          onClose={() => setActivityEntry(null)}
+          onCreated={() => { setEffortReloadKey(k => k + 1); setActivityEntry(null) }}
+        />
+      )}
 
       <CreateWorkItemModal
         open={modalOpen}

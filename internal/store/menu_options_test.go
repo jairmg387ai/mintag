@@ -185,12 +185,12 @@ func TestSetMenuOptionEnabled(t *testing.T) {
 		defer s.Close()
 		ctx := context.Background()
 
-		// Default catalog starts with exactly 3 enabled: dashboard, tasks, activities.
-		if _, err := s.SetMenuOptionEnabled(ctx, "dashboard", false); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := s.SetMenuOptionEnabled(ctx, "tasks", false); err != nil {
-			t.Fatal(err)
+		// Default catalog starts with exactly 4 enabled: dashboard, tasks,
+		// activities, activities-calendar.
+		for _, id := range []string{"dashboard", "tasks", "activities-calendar"} {
+			if _, err := s.SetMenuOptionEnabled(ctx, id, false); err != nil {
+				t.Fatal(err)
+			}
 		}
 
 		_, err = s.SetMenuOptionEnabled(ctx, "activities", false)
@@ -225,8 +225,9 @@ func TestSetMenuOptionEnabled_ConcurrentDisable(t *testing.T) {
 
 	ctx := context.Background()
 	// Fresh DB: migrateMenuOptions leaves the catalog fallback in place, so
-	// exactly 3 options are enabled by default: dashboard, tasks, activities.
-	targets := []string{"dashboard", "tasks", "activities"}
+	// exactly 4 options are enabled by default: dashboard, tasks, activities,
+	// activities-calendar.
+	targets := []string{"dashboard", "tasks", "activities", "activities-calendar"}
 
 	var wg sync.WaitGroup
 	errs := make([]error, len(targets))
@@ -253,8 +254,8 @@ func TestSetMenuOptionEnabled_ConcurrentDisable(t *testing.T) {
 			t.Fatalf("goroutine %d: unexpected error (busy_timeout should have absorbed contention): %v", i, err)
 		}
 	}
-	if succeeded != 2 {
-		t.Fatalf("expected exactly 2 successful concurrent disables, got %d", succeeded)
+	if succeeded != 3 {
+		t.Fatalf("expected exactly 3 successful concurrent disables, got %d", succeeded)
 	}
 	if rejected != 1 {
 		t.Fatalf("expected exactly 1 rejection with ErrLastEnabledMenuOption, got %d", rejected)
@@ -307,13 +308,14 @@ func TestMigrateMenuOptions_FreshDatabaseUsesFallbackOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantEnabled := map[string]bool{
-		"dashboard":          true,
-		"tasks":              true,
-		"meetings":           false,
-		"graph":              false,
-		"activities":         true,
-		"deployment-windows": false,
-		"work-items":         false,
+		"dashboard":           true,
+		"tasks":               true,
+		"meetings":            false,
+		"graph":               false,
+		"activities":          true,
+		"activities-calendar": true,
+		"deployment-windows":  false,
+		"work-items":          false,
 	}
 	for _, o := range opts {
 		if o.Enabled != wantEnabled[o.ID] {
@@ -408,7 +410,7 @@ func TestMigrateMenuOptions_ReopenIsIdempotent(t *testing.T) {
 	}
 	wantEnabled := map[string]bool{
 		"dashboard": true, "tasks": true, "meetings": false,
-		"graph": false, "activities": true, "deployment-windows": false, "work-items": false,
+		"graph": false, "activities": true, "activities-calendar": true, "deployment-windows": false, "work-items": false,
 	}
 	for _, o := range opts {
 		if o.Enabled != wantEnabled[o.ID] {

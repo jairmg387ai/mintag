@@ -129,7 +129,7 @@ export interface GraphNodeDetail {
   neighbor_count: number
 }
 
-export type ViewName = 'dashboard' | 'tasks' | 'meetings' | 'graph' | 'activities' | 'deployment-windows' | 'work-items' | 'settings'
+export type ViewName = 'dashboard' | 'tasks' | 'meetings' | 'graph' | 'activities' | 'activities-calendar' | 'deployment-windows' | 'work-items' | 'settings'
 
 // --- Work Items (manual Azure DevOps Task creation) ---
 

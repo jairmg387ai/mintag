@@ -53,6 +53,7 @@ var menuOptionsCatalog = []MenuOption{
 	{ID: "meetings", Label: "Meetings", DefaultEnabled: false},
 	{ID: "graph", Label: "Knowledge Graph", DefaultEnabled: false},
 	{ID: "activities", Label: "Activities", DefaultEnabled: true},
+	{ID: "activities-calendar", Label: "Activity Calendar", DefaultEnabled: true},
 	{ID: "deployment-windows", Label: "Deployment Windows", DefaultEnabled: false},
 	{ID: "work-items", Label: "Work Items", DefaultEnabled: false},
 }
