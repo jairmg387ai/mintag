@@ -66,7 +66,7 @@ export function WorkItemsView() {
   const [liveStates, setLiveStates] = useState<Record<number, AssignedAzureWorkItem>>({})
   const [statesLoading, setStatesLoading] = useState(false)
   const [rowBusy, setRowBusy] = useState<Record<number, boolean>>({})
-  const [hideClosed, setHideClosed] = useState(false)
+  const [hideClosed, setHideClosed] = useState(true)
   const [hideBugs, setHideBugs] = useState(false)
   const [hideTasks, setHideTasks] = useState(false)
   const [showInactive, setShowInactive] = useState(false)
@@ -238,10 +238,16 @@ export function WorkItemsView() {
   async function syncAssigned() {
     setSyncingAssigned(true)
     try {
-      const { org, items } = await listAssignedAzureWorkItems()
+      // Compare against the whole catalog, inactive rows included: a work item
+      // the user deactivated is already registered and must not be proposed
+      // again just because "Mostrar inactivos" is off.
+      const [{ org, items }, fullCatalog] = await Promise.all([
+        listAssignedAzureWorkItems(),
+        listAzureActivities(true),
+      ])
       setAssignedOrg(org)
-      const knownIds = new Set(azureActivities.map(a => a.work_item_id))
-      setPendingAssigned(items.filter(item => !knownIds.has(item.id)))
+      const knownIds = new Set(fullCatalog.map(a => a.work_item_id))
+      setPendingAssigned(items.filter(item => !knownIds.has(item.id) && item.state !== 'Done'))
     } catch (e: unknown) {
       pushToast(e instanceof Error ? e.message : 'No se pudo sincronizar los work items asignados', true)
     } finally {

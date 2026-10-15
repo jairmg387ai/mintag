@@ -512,6 +512,7 @@ func TestFetchAssignedWorkItems_Success(t *testing.T) {
 		{name: "excludes closed", clause: "[System.State] <> 'Closed'"},
 		{name: "excludes removed", clause: "[System.State] <> 'Removed'"},
 		{name: "excludes cerrado", clause: "[System.State] <> 'Cerrado'"},
+		{name: "excludes legacy done", clause: "[System.State] <> 'Done'"},
 		{name: "only tasks and bugs", clause: "[System.WorkItemType] IN ('Task', 'Bug')"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
