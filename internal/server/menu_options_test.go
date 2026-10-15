@@ -124,9 +124,10 @@ func TestPatchMenuOption_UnknownIDReturns404(t *testing.T) {
 func TestPatchMenuOption_LastEnabledReturns422(t *testing.T) {
 	base, _ := newTestServer(t)
 
-	// Default catalog on a fresh store: dashboard, tasks, activities enabled.
-	// Disable tasks and activities, leaving only dashboard enabled.
-	for _, id := range []string{"tasks", "activities"} {
+	// Default catalog on a fresh store: dashboard, tasks, activities and
+	// activities-calendar enabled.
+	// Disable all but dashboard.
+	for _, id := range []string{"tasks", "activities", "activities-calendar"} {
 		resp := doJSON(t, http.MethodPatch, base+"/api/menu-options/"+id, map[string]any{
 			"enabled": false,
 		})

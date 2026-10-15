@@ -10,6 +10,9 @@ interface AppState {
   menuOptions: MenuOptionStatus[]
   azureConfig: AzureTimeLogConfigStatus | null
   currentView: ViewName
+  // Date the daily ActivitiesView opens on when reached via openActivitiesOn;
+  // null (any other navigation) means today.
+  activitiesDate: string | null
   taskView: TaskViewName
   filterStatus: string
   activeProject: number | null
@@ -23,6 +26,7 @@ interface AppState {
 interface AppActions {
   loadAll: () => Promise<void>
   setView: (view: ViewName) => void
+  openActivitiesOn: (date: string) => void
   setTaskView: (view: TaskViewName) => void
   setFilterStatus: (status: string) => void
   setActiveProject: (id: number) => void
@@ -45,6 +49,7 @@ const defaultState: AppState = {
   menuOptions: [],
   azureConfig: null,
   currentView: 'dashboard',
+  activitiesDate: null,
   taskView: 'list',
   filterStatus: 'all',
   activeProject: null,
@@ -76,7 +81,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const setView = useCallback((view: ViewName) => {
-    setState(prev => ({ ...prev, currentView: view }))
+    setState(prev => ({ ...prev, currentView: view, activitiesDate: null }))
+  }, [])
+
+  const openActivitiesOn = useCallback((date: string) => {
+    setState(prev => ({ ...prev, currentView: 'activities', activitiesDate: date }))
   }, [])
 
   const setTaskView = useCallback((view: TaskViewName) => {
@@ -184,6 +193,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const actions: AppActions = {
     loadAll,
     setView,
+    openActivitiesOn,
     setTaskView,
     setFilterStatus,
     setActiveProject,

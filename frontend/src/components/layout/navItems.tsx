@@ -1,4 +1,4 @@
-import { LayoutDashboard, CheckSquare, Users, Network, Clock, Rocket, FilePlus2 } from 'lucide-react'
+import { LayoutDashboard, CheckSquare, Users, Network, Clock, CalendarDays, Rocket, FilePlus2 } from 'lucide-react'
 import type { ViewName } from '../../types'
 
 export interface NavEntry {
@@ -19,6 +19,7 @@ export const NAV_ITEMS: NavEntry[] = [
   { id: 'meetings',  label: 'Reuniones',       icon: <Users          size={18} strokeWidth={1.75} /> },
   { id: 'graph',      label: 'Grafo de Conocimiento', icon: <Network size={18} strokeWidth={1.75} /> },
   { id: 'activities',          label: 'Actividades',   icon: <Clock   size={18} strokeWidth={1.75} /> },
+  { id: 'activities-calendar', label: 'Calendario',    icon: <CalendarDays size={18} strokeWidth={1.75} /> },
   { id: 'deployment-windows', label: 'Ventanas',     icon: <Rocket  size={18} strokeWidth={1.75} /> },
   { id: 'work-items', label: 'Work Items', icon: <FilePlus2 size={18} strokeWidth={1.75} /> },
 ]
