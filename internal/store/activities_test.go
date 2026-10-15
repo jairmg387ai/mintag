@@ -951,3 +951,45 @@ func createUploadedActivity(t *testing.T, s *Store, ctx context.Context, documen
 	}
 	return a
 }
+
+func TestSetActivityDate(t *testing.T) {
+	s, err := OpenInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+
+	a, err := s.CreateActivity(ctx, "2026-06-12", 1.0, "RNCEA", "Actividades de arquitectura, diseño y código", "Trabajo", "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.SetActivityDate(ctx, a.ID, "2026-06-10"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got, err := s.GetActivity(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Date != "2026-06-10" {
+		t.Errorf("expected date=2026-06-10, got %q", got.Date)
+	}
+
+	if err := s.SetActivityDate(ctx, a.ID, "10/06/2026"); err == nil || !strings.Contains(err.Error(), "YYYY-MM-DD") {
+		t.Errorf("expected a format error, got %v", err)
+	}
+	if err := s.SetActivityDate(ctx, 9999, "2026-06-10"); err == nil {
+		t.Error("expected an error for a missing activity")
+	}
+
+	if _, err := s.ApproveActivities(ctx, []int64{a.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkUploaded(ctx, a.ID, "doc-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetActivityDate(ctx, a.ID, "2026-06-11"); err == nil || !strings.Contains(err.Error(), "already been uploaded") {
+		t.Errorf("expected an uploaded error, got %v", err)
+	}
+}

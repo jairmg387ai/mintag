@@ -127,8 +127,9 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 
 	// --- activity_update ---
 	s.AddTool(mcp.NewTool("activity_update",
-		mcp.WithDescription("Update editable fields (hours, project, category, registro_diario) of a pending or approved activity. Activities already uploaded to Azure cannot be edited."),
+		mcp.WithDescription("Update editable fields (date, hours, project, category, registro_diario) of a pending or approved activity. Activities already uploaded to Azure cannot be edited."),
 		mcp.WithString("id", mcp.Required(), mcp.Description("Activity ID to update")),
+		mcp.WithString("date", mcp.Description("New date YYYY-MM-DD to move the activity to another day")),
 		mcp.WithString("hours", mcp.Description("New hours value, e.g. '2.5'")),
 		mcp.WithString("project", mcp.Description("New project name")),
 		mcp.WithString("category", mcp.Description("New activity category")),
@@ -156,9 +157,20 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 		category := req.GetString("category", "")
 		registroDiario := req.GetString("registro_diario", "")
 
+		date := req.GetString("date", "")
+		if _, perr := time.Parse("2006-01-02", date); date != "" && perr != nil {
+			return errResult(fmt.Errorf("date must be in YYYY-MM-DD format, got %q", date))
+		}
+
 		a, err := st.UpdateActivity(ctx, id, hours, project, category, registroDiario)
 		if err != nil {
 			return errResult(err)
+		}
+		if date != "" && date != a.Date {
+			if err := st.SetActivityDate(ctx, a.ID, date); err != nil {
+				return errResult(err)
+			}
+			a.Date = date
 		}
 		// Empty means "leave unchanged", consistent with project/category/
 		// registro_diario above — this tool doesn't need the REST PATCH's

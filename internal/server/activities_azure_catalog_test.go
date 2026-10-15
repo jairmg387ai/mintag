@@ -612,3 +612,42 @@ func TestPatchActivityExplicitNullClearsReferenceID(t *testing.T) {
 		t.Fatalf("expected reference_id to be cleared to nil, got %#v", *patched.ReferenceID)
 	}
 }
+
+// TestPatchActivityChangesDate verifies the PATCH moves an activity to
+// another day, and that omitting "date" leaves it untouched.
+func TestPatchActivityChangesDate(t *testing.T) {
+	base, _ := newTestServer(t)
+
+	createResp := doJSON(t, http.MethodPost, base+"/api/activities", map[string]any{
+		"date": "2026-07-19", "hours": 1.0, "project": "RNCEA",
+		"category":        "Actividades de arquitectura, diseño y código",
+		"registro_diario": "date via patch",
+		"source":          "manual",
+	})
+	assertStatus(t, createResp, http.StatusCreated)
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	decodeJSON(t, createResp, &created)
+	url := base + "/api/activities/" + strconv.FormatInt(created.ID, 10)
+
+	patchResp := doJSON(t, http.MethodPatch, url, map[string]any{"date": "2026-07-17"})
+	assertStatus(t, patchResp, http.StatusOK)
+	var patched struct {
+		Date string `json:"date"`
+	}
+	decodeJSON(t, patchResp, &patched)
+	if patched.Date != "2026-07-17" {
+		t.Fatalf("expected date=2026-07-17, got %q", patched.Date)
+	}
+
+	hoursResp := doJSON(t, http.MethodPatch, url, map[string]any{"hours": 2.0})
+	assertStatus(t, hoursResp, http.StatusOK)
+	decodeJSON(t, hoursResp, &patched)
+	if patched.Date != "2026-07-17" {
+		t.Fatalf("expected date unchanged at 2026-07-17, got %q", patched.Date)
+	}
+
+	badResp := doJSON(t, http.MethodPatch, url, map[string]any{"date": "17/07/2026"})
+	assertStatus(t, badResp, http.StatusUnprocessableEntity)
+}

@@ -51,6 +51,7 @@ function Field({ label, children, error }: { label: string; children: React.Reac
 
 export function EditActivityModal({ activity, open, onClose, onSaved, catalog, azureActivities }: EditActivityModalProps) {
   const pressedOnOverlay = useRef(false)
+  const [date, setDate] = useState('')
   const [hours, setHours] = useState('')
   const [project, setProject] = useState('')
   const [category, setCategory] = useState('')
@@ -74,6 +75,7 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
 
   useEffect(() => {
     if (open && activity) {
+      setDate(activity.date)
       setHours(String(activity.hours))
       setProject(activity.project)
       setCategory(activity.category)
@@ -110,6 +112,7 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
 
   function validate(): boolean {
     const errs: Record<string, string> = {}
+    if (!date) errs.date = 'La fecha es obligatoria'
     const h = parseFloat(hours)
     if (!hours || isNaN(h) || h <= 0) errs.hours = 'Las horas deben ser mayores que 0'
     if (!project.trim()) errs.project = 'El proyecto es obligatorio'
@@ -125,6 +128,8 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
     setSubmitError('')
     try {
       await updateActivity(activity.id, {
+        // Only sent when changed: moves the activity to another day.
+        ...(date !== activity.date ? { date } : {}),
         hours: parseFloat(hours),
         project: project.trim(),
         category: category.trim(),
@@ -212,17 +217,28 @@ export function EditActivityModal({ activity, open, onClose, onSaved, catalog, a
 
         {/* Body */}
         <div style={{ padding: '20px 22px', overflowY: 'auto', flex: 1 }}>
-          <Field label="Horas *" error={errors.hours}>
-            <input
-              type="number"
-              step="0.25"
-              min="0.25"
-              value={hours}
-              onChange={e => setHours(e.target.value)}
-              placeholder="0.00"
-              style={inputStyle}
-            />
-          </Field>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <Field label="Fecha *" error={errors.date}>
+              <input
+                type="date"
+                aria-label="Fecha *"
+                value={date}
+                onChange={e => setDate(e.target.value)}
+                style={inputStyle}
+              />
+            </Field>
+            <Field label="Horas *" error={errors.hours}>
+              <input
+                type="number"
+                step="0.25"
+                min="0.25"
+                value={hours}
+                onChange={e => setHours(e.target.value)}
+                placeholder="0.00"
+                style={inputStyle}
+              />
+            </Field>
+          </div>
 
           <Field label="Actividad de Azure">
             <AzureActivityCombobox
