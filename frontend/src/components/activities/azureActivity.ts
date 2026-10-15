@@ -40,9 +40,15 @@ export function formatAzureActivityLabel(a: AzureActivity): string {
 // string the user sees (formatAzureActivityLabel), so one comparison covers
 // matching the title, the bare id ("4521"), and the "#4521" display form.
 // Inactive items are defensively excluded even though the server-side
-// catalog list already returns active-only rows.
+// catalog list already returns active-only rows. Work items last seen in a
+// terminal Azure state (Closed/Cerrado, the legacy Done, or Removed) are
+// excluded too: nobody should log new time against them. Unknown state is
+// not terminal.
+const TERMINAL_AZURE_STATES = new Set(['Closed', 'Cerrado', 'Done', 'Removed'])
+
 export function azureActivityMatches(a: AzureActivity, query: string): boolean {
   if (a.is_active === false) return false
+  if (a.last_known_state && TERMINAL_AZURE_STATES.has(a.last_known_state)) return false
   const q = query.trim().toLowerCase()
   if (!q) return true
   return formatAzureActivityLabel(a).toLowerCase().includes(q)
