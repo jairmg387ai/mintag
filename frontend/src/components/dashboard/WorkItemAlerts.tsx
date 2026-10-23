@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Gauge, Hourglass } from 'lucide-react'
+import { Clock, Gauge, Hourglass } from 'lucide-react'
 import { fetchWorkItemEffort, listAzureActivities } from '../../api/client'
 import type { AzureActivity, DailyActivity, WorkItemEffort } from '../../types'
-import { idleWorkItems, openWorkItems, overBudgetWorkItems } from './timeLogKpis'
+import { idleWorkItems, openWorkItems, overBudgetWorkItems, weekHoursByWorkItem } from './timeLogKpis'
 
 interface WorkItemAlertsProps {
   // Activities of the current week, used to spot work items without hours.
@@ -40,6 +40,10 @@ export function WorkItemAlerts({ weekActivities }: WorkItemAlertsProps) {
     return () => { cancelled = true }
   }, [])
 
+  const weekHours = useMemo(
+    () => (catalog ? weekHoursByWorkItem(catalog, weekActivities) : []),
+    [catalog, weekActivities],
+  )
   const idle = useMemo(() => (catalog ? idleWorkItems(catalog, weekActivities) : []), [catalog, weekActivities])
   const overBudget = useMemo(
     () => (catalog && effort ? overBudgetWorkItems(catalog, effort) : []),
@@ -48,6 +52,28 @@ export function WorkItemAlerts({ weekActivities }: WorkItemAlertsProps) {
 
   return (
     <section className="card" style={{ padding: 18, display: 'grid', gap: 18 }}>
+      {!catalogFailed && (
+        <div>
+          <h3 style={{ font: 'var(--text-h3)', margin: '0 0 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Clock size={17} color="var(--indigo-700)" />
+            Horas por work item esta semana
+          </h3>
+          {catalog === null ? null : weekHours.length === 0 ? (
+            <div style={muted}>Sin horas registradas esta semana.</div>
+          ) : (
+            <ul aria-label="Horas por work item esta semana" style={listStyle}>
+              {weekHours.map(r => (
+                <li key={r.workItemId ?? 'none'} style={rowStyle}>
+                  {r.workItemId != null && <span style={idStyle}>#{r.workItemId}</span>}
+                  <span style={labelStyle} title={r.label}>{r.label}</span>
+                  <span style={{ color: 'var(--fg1)', fontWeight: 600, whiteSpace: 'nowrap' }}>{r.hours.toFixed(1)}h</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
       <div>
         <h3 style={{ font: 'var(--text-h3)', margin: '0 0 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
           <Hourglass size={17} color="var(--amber-700)" />
