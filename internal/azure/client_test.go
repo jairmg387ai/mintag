@@ -221,6 +221,51 @@ func TestPostTimeEntry_NonTwoXXSanitizesResponseBody(t *testing.T) {
 	}
 }
 
+func TestPostTimeEntry_FrontDoorBlockReportsBlockedRequest(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`<!DOCTYPE html><html><body><div id='message'><h2>The request is blocked.</h2></div><div id='footer'>Ref A: 3810A6A694394105B139881282AFAE7E Ref B: SN4AA2022402027 Ref C: 2026-10-23T20:57:45Z</div></body></html>`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	cfg := Config{Token: "x", AuthMode: AuthModeBasic, Org: "ORG", WorkItemID: 1, User: "U", UserID: "uid", EntryType: "T"}
+	c := &Client{
+		cfg:  cfg,
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+
+	_, err := c.PostTimeEntry(context.Background(), TimeEntry{Date: "2026-06-12", Hours: 1, RegistroDiario: "x"})
+	if err == nil {
+		t.Fatal("expected error for Front Door 403 response")
+	}
+	for _, want := range []string{"unexpected status 403", "blocked by Azure Front Door", "retry in a few minutes", "Ref A: 3810A6A694394105B139881282AFAE7E"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected error to contain %q, got: %v", want, err)
+		}
+	}
+}
+
+func TestPostTimeEntry_PlainHTML403KeepsBareStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`<html><body>Access denied</body></html>`)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	cfg := Config{Token: "x", AuthMode: AuthModeBasic, Org: "ORG", WorkItemID: 1, User: "U", UserID: "uid", EntryType: "T"}
+	c := &Client{
+		cfg:  cfg,
+		http: &http.Client{Transport: redirectToServer(srv.URL)},
+	}
+
+	_, err := c.PostTimeEntry(context.Background(), TimeEntry{Date: "2026-06-12", Hours: 1, RegistroDiario: "x"})
+	if err == nil || err.Error() != "azure: unexpected status 403" {
+		t.Errorf("expected bare status error for non-Front-Door HTML, got: %v", err)
+	}
+}
+
 func TestPostTimeEntry_TwoXXWithIDReturnsID(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

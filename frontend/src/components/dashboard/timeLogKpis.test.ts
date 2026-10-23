@@ -13,6 +13,7 @@ import {
   periodRange,
   sumHours,
   toYMD,
+  weekHoursByWorkItem,
 } from './timeLogKpis'
 
 function act(date: string, hours: number, extra: Partial<DailyActivity> = {}): DailyActivity {
@@ -199,6 +200,46 @@ describe('idleWorkItems', () => {
       act('2026-10-06', 1, { azure_activity_id: 5 }),
     ]
     expect(idleWorkItems(catalog, week).map(w => w.work_item_id)).toEqual([102])
+  })
+})
+
+describe('weekHoursByWorkItem', () => {
+  it('sums hours per work item across sibling catalog rows, sorted by hours desc', () => {
+    const catalog = [
+      wi(1, 101),
+      wi(2, 101), // sibling row of 101
+      wi(3, 102),
+      wi(4, 103, { last_known_state: 'Closed' }), // closed items still count their logged hours
+      wi(5, 104), // no hours: not listed
+    ]
+    const week = [
+      act('2026-10-05', 2, { azure_activity_id: 1 }),
+      act('2026-10-06', 1.5, { azure_activity_id: 2 }),
+      act('2026-10-06', 1, { azure_activity_id: 3 }),
+      act('2026-10-07', 6, { azure_activity_id: 4 }),
+    ]
+    expect(weekHoursByWorkItem(catalog, week)).toEqual([
+      { workItemId: 103, label: 'WI 103', hours: 6 },
+      { workItemId: 101, label: 'WI 101', hours: 3.5 },
+      { workItemId: 102, label: 'WI 102', hours: 1 },
+    ])
+  })
+
+  it('groups unlinked or unknown-row hours under a single unassigned entry', () => {
+    const catalog = [wi(1, 101)]
+    const week = [
+      act('2026-10-05', 2, { azure_activity_id: 1 }),
+      act('2026-10-05', 1, {}),
+      act('2026-10-06', 0.5, { azure_activity_id: 99 }), // row not in catalog
+    ]
+    expect(weekHoursByWorkItem(catalog, week)).toEqual([
+      { workItemId: 101, label: 'WI 101', hours: 2 },
+      { workItemId: null, label: '(sin work item)', hours: 1.5 },
+    ])
+  })
+
+  it('returns an empty list for a week without hours', () => {
+    expect(weekHoursByWorkItem([wi(1, 101)], [])).toEqual([])
   })
 })
 
