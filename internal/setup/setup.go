@@ -10,7 +10,9 @@ import (
 )
 
 // Run configures the Mintag MCP server for the given agent.
-// agent must be "claude", "opencode", or "gemini".
+// agent must be one of SupportedAgents ("claude", "opencode", "gemini",
+// "gentle-shell", "antigravity"); "agy" is accepted as an alias for
+// "antigravity".
 // homeDir is the user's home directory.
 // execPath is the absolute path to the mintag binary.
 func Run(agent, homeDir, execPath string) error {
@@ -21,8 +23,12 @@ func Run(agent, homeDir, execPath string) error {
 		return setupOpenCode(homeDir, execPath)
 	case "gemini":
 		return setupGemini(homeDir, execPath)
+	case "gentle-shell":
+		return setupGentleShell(homeDir, execPath)
+	case "antigravity", "agy":
+		return setupAntigravity(homeDir, execPath)
 	default:
-		return fmt.Errorf("unknown agent %q — supported: claude, opencode, gemini", agent)
+		return fmt.Errorf("unknown agent %q — supported: %s (alias: agy = antigravity)", agent, SupportedAgentsList())
 	}
 }
 
@@ -170,6 +176,59 @@ func setupGemini(homeDir, execPath string) error {
 	return nil
 }
 
+// setupGentleShell injects the mintag MCP entry into ~/.gentle-shell/agent/mcp.json.
+func setupGentleShell(homeDir, execPath string) error {
+	return mergeMCPServerEntry(filepath.Join(homeDir, ".gentle-shell", "agent", "mcp.json"), execPath)
+}
+
+// setupAntigravity injects the mintag MCP entry into ~/.gemini/config/mcp_config.json,
+// the MCP config file read by the Antigravity IDE.
+func setupAntigravity(homeDir, execPath string) error {
+	return mergeMCPServerEntry(filepath.Join(homeDir, ".gemini", "config", "mcp_config.json"), execPath)
+}
+
+// mergeMCPServerEntry sets mcpServers.mintag = {command, args:["mcp"]} in the
+// JSON file at cfgPath, creating the file and its parent dirs when missing.
+// Every other key and server is preserved. An existing file that is not valid
+// JSON is left untouched and an error is returned.
+func mergeMCPServerEntry(cfgPath, execPath string) error {
+	name := filepath.Base(cfgPath)
+	cfg := map[string]any{}
+	data, err := os.ReadFile(cfgPath)
+	switch {
+	case err == nil:
+		if len(data) > 0 {
+			if err := json.Unmarshal(data, &cfg); err != nil {
+				return fmt.Errorf("parse %s: %w", name, err)
+			}
+			if cfg == nil {
+				cfg = map[string]any{}
+			}
+		}
+	case !errors.Is(err, os.ErrNotExist):
+		return fmt.Errorf("read %s: %w", name, err)
+	}
+
+	servers, _ := cfg["mcpServers"].(map[string]any)
+	if servers == nil {
+		servers = map[string]any{}
+		cfg["mcpServers"] = servers
+	}
+	servers["mintag"] = map[string]any{
+		"command": execPath,
+		"args":    []string{"mcp"},
+	}
+
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+		return fmt.Errorf("create %s: %w", filepath.Dir(cfgPath), err)
+	}
+	if err := writeJSON(cfgPath, cfg); err != nil {
+		return fmt.Errorf("write %s: %w", name, err)
+	}
+	fmt.Printf("  patched %s\n", cfgPath)
+	return nil
+}
+
 // --- helpers ---
 
 func writeJSON(path string, v any) error {
@@ -233,7 +292,7 @@ exposes | consumes | uses_client | implemented_by | implements | belongs_to | re
 `
 
 // SupportedAgents lists valid agent names for display in help text.
-var SupportedAgents = []string{"claude", "opencode", "gemini"}
+var SupportedAgents = []string{"claude", "opencode", "gemini", "gentle-shell", "antigravity"}
 
 // SupportedAgentsList returns a comma-joined string of supported agents.
 func SupportedAgentsList() string {
