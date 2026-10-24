@@ -133,6 +133,16 @@ mintag.exe skills install mintag-table-search --targets gentle-shell,agy
 
 Without `--targets`, skills install for Claude, Gemini, and OpenCode; Gentle Shell and Antigravity are installed only when named.
 
+### Keeping installed skills current
+
+```bash
+# Preview, then apply
+mintag.exe sync --dry-run
+mintag.exe sync
+```
+
+`mintag sync` updates installed Mintag skills to the bundled version and removes retired ones (`mintag-graph` was replaced by `mintag`). It only changes a skill directory Mintag can prove it installed — recorded in `~/.mintag/skills-manifest.json` by `skills install`, or identical (ignoring line endings) to a version Mintag shipped. Copies you edited, symlinks, and skills Mintag never shipped are reported and left untouched; skills that are not installed are not added.
+
 Current target directories:
 
 | Target | Destination |

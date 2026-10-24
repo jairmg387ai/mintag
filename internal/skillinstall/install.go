@@ -31,10 +31,13 @@ const (
 // Antigravity are opt-in so existing installs never create their dirs.
 var allTargets = []Target{TargetClaude, TargetGemini, TargetOpenCode}
 
+// knownTargets is every supported target; Sync scans all of them by default
+// because it only touches skill dirs that already exist.
+var knownTargets = []Target{TargetClaude, TargetGemini, TargetOpenCode, TargetGentleShell, TargetAntigravity}
+
 var skillDirs = map[string]string{
 	"mintag":              "bundled/skills/mintag",
 	"activity-autolog":    "bundled/skills/activity-autolog",
-	"mintag-graph":        "bundled/skills/mintag-graph",
 	"mintag-table-search": "bundled/skills/mintag-table-search",
 	"vtt-task-extractor":  "bundled/skills/vtt-task-extractor",
 }
@@ -74,6 +77,9 @@ func Install(skillNames []string, targets []Target, homeDir string, force bool) 
 	for _, skillName := range skillNames {
 		sourceDir, ok := skillDirs[skillName]
 		if !ok {
+			if replacement, retired := retiredSkills[skillName]; retired {
+				return nil, fmt.Errorf("skill %q was retired; install %q instead (run `mintag sync` to remove old copies)", skillName, replacement)
+			}
 			return nil, fmt.Errorf("unknown skill %q", skillName)
 		}
 		sourceDirs[skillName] = sourceDir
@@ -106,6 +112,9 @@ func Install(skillNames []string, targets []Target, homeDir string, force bool) 
 		}
 	}
 
+	if err := recordInstalls(homeDir, results); err != nil {
+		return results, fmt.Errorf("skills installed but manifest update failed: %w", err)
+	}
 	return results, nil
 }
 

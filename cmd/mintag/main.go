@@ -35,6 +35,8 @@ func main() {
 		runSkills(os.Args[2:])
 	case "setup":
 		runSetup(os.Args[2:])
+	case "sync":
+		runSync(os.Args[2:])
 	case "version", "--version", "-v":
 		fmt.Println("mintag " + version)
 	default:
@@ -135,6 +137,47 @@ Examples:
 	fmt.Println(skillinstall.FormatResults(results))
 }
 
+func runSync(args []string) {
+	fs := flag.NewFlagSet("sync", flag.ExitOnError)
+	targetsArg := fs.String("targets", "claude,gemini,opencode,gentle-shell,antigravity", "comma-separated targets to sync (alias agy = antigravity)")
+	dryRun := fs.Bool("dry-run", false, "show what would change without writing anything")
+	fs.Usage = func() {
+		fmt.Fprint(os.Stderr, `Usage:
+	  mintag sync [--targets claude,gemini,opencode,gentle-shell,antigravity] [--dry-run]
+
+Updates installed Mintag skills to the bundled version and removes retired
+skills (e.g. mintag-graph, replaced by mintag). Only copies Mintag can prove
+it installed are changed; skills you edited or never got from Mintag are
+reported and left untouched. Skills that are not installed are not added.
+
+Examples:
+	  mintag sync --dry-run
+	  mintag sync
+	  mintag sync --targets claude,agy
+`)
+	}
+	if err := fs.Parse(args); err != nil {
+		log.Fatalf("sync parse error: %v", err)
+	}
+	if fs.NArg() > 0 {
+		fs.Usage()
+		os.Exit(1)
+	}
+
+	targets, err := skillinstall.ParseTargets(*targetsArg)
+	if err != nil {
+		log.Fatalf("invalid targets: %v", err)
+	}
+
+	actions, err := skillinstall.Sync(targets, userHome(), *dryRun)
+	if out := skillinstall.FormatSyncActions(actions, *dryRun); err == nil || len(actions) > 0 {
+		fmt.Println(out)
+	}
+	if err != nil {
+		log.Fatalf("sync error: %v", err)
+	}
+}
+
 func runSetup(args []string) {
 	if len(args) == 0 {
 		setupUsage()
@@ -180,6 +223,7 @@ Commands:
   mintag mcp      Start MCP stdio server for Claude integration
   mintag skills   List or install bundled AI skills
   mintag setup    Configure MCP integration for an AI agent (claude, opencode, gemini, gentle-shell, antigravity)
+  mintag sync     Update installed Mintag skills and remove retired ones (--dry-run to preview)
   mintag version  Print the mintag version
 
 Environment:

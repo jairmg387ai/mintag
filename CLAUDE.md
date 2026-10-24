@@ -35,7 +35,10 @@ mintag.exe setup
 
 # Install bundled skills into an agent's skills dir
 mintag.exe skills list
-mintag.exe skills install <skill> [--targets claude,gemini,opencode] [--force]
+mintag.exe skills install <skill> [--targets claude,gemini,opencode,gentle-shell,antigravity] [--force]
+
+# Update installed skills / remove retired ones (only Mintag-owned copies)
+mintag.exe sync [--dry-run] [--targets ...]
 
 # Run tests
 go test ./...
@@ -112,7 +115,7 @@ cmd/mintag/main.go
     ├── internal/server        REST API via chi v5
     ├── internal/web           Embedded dark SPA (go:embed static/)
     ├── internal/setup         `mintag setup` guided config wizard
-    └── internal/skillinstall  `mintag skills` installer (copies bundled skills to ~/.claude, ~/.gemini, ~/.config/opencode)
+    └── internal/skillinstall  `mintag skills` installer + `mintag sync` (manifest-owned updates/removals; regenerate shipped_digests.go when a bundled skill changes)
 ```
 
 ### Store (`internal/store`)

@@ -27,7 +27,7 @@ Use this skill when the user asks where a database table is used: which repos, s
 | "Does repo R use table X?" | `table_search` with `query=X`, `repo=R` |
 | Name is ambiguous (several tables match) | List the matching tables and ask which one, or answer for each |
 | No tables found | Say the table is not in the imported inventory; offer a code search |
-| Need what depends on a repo found here | Use the `mintag-graph` skill (`graph_impact`) on that repo |
+| Need what depends on a repo found here | Use the `mintag` skill (`graph_impact`) on that repo |
 
 ## Execution Steps
 
