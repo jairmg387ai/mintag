@@ -88,3 +88,56 @@ func TestInstall_RequiresForceWhenDestinationExists(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestParseTargets_AcceptsGentleShellAndAntigravity(t *testing.T) {
+	targets, err := ParseTargets("gentle-shell,antigravity,agy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 2 || targets[0] != TargetGentleShell || targets[1] != TargetAntigravity {
+		t.Fatalf("expected [gentle-shell antigravity] with agy deduplicated, got %v", targets)
+	}
+}
+
+func TestParseTargets_DefaultTargetsUnchanged(t *testing.T) {
+	targets, err := ParseTargets("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Target{TargetClaude, TargetGemini, TargetOpenCode}
+	if len(targets) != len(want) {
+		t.Fatalf("expected default targets %v, got %v", want, targets)
+	}
+	for i := range want {
+		if targets[i] != want[i] {
+			t.Fatalf("expected default targets %v, got %v", want, targets)
+		}
+	}
+}
+
+func TestInstall_TableSearchSkillForNewTargets(t *testing.T) {
+	homeDir := t.TempDir()
+	results, err := Install([]string{"mintag-table-search"}, []Target{TargetGentleShell, TargetAntigravity}, homeDir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDirs := []string{
+		filepath.Join(homeDir, ".gentle-shell", "agent", "skills", "mintag-table-search"),
+		filepath.Join(homeDir, ".gemini", "config", "skills", "mintag-table-search"),
+	}
+	if len(results) != len(wantDirs) {
+		t.Fatalf("expected %d results, got %d", len(wantDirs), len(results))
+	}
+	for i, dir := range wantDirs {
+		if results[i].Destination != dir {
+			t.Fatalf("result %d: expected destination %s, got %s", i, dir, results[i].Destination)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), "table_search") {
+			t.Fatalf("installed skill at %s does not reference the table_search tool", dir)
+		}
+	}
+}

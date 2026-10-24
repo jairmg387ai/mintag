@@ -21,14 +21,21 @@ const (
 	TargetClaude   Target = "claude"
 	TargetGemini   Target = "gemini"
 	TargetOpenCode Target = "opencode"
+	// TargetGentleShell installs into Gentle Shell's isolated Pi agent home.
+	TargetGentleShell Target = "gentle-shell"
+	// TargetAntigravity installs into Antigravity's config dir; "agy" is an alias.
+	TargetAntigravity Target = "antigravity"
 )
 
+// allTargets is the default when --targets is omitted. Gentle Shell and
+// Antigravity are opt-in so existing installs never create their dirs.
 var allTargets = []Target{TargetClaude, TargetGemini, TargetOpenCode}
 
 var skillDirs = map[string]string{
-	"activity-autolog":   "bundled/skills/activity-autolog",
-	"mintag-graph":       "bundled/skills/mintag-graph",
-	"vtt-task-extractor": "bundled/skills/vtt-task-extractor",
+	"activity-autolog":    "bundled/skills/activity-autolog",
+	"mintag-graph":        "bundled/skills/mintag-graph",
+	"mintag-table-search": "bundled/skills/mintag-table-search",
+	"vtt-task-extractor":  "bundled/skills/vtt-task-extractor",
 }
 
 type Result struct {
@@ -112,8 +119,11 @@ func ParseTargets(raw string) ([]Target, error) {
 	targets := make([]Target, 0, len(parts))
 	for _, part := range parts {
 		target := Target(strings.ToLower(strings.TrimSpace(part)))
+		if target == "agy" {
+			target = TargetAntigravity
+		}
 		switch target {
-		case TargetClaude, TargetGemini, TargetOpenCode:
+		case TargetClaude, TargetGemini, TargetOpenCode, TargetGentleShell, TargetAntigravity:
 			if !seen[target] {
 				seen[target] = true
 				targets = append(targets, target)
@@ -138,6 +148,10 @@ func targetDir(homeDir string, target Target) (string, error) {
 		return filepath.Join(homeDir, ".gemini", "skills"), nil
 	case TargetOpenCode:
 		return filepath.Join(homeDir, ".config", "opencode", "skills"), nil
+	case TargetGentleShell:
+		return filepath.Join(homeDir, ".gentle-shell", "agent", "skills"), nil
+	case TargetAntigravity:
+		return filepath.Join(homeDir, ".gemini", "config", "skills"), nil
 	default:
 		return "", fmt.Errorf("unsupported target %q", target)
 	}

@@ -98,16 +98,17 @@ func runSkills(args []string) {
 
 func installSkills(args []string) {
 	fs := flag.NewFlagSet("skills install", flag.ExitOnError)
-	targetsArg := fs.String("targets", "claude,gemini,opencode", "comma-separated targets: claude,gemini,opencode")
+	targetsArg := fs.String("targets", "claude,gemini,opencode", "comma-separated targets: claude,gemini,opencode,gentle-shell,antigravity (alias agy)")
 	force := fs.Bool("force", false, "overwrite an existing installed skill")
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, `Usage:
-	  mintag skills install <skill> [<skill> ...] [--targets claude,gemini,opencode] [--force]
+	  mintag skills install <skill> [<skill> ...] [--targets claude,gemini,opencode,gentle-shell,antigravity] [--force]
 
 Examples:
 	  mintag skills install vtt-task-extractor
 	  mintag skills install vtt-task-extractor --targets claude,opencode
 	  mintag skills install vtt-task-extractor --targets gemini --force
+	  mintag skills install mintag-table-search --targets gentle-shell,agy
 `)
 	}
 	if err := fs.Parse(args); err != nil {
@@ -165,6 +166,8 @@ Examples:
   mintag setup claude
   mintag setup opencode
   mintag setup gemini
+  mintag setup gentle-shell
+  mintag setup antigravity   (alias: mintag setup agy)
 `, setup.SupportedAgentsList())
 	os.Exit(1)
 }
@@ -176,7 +179,7 @@ Commands:
   mintag serve    Start the web portal (default port 7430)
   mintag mcp      Start MCP stdio server for Claude integration
   mintag skills   List or install bundled AI skills
-  mintag setup    Configure MCP integration for an AI agent (claude, opencode, gemini)
+  mintag setup    Configure MCP integration for an AI agent (claude, opencode, gemini, gentle-shell, antigravity)
   mintag version  Print the mintag version
 
 Environment:
@@ -192,7 +195,7 @@ func skillsUsage() {
 
 Commands:
   mintag skills list
-  mintag skills install <skill> [<skill> ...] [--targets claude,gemini,opencode] [--force]
+  mintag skills install <skill> [<skill> ...] [--targets claude,gemini,opencode,gentle-shell,antigravity] [--force]
 `)
 	os.Exit(1)
 }
