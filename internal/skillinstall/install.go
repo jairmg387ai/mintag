@@ -32,6 +32,7 @@ const (
 var allTargets = []Target{TargetClaude, TargetGemini, TargetOpenCode}
 
 var skillDirs = map[string]string{
+	"mintag":              "bundled/skills/mintag",
 	"activity-autolog":    "bundled/skills/activity-autolog",
 	"mintag-graph":        "bundled/skills/mintag-graph",
 	"mintag-table-search": "bundled/skills/mintag-table-search",

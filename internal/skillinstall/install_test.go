@@ -141,3 +141,19 @@ func TestInstall_TableSearchSkillForNewTargets(t *testing.T) {
 		}
 	}
 }
+
+func TestInstall_GeneralMintagSkillRoutesToSpecificTools(t *testing.T) {
+	homeDir := t.TempDir()
+	if _, err := Install([]string{"mintag"}, []Target{TargetClaude}, homeDir, false); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(homeDir, ".claude", "skills", "mintag", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"name: mintag\n", "table_search", "implemented_in", "graph_impact", "task_search"} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("general mintag skill is missing %q", want)
+		}
+	}
+}
