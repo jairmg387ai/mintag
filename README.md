@@ -94,7 +94,14 @@ mintag.exe skills list
 
 # Install a bundled skill for Claude, Gemini, and OpenCode
 mintag.exe skills install vtt-task-extractor
+
+# Configure the Mintag MCP server for an agent
+# (claude, opencode, gemini, gentle-shell, antigravity — alias agy)
+mintag.exe setup gentle-shell
+mintag.exe setup agy
 ```
+
+`mintag setup gentle-shell` merges a `mintag` entry into `~/.gentle-shell/agent/mcp.json`; `mintag setup antigravity` (or `agy`) merges it into `~/.gemini/config/mcp_config.json`. Other configured servers are preserved.
 
 ### Environment variables
 
@@ -119,7 +126,22 @@ mintag.exe skills install vtt-task-extractor --targets claude,opencode
 
 # Overwrite an existing installation
 mintag.exe skills install vtt-task-extractor --force
+
+# Table lookup skill for Gentle Shell and Antigravity (opt-in targets)
+mintag.exe skills install mintag-table-search --targets gentle-shell,agy
 ```
+
+Without `--targets`, skills install for Claude, Gemini, and OpenCode; Gentle Shell and Antigravity are installed only when named.
+
+### Keeping installed skills current
+
+```bash
+# Preview, then apply
+mintag.exe sync --dry-run
+mintag.exe sync
+```
+
+`mintag sync` updates installed Mintag skills to the bundled version and removes retired ones (`mintag-graph` was replaced by `mintag`). It only changes a skill directory Mintag can prove it installed — recorded in `~/.mintag/skills-manifest.json` by `skills install`, or identical (ignoring line endings) to a version Mintag shipped. Copies you edited, symlinks, and skills Mintag never shipped are reported and left untouched; skills that are not installed are not added.
 
 Current target directories:
 
@@ -128,6 +150,8 @@ Current target directories:
 | Claude | `~/.claude/skills/<skill-name>` |
 | Gemini | `~/.gemini/skills/<skill-name>` |
 | OpenCode | `~/.config/opencode/skills/<skill-name>` |
+| Gentle Shell (`gentle-shell`) | `~/.gentle-shell/agent/skills/<skill-name>` |
+| Antigravity (`antigravity`, alias `agy`) | `~/.gemini/config/skills/<skill-name>` |
 
 ---
 
@@ -213,6 +237,7 @@ Restart Claude Code after editing the settings file.
 | `graph_impact` | Blast-radius analysis — every node that transitively depends on the given node |
 | `graph_upsert_node` | Create or update an architectural node |
 | `graph_upsert_edge` | Create or update a typed edge between two nodes |
+| `table_search` | Which repos/files read or write a database table (case-insensitive substring on `SCHEMA.TABLE`, with line-level evidence). Covers only table usage already imported as `uses_table` edges |
 
 ### Deployment Window tools
 
@@ -348,7 +373,7 @@ internal/
   server/            HTTP REST API (chi v5)
   web/static/        Embedded dark SPA (go:embed)
   setup/             `mintag setup` guided config wizard
-  skillinstall/      Skill installer (Claude / Gemini / OpenCode targets)
+  skillinstall/      Skill installer (Claude / Gemini / OpenCode / Gentle Shell / Antigravity targets)
 frontend/            Vite + React 18 + TypeScript + Tailwind v4 source
 ```
 

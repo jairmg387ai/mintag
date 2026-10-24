@@ -35,6 +35,8 @@ func main() {
 		runSkills(os.Args[2:])
 	case "setup":
 		runSetup(os.Args[2:])
+	case "sync":
+		runSync(os.Args[2:])
 	case "version", "--version", "-v":
 		fmt.Println("mintag " + version)
 	default:
@@ -98,16 +100,17 @@ func runSkills(args []string) {
 
 func installSkills(args []string) {
 	fs := flag.NewFlagSet("skills install", flag.ExitOnError)
-	targetsArg := fs.String("targets", "claude,gemini,opencode", "comma-separated targets: claude,gemini,opencode")
+	targetsArg := fs.String("targets", "claude,gemini,opencode", "comma-separated targets: claude,gemini,opencode,gentle-shell,antigravity (alias agy)")
 	force := fs.Bool("force", false, "overwrite an existing installed skill")
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, `Usage:
-	  mintag skills install <skill> [<skill> ...] [--targets claude,gemini,opencode] [--force]
+	  mintag skills install <skill> [<skill> ...] [--targets claude,gemini,opencode,gentle-shell,antigravity] [--force]
 
 Examples:
 	  mintag skills install vtt-task-extractor
 	  mintag skills install vtt-task-extractor --targets claude,opencode
 	  mintag skills install vtt-task-extractor --targets gemini --force
+	  mintag skills install mintag-table-search --targets gentle-shell,agy
 `)
 	}
 	if err := fs.Parse(args); err != nil {
@@ -132,6 +135,47 @@ Examples:
 	}
 
 	fmt.Println(skillinstall.FormatResults(results))
+}
+
+func runSync(args []string) {
+	fs := flag.NewFlagSet("sync", flag.ExitOnError)
+	targetsArg := fs.String("targets", "claude,gemini,opencode,gentle-shell,antigravity", "comma-separated targets to sync (alias agy = antigravity)")
+	dryRun := fs.Bool("dry-run", false, "show what would change without writing anything")
+	fs.Usage = func() {
+		fmt.Fprint(os.Stderr, `Usage:
+	  mintag sync [--targets claude,gemini,opencode,gentle-shell,antigravity] [--dry-run]
+
+Updates installed Mintag skills to the bundled version and removes retired
+skills (e.g. mintag-graph, replaced by mintag). Only copies Mintag can prove
+it installed are changed; skills you edited or never got from Mintag are
+reported and left untouched. Skills that are not installed are not added.
+
+Examples:
+	  mintag sync --dry-run
+	  mintag sync
+	  mintag sync --targets claude,agy
+`)
+	}
+	if err := fs.Parse(args); err != nil {
+		log.Fatalf("sync parse error: %v", err)
+	}
+	if fs.NArg() > 0 {
+		fs.Usage()
+		os.Exit(1)
+	}
+
+	targets, err := skillinstall.ParseTargets(*targetsArg)
+	if err != nil {
+		log.Fatalf("invalid targets: %v", err)
+	}
+
+	actions, err := skillinstall.Sync(targets, userHome(), *dryRun)
+	if out := skillinstall.FormatSyncActions(actions, *dryRun); err == nil || len(actions) > 0 {
+		fmt.Println(out)
+	}
+	if err != nil {
+		log.Fatalf("sync error: %v", err)
+	}
 }
 
 func runSetup(args []string) {
@@ -165,6 +209,8 @@ Examples:
   mintag setup claude
   mintag setup opencode
   mintag setup gemini
+  mintag setup gentle-shell
+  mintag setup antigravity   (alias: mintag setup agy)
 `, setup.SupportedAgentsList())
 	os.Exit(1)
 }
@@ -176,7 +222,8 @@ Commands:
   mintag serve    Start the web portal (default port 7430)
   mintag mcp      Start MCP stdio server for Claude integration
   mintag skills   List or install bundled AI skills
-  mintag setup    Configure MCP integration for an AI agent (claude, opencode, gemini)
+  mintag setup    Configure MCP integration for an AI agent (claude, opencode, gemini, gentle-shell, antigravity)
+  mintag sync     Update installed Mintag skills and remove retired ones (--dry-run to preview)
   mintag version  Print the mintag version
 
 Environment:
@@ -192,7 +239,7 @@ func skillsUsage() {
 
 Commands:
   mintag skills list
-  mintag skills install <skill> [<skill> ...] [--targets claude,gemini,opencode] [--force]
+  mintag skills install <skill> [<skill> ...] [--targets claude,gemini,opencode,gentle-shell,antigravity] [--force]
 `)
 	os.Exit(1)
 }

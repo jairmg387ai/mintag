@@ -123,6 +123,42 @@ export interface GraphStatsResponse {
   namespaces: string[]
 }
 
+export interface TableEvidence {
+  path: string
+  line: number
+  type: string
+  text: string
+}
+
+export interface TableUsageFile {
+  path: string
+  evidence: TableEvidence[]
+}
+
+export interface TableUsageRepo {
+  repo: string
+  files: TableUsageFile[]
+}
+
+export interface TableUsage {
+  namespace: string
+  key: string
+  label: string
+  file_count: number
+  repo_count: number
+  files_truncated: boolean
+  repos: TableUsageRepo[]
+}
+
+export interface TableUsageResult {
+  query: string
+  namespace?: string
+  repo?: string
+  tables: TableUsage[]
+  truncated?: boolean
+  tables_truncated?: boolean
+}
+
 export interface GraphNodeDetail {
   node: GraphNode
   relations: Record<string, GraphNeighbor[]>

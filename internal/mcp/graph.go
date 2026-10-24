@@ -280,6 +280,24 @@ func registerGraphTools(s *mcpserver.MCPServer, st *store.Store) {
 		return jsonResult(map[string]any{"action": action}, nil)
 	})
 
+	// --- table_search ---
+	s.AddTool(mcp.NewTool("table_search",
+		mcp.WithDescription("Answer 'which repos/files read or write database table X?'. Case-insensitive literal substring match on table node keys (e.g. 'RUNTPROD.PA_DEPARTAME' or 'PA_DEPARTAME'; exact matches rank first), returning per table its repos, files and code evidence (path, line, type: jpa_table | sql_from | sql_join | sql_into | sql_update, text) plus total file/repo counts. Only covers table usage previously imported into the knowledge graph (table, source_file and repo nodes linked by uses_table/in_repo edges); an empty result means no imported usage, not that the table is unused."),
+		mcp.WithString("query", mcp.Required(), mcp.Description("Table name or fragment, e.g. 'PA_DEPARTAME' or 'RUNTPROD.PA_DEPARTAME'")),
+		mcp.WithString("namespace", mcp.Description("Graph namespace, e.g. 'runt2' (auto-detected when only one exists; omit to search all)")),
+		mcp.WithString("repo", mcp.Description("Only list usages in this repo key (exact), e.g. 'BlockChain/BCAdministracionMS'")),
+		mcp.WithString("limit", mcp.Description("Max tables, default 20, max 100")),
+		mcp.WithString("max_files", mcp.Description("Max files listed per table, default 50, max 200 (counts always cover every usage)")),
+	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		q, err := req.RequireString("query")
+		if err != nil {
+			return errResult(err)
+		}
+		res, err := st.SearchTableUsage(resolveNS(req), q, req.GetString("repo", ""),
+			req.GetInt("limit", 20), req.GetInt("max_files", 50))
+		return jsonResult(res, err)
+	})
+
 	// --- graph_stats ---
 	s.AddTool(mcp.NewTool("graph_stats",
 		mcp.WithDescription("Knowledge graph overview: node counts by kind and edge counts by relation. Call this first to discover what the graph contains."),
