@@ -74,9 +74,9 @@ make frontend-install
 make build
 ```
 
-This produces `mintag.exe` in the project root. The frontend is compiled to `internal/web/static/` and embedded directly into the binary via `go:embed`.
+This produces `mintag.exe` in the project root. The frontend is compiled to `internal/web/static/app/` (gitignored) and embedded directly into the binary via `go:embed`. Release binaries are built by CI, which runs the frontend build first.
 
-> If you only need the binary and don't care about modifying the UI, you can skip `make frontend-install` and `make frontend-build` — the pre-built static files are already committed.
+> The built frontend is not committed. A plain `go build ./cmd/mintag` still works (MCP, API, CLI), but the web portal shows a "UI is not built" page until you run `make frontend-install` once and then `make build`.
 
 ---
 
@@ -149,9 +149,9 @@ Open `http://localhost:5173` for live-reload during UI development.
 
 | Target | Description |
 |--------|-------------|
-| `make build` | Full production build: frontend → `internal/web/static/`, then `go build` |
+| `make build` | Full production build: frontend → `internal/web/static/app/`, then `go build` |
 | `make frontend-install` | `npm install` inside `frontend/` |
-| `make frontend-build` | Vite build only (emits to `internal/web/static/`) |
+| `make frontend-build` | Vite build only (emits to `internal/web/static/app/`) |
 | `make dev-api` | `go run ./cmd/mintag serve` |
 | `make dev-web` | `npm run dev` inside `frontend/` |
 

@@ -29,6 +29,8 @@ Thumbs.db
 # Frontend
 frontend/node_modules/
 frontend/dist/
+# Built SPA embedded by internal/web (make frontend-build; release CI builds it)
+internal/web/static/app/
 
 # Root-level node artifacts (accidental npm installs at project root)
 node_modules/
