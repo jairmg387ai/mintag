@@ -15,7 +15,7 @@ make build
 # Install frontend deps (first time only)
 make frontend-install
 
-# Build frontend only (outputs to internal/web/static/)
+# Build frontend only (outputs to internal/web/static/app/, gitignored)
 make frontend-build
 
 # Dev: run Go API server on :7430
@@ -52,9 +52,9 @@ go mod tidy
 
 There is no `make lint` / `make test` / `make clean` target — the Makefile only wraps the build/dev commands above. Frontend lint is `npm run lint` (run from `frontend/`) using the flat ESLint config at `frontend/eslint.config.js`. There is no Go lint config (`.golangci.yml`) in the repo — `go vet` / `gofmt` are the baseline.
 
-`go test ./...` does **not** cover `internal/mcp`, `internal/setup`, or `internal/web` — none of those packages have test files. Everything else under `internal/` does.
+`go test ./...` covers every package under `internal/` except `internal/setup`, which has no test files.
 
-Requires Go 1.23+ and, only if you're modifying the UI, Node 18+. `internal/web/static/` (the built frontend) is committed, so a fresh clone builds the Go binary without ever touching `frontend/`. SQLite access is pure Go (`modernc.org/sqlite`) — no CGo.
+Requires Go 1.23+ and, only if you're modifying the UI, Node 18+. The built frontend (`internal/web/static/app/`) is **not** committed: release CI builds it via the GoReleaser `before` hooks (`make frontend-install`, `make frontend-build`). A fresh clone still compiles and tests with Go alone (`internal/web/static/.gitkeep` keeps `//go:embed all:static` valid), but the web portal then serves a "UI is not built" page until you run `make frontend-install` once and then `make build` (frontend build + Go build). SQLite access is pure Go (`modernc.org/sqlite`) — no CGo.
 
 Environment variables:
 - `MINTAG_DB` — path to SQLite database (default: `~/.mintag/mintag.db`)
@@ -90,8 +90,8 @@ This summary is release documentation for humans, not a generated code artifact 
 
 Located in `frontend/`. Built with Vite + React 19 + TypeScript + Tailwind v4.
 
-- `npm run build` (`tsc -b && vite build`) emits directly to `internal/web/static/` (Vite outDir)
-- `internal/web/static/` is committed to the repo — `go:embed` requires it at compile time
+- `npm run build` (`tsc -b && vite build`) emits to `internal/web/static/app/` (Vite outDir, emptied on each build)
+- `internal/web/static/app/` is gitignored; only `internal/web/static/.gitkeep` is committed so `go:embed` compiles without a frontend build
 - `frontend/node_modules/` and `frontend/dist/` are gitignored
 - State: React Context + useState (no external state library)
 - Routing: view-enum in AppContext (no react-router)
@@ -113,7 +113,7 @@ cmd/mintag/main.go
     ├── internal/azure         Azure DevOps TimeLog client + AD device-code OAuth
     ├── internal/mcp           MCP tools over stdio (mark3labs/mcp-go v0.44+)
     ├── internal/server        REST API via chi v5
-    ├── internal/web           Embedded dark SPA (go:embed static/)
+    ├── internal/web           Embedded dark SPA (go:embed all:static, served from static/app)
     ├── internal/setup         `mintag setup` guided config wizard
     └── internal/skillinstall  `mintag skills` installer + `mintag sync` (manifest-owned updates/removals; regenerate shipped_digests.go with `python scripts/gen_shipped_digests.py` when a bundled skill changes)
 ```
@@ -155,7 +155,7 @@ MCP registration lives in `C:\Users\jmunoz\.claude\settings.json` under key `"mi
 
 ### Web SPA (`internal/web`)
 
-Single `index.html` embedded via `//go:embed static`. The `Handler()` falls back to `index.html` for any path that doesn't match a real file — standard SPA pattern. The UI fetches `/api/*` endpoints directly.
+The built SPA is embedded via `//go:embed all:static` and served from `static/app`. `Handler()` falls back to `index.html` for any path that doesn't match a real file — standard SPA pattern — and returns a 503 "UI is not built" page when the binary was compiled without `make frontend-build`. The UI fetches `/api/*` endpoints directly.
 
 ### REST API (`internal/server`)
 
