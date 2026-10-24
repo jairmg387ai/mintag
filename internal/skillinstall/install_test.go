@@ -151,8 +151,10 @@ func TestInstall_GeneralMintagSkillRoutesToSpecificTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Windows checkouts may embed the skill with CRLF line endings.
+	content := strings.ReplaceAll(string(data), "\r\n", "\n")
 	for _, want := range []string{"name: mintag\n", "table_search", "implemented_in", "graph_impact", "task_search"} {
-		if !strings.Contains(string(data), want) {
+		if !strings.Contains(content, want) {
 			t.Fatalf("general mintag skill is missing %q", want)
 		}
 	}
