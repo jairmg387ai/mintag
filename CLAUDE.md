@@ -115,7 +115,7 @@ cmd/mintag/main.go
     ├── internal/server        REST API via chi v5
     ├── internal/web           Embedded dark SPA (go:embed static/)
     ├── internal/setup         `mintag setup` guided config wizard
-    └── internal/skillinstall  `mintag skills` installer + `mintag sync` (manifest-owned updates/removals; regenerate shipped_digests.go when a bundled skill changes)
+    └── internal/skillinstall  `mintag skills` installer + `mintag sync` (manifest-owned updates/removals; regenerate shipped_digests.go with `python scripts/gen_shipped_digests.py` when a bundled skill changes)
 ```
 
 ### Store (`internal/store`)

@@ -1,5 +1,5 @@
 // Code generated from git history of internal/skillinstall/bundled/skills; DO NOT EDIT.
-// Regenerate when a bundled skill changes (TestShippedDigests_IncludeCurrentBundle fails otherwise).
+// Regenerate with `python scripts/gen_shipped_digests.py` when a bundled skill changes.
 
 package skillinstall
 

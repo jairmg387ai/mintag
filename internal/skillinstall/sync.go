@@ -88,6 +88,9 @@ func readManifest(homeDir string) (manifest, error) {
 // writeManifest replaces the manifest atomically (temp file + rename).
 func writeManifest(homeDir string, m manifest) error {
 	m.Schema = manifestSchema
+	if m.Entries == nil {
+		m.Entries = []manifestEntry{}
+	}
 	sort.Slice(m.Entries, func(i, j int) bool {
 		if m.Entries[i].Target != m.Entries[j].Target {
 			return m.Entries[i].Target < m.Entries[j].Target

@@ -90,7 +90,7 @@ func TestShippedDigests_IncludeCurrentBundle(t *testing.T) {
 			found = found || d == digest
 		}
 		if !found {
-			t.Fatalf("current bundle digest %s of %s is missing from shippedDigests; regenerate shipped_digests.go", digest, skill)
+			t.Fatalf("current bundle digest %s of %s is missing from shippedDigests; run `python scripts/gen_shipped_digests.py`", digest, skill)
 		}
 	}
 }
@@ -321,5 +321,15 @@ func TestSync_SkipsSymlinkedSkillDir(t *testing.T) {
 	}
 	if got := readFile(t, filepath.Join(real, "SKILL.md")); got != "old graph skill" {
 		t.Fatalf("symlink target changed: %q", got)
+	}
+}
+
+func TestSync_EmptyManifestHasEntriesArray(t *testing.T) {
+	homeDir := t.TempDir()
+	if _, err := Sync(nil, homeDir, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, manifestPath(homeDir)); !strings.Contains(got, `"entries": []`) {
+		t.Fatalf("empty manifest should store an entries array, got %s", got)
 	}
 }
