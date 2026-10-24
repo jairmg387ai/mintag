@@ -51,7 +51,7 @@ There is no `make lint` / `make test` / `make clean` target — the Makefile onl
 
 `go test ./...` covers every package under `internal/` except `internal/setup`, which has no test files.
 
-Requires Go 1.23+ and, only if you're modifying the UI, Node 18+. The built frontend (`internal/web/static/app/`) is **not** committed: release CI builds it via the GoReleaser `before` hooks (`make frontend-install`, `make frontend-build`). A fresh clone still compiles and tests with Go alone (`internal/web/static/.gitkeep` keeps `//go:embed all:static` valid), but the web portal then serves a "UI is not built" page until you run `make frontend-build` (or `make build`). SQLite access is pure Go (`modernc.org/sqlite`) — no CGo.
+Requires Go 1.23+ and, only if you're modifying the UI, Node 18+. The built frontend (`internal/web/static/app/`) is **not** committed: release CI builds it via the GoReleaser `before` hooks (`make frontend-install`, `make frontend-build`). A fresh clone still compiles and tests with Go alone (`internal/web/static/.gitkeep` keeps `//go:embed all:static` valid), but the web portal then serves a "UI is not built" page until you run `make frontend-install` once and then `make build` (frontend build + Go build). SQLite access is pure Go (`modernc.org/sqlite`) — no CGo.
 
 Environment variables:
 - `MINTAG_DB` — path to SQLite database (default: `~/.mintag/mintag.db`)
