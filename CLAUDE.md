@@ -35,7 +35,10 @@ mintag.exe setup
 
 # Install bundled skills into an agent's skills dir
 mintag.exe skills list
-mintag.exe skills install <skill> [--targets claude,gemini,opencode] [--force]
+mintag.exe skills install <skill> [--targets claude,gemini,opencode,gentle-shell,antigravity] [--force]
+
+# Update installed skills / remove retired ones (only Mintag-owned copies)
+mintag.exe sync [--dry-run] [--targets ...]
 
 # Run tests
 go test ./...
@@ -112,7 +115,7 @@ cmd/mintag/main.go
     ├── internal/server        REST API via chi v5
     ├── internal/web           Embedded dark SPA (go:embed static/)
     ├── internal/setup         `mintag setup` guided config wizard
-    └── internal/skillinstall  `mintag skills` installer (copies bundled skills to ~/.claude, ~/.gemini, ~/.config/opencode)
+    └── internal/skillinstall  `mintag skills` installer + `mintag sync` (manifest-owned updates/removals; regenerate shipped_digests.go with `python scripts/gen_shipped_digests.py` when a bundled skill changes)
 ```
 
 ### Store (`internal/store`)
@@ -142,7 +145,7 @@ Uses `req.RequireString()` / `req.GetString()` from mcp-go v0.44+ — **do not**
 
 Tools exposed, by file:
 - **`mcp.go`** (Meetings/Tasks): `project_create`, `project_list`, `meeting_import`, `meeting_find_or_create`, `meeting_search`, `meeting_set_rich_content`, `task_create`, `task_upsert`, `task_update`, `task_search`, `task_history`, `tasks_by_project`
-- **`graph.go`** (Knowledge Graph): `graph_stats`, `graph_search`, `graph_node`, `graph_neighbors`, `graph_impact`, `graph_upsert_node`, `graph_upsert_edge`
+- **`graph.go`** (Knowledge Graph): `graph_stats`, `graph_search`, `graph_node`, `graph_neighbors`, `graph_impact`, `graph_upsert_node`, `graph_upsert_edge`, `table_search` (which repos/files use a database table, from imported `uses_table` edges)
 - **`deployment_window.go`** (Deployment Windows): `dw_create`, `dw_list`, `dw_get`, `dw_update_state`, `dw_add_task`, `dw_remove_task`, `dw_add_repo`, `dw_update_repo`, `dw_remove_repo`, `dw_add_artifact`, `dw_update_artifact`, `dw_remove_artifact`, `dw_add_test_scenario`, `dw_update_test_scenario`, `dw_remove_test_scenario`, `dw_sign_off_scenario`, `dw_export_markdown`
 - **`activities.go`** (Activities/TimeLog + catalog): `activity_log`, `activity_list`, `activity_approve`, `activity_update`, `activity_upload`, `activity_delete`, `catalog_project_add`, `catalog_project_remove`, `catalog_category_add`, `catalog_category_remove`, `catalog_azure_activity_add`, `catalog_azure_activity_list`, `catalog_azure_activity_set_default`, `catalog_azure_activity_remove`
 

@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
 import DOMPurify from 'dompurify'
-import { Search, Network, ChevronRight, ArrowLeft, Zap, ListTree, GitBranch } from 'lucide-react'
+import { Search, Network, ChevronRight, ArrowLeft, Zap, ListTree, GitBranch, Database } from 'lucide-react'
 import { useDebounce } from '../../hooks/useDebounce'
 import * as api from '../../api/client'
 import { TreeExplorer } from './TreeExplorer'
 import { HierarchyView } from './HierarchyView'
+import { TableSearchPanel } from './TableSearchPanel'
 import type {
   GraphNodeSearchResult,
   GraphNodeDetail,
@@ -19,7 +20,7 @@ import { Input } from '../ui/Input'
 // ---------------------------------------------------------------------------
 
 type PanelView = 'overview' | 'neighbors' | 'impact'
-type ExploreMode = 'search' | 'tree' | 'hierarchy'
+type ExploreMode = 'search' | 'tables' | 'tree' | 'hierarchy'
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -661,6 +662,18 @@ export function GraphView() {
       .catch(e => setError(String(e)))
   }, [])
 
+  // Table search returns natural keys (table/repo), so resolve the node ID first.
+  const selectNodeByKey = useCallback(
+    (kind: string, key: string) => {
+      setError(null)
+      api
+        .graphNodeByKey({ kind, key, namespace: namespace || undefined })
+        .then(n => selectNode(n.id))
+        .catch(e => setError(String(e)))
+    },
+    [namespace, selectNode],
+  )
+
   const clearSelection = useCallback(() => {
     setSelectedNodeID(null)
     setDetail(null)
@@ -689,6 +702,7 @@ export function GraphView() {
             {(
               [
                 { id: 'search', label: 'Search', icon: <Search size={13} /> },
+                { id: 'tables', label: 'Tables', icon: <Database size={13} /> },
                 { id: 'tree', label: 'Tree', icon: <ListTree size={13} /> },
                 { id: 'hierarchy', label: 'Hierarchy', icon: <GitBranch size={13} /> },
               ] as { id: ExploreMode; label: string; icon: React.ReactNode }[]
@@ -730,6 +744,8 @@ export function GraphView() {
                 Select a node in Search or Tree first
               </div>
             )
+          ) : mode === 'tables' ? (
+            <TableSearchPanel namespace={namespace || undefined} onSelectNode={selectNodeByKey} />
           ) : mode === 'tree' ? (
             <TreeExplorer namespace={namespace || undefined} onSelectNode={selectNode} />
           ) : (

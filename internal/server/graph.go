@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -19,6 +20,7 @@ import (
 //	GET /api/graph/nodes/{id}/impact     ?max_depth=&limit=&kind_filter=
 //	GET /api/graph/stats          ?namespace=
 //	GET /api/graph/namespaces
+//	GET /api/graph/tables         ?q=&namespace=&repo=&limit=&max_files= (repos/files using a table)
 func (srv *Server) registerGraphRoutes(r chi.Router) {
 	r.Route("/graph", func(r chi.Router) {
 		r.Get("/search", srv.handleGraphSearch)
@@ -28,6 +30,7 @@ func (srv *Server) registerGraphRoutes(r chi.Router) {
 		r.Get("/nodes/{id}/impact", srv.handleGraphImpact)
 		r.Get("/stats", srv.handleGraphStats)
 		r.Get("/namespaces", srv.handleGraphNamespaces)
+		r.Get("/tables", srv.handleGraphTables)
 	})
 }
 
@@ -255,4 +258,23 @@ func (srv *Server) handleGraphNamespaces(w http.ResponseWriter, r *http.Request)
 		ns = []string{}
 	}
 	writeJSON(w, ns, err)
+}
+
+// GET /api/graph/tables?q=&namespace=&repo=&limit=&max_files=
+// Lists which repos and source files use the tables matching q. An empty q
+// returns an empty result, mirroring /search.
+func (srv *Server) handleGraphTables(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		writeJSON(w, map[string]any{"query": "", "tables": []any{}}, nil)
+		return
+	}
+	result, err := srv.st.SearchTableUsage(
+		r.URL.Query().Get("namespace"),
+		q,
+		r.URL.Query().Get("repo"),
+		queryInt(r, "limit", 20),
+		queryInt(r, "max_files", 50),
+	)
+	writeJSON(w, result, err)
 }

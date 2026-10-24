@@ -7,6 +7,7 @@ import type {
   SearchResult,
   GraphNode,
   GraphNodeSearchResult,
+  TableUsageResult,
   GraphNodeDetail,
   GraphNeighbor,
   GraphImpactResult,
@@ -168,6 +169,27 @@ export function graphSearch(params: {
   if (params.kind) qs.set('kind', params.kind)
   if (params.limit) qs.set('limit', String(params.limit))
   return request<GraphNodeSearchResult[]>(`/api/graph/search?${qs}`)
+}
+
+export function graphTableSearch(params: {
+  q: string
+  namespace?: string
+  repo?: string
+  limit?: number
+  maxFiles?: number
+}): Promise<TableUsageResult> {
+  const qs = new URLSearchParams({ q: params.q })
+  if (params.namespace) qs.set('namespace', params.namespace)
+  if (params.repo) qs.set('repo', params.repo)
+  if (params.limit) qs.set('limit', String(params.limit))
+  if (params.maxFiles) qs.set('max_files', String(params.maxFiles))
+  return request<TableUsageResult>(`/api/graph/tables?${qs}`)
+}
+
+export function graphNodeByKey(params: { kind: string; key: string; namespace?: string }): Promise<GraphNode> {
+  const qs = new URLSearchParams({ kind: params.kind, key: params.key })
+  if (params.namespace) qs.set('namespace', params.namespace)
+  return request<GraphNode>(`/api/graph/nodes?${qs}`)
 }
 
 export function graphNodesByKind(params: {
