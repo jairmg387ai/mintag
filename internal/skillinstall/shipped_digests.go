@@ -8,6 +8,7 @@ package skillinstall
 var shippedDigests = map[string][]string{
 	"activity-autolog": {
 		"sha256:16cb8c78729a6b0e6dd06135f6e21a2fd9c416106b8e045fa1fea81d4fe8cb65",
+		"sha256:4910b15dabf6b9d51bae43ff905ec53f71307b3776a8237260f25756bc31f7fd",
 		"sha256:a3bd114901533434ca5d63f941f6afad9f834c1c9b4e6e495e053cf678eeef91",
 		"sha256:a4c0281109f0655157ac26b9fe62ff814d31e4d21c8200bace75cd75eb1610b6",
 	},

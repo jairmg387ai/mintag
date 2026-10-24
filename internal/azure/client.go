@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -1171,7 +1172,21 @@ func isHTMLResponse(contentType string, body []byte) bool {
 	return strings.HasPrefix(lower, "<html") || strings.HasPrefix(lower, "<!doctype html")
 }
 
+// frontDoorRefPattern extracts the support reference from an Azure Front Door
+// block page so the user can quote it when the block persists.
+var frontDoorRefPattern = regexp.MustCompile(`Ref A: [0-9A-Fa-f]+`)
+
 func sanitizedResponseMessage(body []byte) string {
+	// Azure Front Door answers with an HTML page (not JSON) when it blocks the
+	// caller, typically a temporary IP-level block. Without this, the error is
+	// a bare status code that looks like a credential problem.
+	if strings.Contains(string(body), "The request is blocked") {
+		msg := ": request blocked by Azure Front Door (not a token problem); your IP may be temporarily blocked, retry in a few minutes"
+		if ref := frontDoorRefPattern.FindString(string(body)); ref != "" {
+			msg += " (" + ref + ")"
+		}
+		return msg
+	}
 	var payload struct {
 		Message string `json:"message"`
 		Error   string `json:"error"`

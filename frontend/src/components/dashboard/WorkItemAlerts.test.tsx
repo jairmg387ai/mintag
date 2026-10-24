@@ -78,6 +78,32 @@ describe('WorkItemAlerts', () => {
     expect(fetchWorkItemEffort).toHaveBeenCalledWith([101, 102, 104])
   })
 
+  it('summarizes the hours logged per work item this week', async () => {
+    const week: DailyActivity[] = [
+      weekActivity,
+      { ...weekActivity, id: 2, hours: 5, azure_activity_id: 4 },
+      { ...weekActivity, id: 3, hours: 1, azure_activity_id: undefined },
+    ]
+    render(<WorkItemAlerts weekActivities={week} />)
+
+    const summary = await screen.findByRole('list', { name: 'Horas por work item esta semana' })
+    const items = within(summary).getAllByRole('listitem')
+    expect(items).toHaveLength(3)
+    expect(items[0]).toHaveTextContent('#104')
+    expect(items[0]).toHaveTextContent('Payments API')
+    expect(items[0]).toHaveTextContent('5.0h')
+    expect(items[1]).toHaveTextContent('Login fix')
+    expect(items[1]).toHaveTextContent('2.0h')
+    expect(items[2]).toHaveTextContent('(sin work item)')
+    expect(items[2]).toHaveTextContent('1.0h')
+  })
+
+  it('shows an empty note when no hours were logged this week', async () => {
+    render(<WorkItemAlerts weekActivities={[]} />)
+
+    expect(await screen.findByText('Sin horas registradas esta semana.')).toBeInTheDocument()
+  })
+
   it('keeps the idle list when the effort call fails', async () => {
     vi.mocked(fetchWorkItemEffort).mockRejectedValue(new Error('boom'))
     render(<WorkItemAlerts weekActivities={[weekActivity]} />)

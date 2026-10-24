@@ -177,6 +177,32 @@ export function idleWorkItems(catalog: AzureActivity[], activities: DailyActivit
   })
 }
 
+export interface WorkItemHours {
+  workItemId: number | null
+  label: string
+  hours: number
+}
+
+// weekHoursByWorkItem sums `activities` hours per work item, following the same
+// activity.azure_activity_id -> catalog row -> work_item_id link as
+// idleWorkItems. Closed or inactive rows still count: the hours were logged.
+// Activities without a known catalog row go to one "(sin work item)" entry so
+// the list adds up to the period total. Sorted by hours desc, then label.
+export function weekHoursByWorkItem(catalog: AzureActivity[], activities: DailyActivity[]): WorkItemHours[] {
+  const rowById = new Map(catalog.map(w => [w.id, w]))
+  const sums = new Map<number | null, WorkItemHours>()
+  for (const a of activities) {
+    const row = a.azure_activity_id != null ? rowById.get(a.azure_activity_id) : undefined
+    const key = row?.work_item_id ?? null
+    const entry = sums.get(key) ?? { workItemId: key, label: row?.label ?? '(sin work item)', hours: 0 }
+    entry.hours += a.hours
+    sums.set(key, entry)
+  }
+  return Array.from(sums.values(), e => ({ ...e, hours: round1(e.hours) })).sort(
+    (a, b) => b.hours - a.hours || a.label.localeCompare(b.label),
+  )
+}
+
 export interface OverBudgetItem {
   workItemId: number
   label: string

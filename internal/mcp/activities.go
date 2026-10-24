@@ -29,7 +29,8 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 		mcp.WithString("category", mcp.Required(), mcp.Description("Activity category from the catalog")),
 		mcp.WithString("registro_diario", mcp.Required(), mcp.Description("Work log description (sent as Azure comment)")),
 		mcp.WithString("source", mcp.Description("Entry source: 'manual' or 'llm_auto' (default: 'llm_auto')")),
-		mcp.WithString("reference_id", mcp.Description("External bug reference: Azure work item ID, Mantis ticket ID, or LuxFlow number")),
+		mcp.WithString("reference_id", mcp.Description("Free-text external bug reference; not the Azure catalog link")),
+		mcp.WithString("azure_activity_id", mcp.Description("Active Azure activity catalog ID to link; not a work item ID. Bug links are rejected while the bug guard is on")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		date := req.GetString("date", "")
 		if date == "" {
@@ -58,6 +59,13 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 			return errResult(err)
 		}
 		source := req.GetString("source", "llm_auto")
+		azureID, err := parseAzureActivityID(req)
+		if err != nil {
+			return errResult(err)
+		}
+		if azureID != nil {
+			return jsonResult(st.CreateLinkedActivity(ctx, date, hours, project, category, registroDiario, source, *azureID, req.GetString("reference_id", "")))
+		}
 
 		a, err := st.CreateActivity(ctx, date, hours, project, category, registroDiario, source)
 		if err != nil {
@@ -127,14 +135,15 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 
 	// --- activity_update ---
 	s.AddTool(mcp.NewTool("activity_update",
-		mcp.WithDescription("Update editable fields (date, hours, project, category, registro_diario) of a pending or approved activity. Activities already uploaded to Azure cannot be edited."),
+		mcp.WithDescription("Update editable fields (date, hours, project, category, registro_diario, reference_id, azure_activity_id) of a pending or approved activity. Activities already uploaded to Azure cannot be edited."),
 		mcp.WithString("id", mcp.Required(), mcp.Description("Activity ID to update")),
 		mcp.WithString("date", mcp.Description("New date YYYY-MM-DD to move the activity to another day")),
 		mcp.WithString("hours", mcp.Description("New hours value, e.g. '2.5'")),
 		mcp.WithString("project", mcp.Description("New project name")),
 		mcp.WithString("category", mcp.Description("New activity category")),
 		mcp.WithString("registro_diario", mcp.Description("New work log description")),
-		mcp.WithString("reference_id", mcp.Description("External bug reference: Azure work item ID, Mantis ticket ID, or LuxFlow number. Leave unchanged if omitted.")),
+		mcp.WithString("reference_id", mcp.Description("Free-text external bug reference; not the Azure catalog link. Leave unchanged if omitted.")),
+		mcp.WithString("azure_activity_id", mcp.Description("Active Azure activity catalog ID to link; not a work item ID. Bug links are rejected while the bug guard is on. Leave unchanged if omitted.")),
 	), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		idStr, err := req.RequireString("id")
 		if err != nil {
@@ -162,6 +171,13 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 			return errResult(fmt.Errorf("date must be in YYYY-MM-DD format, got %q", date))
 		}
 
+		azureID, err := parseAzureActivityID(req)
+		if err != nil {
+			return errResult(err)
+		}
+		if azureID != nil {
+			return jsonResult(st.UpdateLinkedActivity(ctx, id, hours, project, category, registroDiario, date, req.GetString("reference_id", ""), *azureID))
+		}
 		a, err := st.UpdateActivity(ctx, id, hours, project, category, registroDiario)
 		if err != nil {
 			return errResult(err)
@@ -533,6 +549,25 @@ func registerActivityTools(s *mcpserver.MCPServer, st *store.Store) {
 		v, err = st.GetActivityValidationSettings(ctx)
 		return jsonResult(v, err)
 	})
+}
+
+// parseAzureActivityID distinguishes an omitted optional link from an
+// explicitly blank or mistyped one. Unlike omission, explicit input must
+// either parse or fail before creating/updating an activity.
+func parseAzureActivityID(req mcp.CallToolRequest) (*int64, error) {
+	if args, ok := req.Params.Arguments.(map[string]any); ok {
+		if raw, exists := args["azure_activity_id"]; exists {
+			value, valid := raw.(string)
+			if !valid || value == "" {
+				return nil, fmt.Errorf("azure_activity_id must be an integer, got %q", req.GetString("azure_activity_id", ""))
+			}
+		}
+	}
+	id, err := parsePtrID(req, "azure_activity_id")
+	if err != nil {
+		return nil, fmt.Errorf("azure_activity_id must be an integer, got %q", req.GetString("azure_activity_id", ""))
+	}
+	return id, nil
 }
 
 // parseOptionalBool reads an optional "true"/"false" string parameter by key

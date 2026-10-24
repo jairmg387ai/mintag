@@ -91,10 +91,10 @@ Try these in order. Stop at the first one that resolves cleanly.
 
 **2a. Existing Azure activity mapping (fastest path).**
 If the request references a specific Azure work item (an ID, a bug label, "el bug de X") or an activity that was clearly logged before, call `catalog_azure_activity_list` (default `include_inactive=false`). Match the hint against `label` / `work_item_id`.
-- If exactly one entry matches and it has both `project` and `category_id` set → that mapping **is** the project/category. Use `project` directly, and resolve `category_id` to a name via `catalog_category_list` (match by `id`). Set `reference_id` to `work_item_id` when calling `activity_log`. **Skip 2b/2c — no catalog listing needed.**
+- If exactly one entry matches and it has both `project` and `category_id` set → that mapping **is** the project/category. Use `project` directly, and resolve `category_id` to a name via `catalog_category_list` (match by `id`). Pass the matched catalog entry's `id` as `azure_activity_id` when calling `activity_log`; use `reference_id` only for an actual free-text bug reference. **Skip 2b/2c — no catalog listing needed.**
 - If it matches but `project` or `category_id` is missing, fall through to 2b/2c only for the missing piece.
 - If nothing matches, fall through to 2b.
-- **Bug → child Task.** If the hint is a Bug (the matched entry has `work_item_type` `Bug`, or the user says "el bug X") and `activity_validation_get` reports `block_bug_work_item: true`, do NOT use the Bug's entry or ID. Look in the same `catalog_azure_activity_list` result for the bug's child Task assigned to the user (Task-type entries whose label references the bug, e.g. "Atención y/o Corrección del defecto 171306" under Bug 171191) and use that Task's mapping and `work_item_id` as `reference_id`. If none is catalogued or several fit, ask: "¿En cuál tarea hija del bug <id> asignada a ti registro las horas?" — if the user gives a task ID not in the catalog, offer to add it with `catalog_azure_activity_add` (`work_item_type` `Task`) first.
+- **Bug → child Task.** If the hint is a Bug (the matched entry has `work_item_type` `Bug`, or the user says "el bug X") and `activity_validation_get` reports `block_bug_work_item: true`, do NOT use the Bug's entry or ID. Look in the same `catalog_azure_activity_list` result for the bug's child Task assigned to the user (Task-type entries whose label references the bug, e.g. "Atención y/o Corrección del defecto 171306" under Bug 171191) and use that Task's mapping and catalog `id` as `azure_activity_id`. If none is catalogued or several fit, ask: "¿En cuál tarea hija del bug <id> asignada a ti registro las horas?" — if the user gives a task ID not in the catalog, offer to add it with `catalog_azure_activity_add` (`work_item_type` `Task`) first.
 
 **2b. Resolve project from the live catalog.**
 Call `catalog_project_list` (default `include_inactive=false`) and match the project hint against the returned names:
@@ -158,7 +158,8 @@ mcp__mintag__activity_log(
   category="{exact category string from the catalog}",
   registro_diario="{formatted comment}",
   source="llm_auto",
-  reference_id="{work_item_id, only if resolved via 2a}"
+  azure_activity_id="{catalog entry id, only if resolved via 2a}",
+  reference_id="{actual free-text bug reference, only if applicable}"
 )
 ```
 
@@ -188,12 +189,12 @@ mcp__mintag__activity_log(
 - `catalog_azure_activity_list` has an entry with `work_item_id=156263` (`work_item_type` `Task`), `project="RNA Core"`, `category_id` set → use both directly, no listing needed for project/category
 - `category_id` resolved to a name via `catalog_category_list`
 - registro_diario: ask user what was done if not stated
-- `reference_id` = `156263` in the `activity_log` call
+- `azure_activity_id` = the matched catalog entry's `id` in the `activity_log` call (not `156263`)
 
 ### Example 3b — explicit, user names a Bug (guard on)
 **Prompt:** "registra 3 horas al bug 171191"
 - `catalog_azure_activity_list`: 171191 is `work_item_type` `Bug`; `activity_validation_get` → `block_bug_work_item: true`
-- The catalog also has Task 171306 "Atención y/o Corrección del defecto 171306" assigned to the user → resolve to it: its mapping for project/category, `reference_id` = `171306`
+- The catalog also has Task 171306 "Atención y/o Corrección del defecto 171306" assigned to the user → resolve to it: its mapping for project/category, `azure_activity_id` = the child Task's catalog `id`
 - Confirmation summary says the hours go to task 171306 (child of bug 171191), not to the bug
 
 ### Example 4 — explicit, unambiguous, no Azure mapping
